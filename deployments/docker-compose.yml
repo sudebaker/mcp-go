@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mcp-server:
     build:
@@ -10,7 +8,7 @@ services:
       - "8080:8080"
     environment:
       # LLM Configuration - can be overridden via .env or CLI
-      LLM_API_URL: ${LLM_API_URL:-http://host.docker.internal:11434}
+      LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
 
       # Database Configuration
@@ -32,9 +30,10 @@ services:
         condition: service_healthy
     networks:
       - mcp-network
+      - docker_default
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/sse"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -61,30 +60,12 @@ services:
       retries: 5
       start_period: 10s
 
-  # Optional: Ollama for local LLM inference
-  # Uncomment to run Ollama locally
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: mcp-ollama
-  #   volumes:
-  #     - ollama-data:/root/.ollama
-  #   ports:
-  #     - "11434:11434"
-  #   networks:
-  #     - mcp-network
-  #   restart: unless-stopped
-  #   # GPU support (uncomment for NVIDIA GPU)
-  #   # deploy:
-  #   #   resources:
-  #   #     reservations:
-  #   #       devices:
-  #   #         - driver: nvidia
-  #   #           count: 1
-  #   #           capabilities: [gpu]
-
 networks:
   mcp-network:
     driver: bridge
+  docker_default:
+    driver: bridge
+    external: true
 
 volumes:
   mcp-data:

@@ -88,6 +88,9 @@ func main() {
 		Host:              cfg.Server.Host,
 		Port:              cfg.Server.Port,
 		KeepAliveInterval: 30 * time.Second,
+		ServerName:        cfg.Server.Name,
+		Version:           Version,
+		Tools:             cfg.Tools,
 	})
 
 	// Setup graceful shutdown
@@ -191,8 +194,14 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 			Interface("arguments", request.Params.Arguments).
 			Msg("Executing tool")
 
+		// Convert arguments to map[string]interface{}
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Invalid arguments format"), nil
+		}
+
 		// Execute via subprocess
-		result, err := exec.Execute(ctx, toolName, request.Params.Arguments)
+		result, err := exec.Execute(ctx, toolName, args)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

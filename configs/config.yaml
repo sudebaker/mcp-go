@@ -1,0 +1,149 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  name: "mcp-orchestrator"
+
+execution:
+  default_timeout: "60s"
+  working_dir: "/data"
+  environment:
+    LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
+    LLM_MODEL: "${LLM_MODEL:-llama3}"
+    DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"
+    PYTHONUNBUFFERED: "1"
+
+tools:
+  # Echo tool for testing
+  - name: "echo"
+    description: "Echo back the provided text. Useful for testing the MCP server."
+    command: "python3"
+    args: ["/app/tools/echo/main.py"]
+    timeout: "10s"
+    input_schema:
+      type: object
+      properties:
+        text:
+          type: string
+          description: "Text to echo back"
+      required:
+        - text
+
+  # PDF Report Generation
+  - name: "generate_report"
+    description: "Generate PDF reports from structured data using Jinja2 templates. Supports incident reports, meeting minutes, and audit reports."
+    command: "python3"
+    args: ["/app/tools/pdf_reports/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        report_type:
+          type: string
+          enum: ["incident", "meeting", "audit"]
+          description: "Type of report to generate"
+        data:
+          type: object
+          description: "Report data to fill in the template"
+        output_path:
+          type: string
+          description: "Path where to save the generated PDF"
+      required:
+        - report_type
+        - data
+
+  # Data Analysis
+  - name: "analyze_data"
+    description: "Execute Python/Pandas analysis on Excel or CSV files. Generates code via LLM and executes it safely."
+    command: "python3"
+    args: ["/app/tools/data_analysis/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Path to the Excel or CSV file to analyze"
+        question:
+          type: string
+          description: "Natural language question about the data"
+        output_format:
+          type: string
+          enum: ["text", "json", "markdown"]
+          default: "text"
+          description: "Output format for the analysis results"
+      required:
+        - file_path
+        - question
+
+  # Vision/OCR
+  - name: "analyze_image"
+    description: "Analyze images using OCR and vision models. Extracts text, detects objects, and answers questions about image content."
+    command: "python3"
+    args: ["/app/tools/vision_ocr/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        image_path:
+          type: string
+          description: "Path to the image file"
+        task:
+          type: string
+          enum: ["ocr", "describe", "extract_entities", "answer"]
+          description: "Type of analysis to perform"
+        question:
+          type: string
+          description: "Question to answer about the image (required for 'answer' task)"
+      required:
+        - image_path
+        - task
+
+  # Knowledge Base - Ingest
+  - name: "kb_ingest"
+    description: "Ingest documents into the knowledge base. Supports PDF, TXT, MD, and DOCX files."
+    command: "python3"
+    args: ["/app/tools/knowledge_base/main.py", "ingest"]
+    timeout: "300s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Path to the document to ingest"
+        collection:
+          type: string
+          default: "default"
+          description: "Collection name for organizing documents"
+        metadata:
+          type: object
+          description: "Additional metadata to associate with the document"
+      required:
+        - file_path
+
+  # Knowledge Base - Search
+  - name: "kb_search"
+    description: "Search the knowledge base using semantic and keyword search. Returns relevant document chunks."
+    command: "python3"
+    args: ["/app/tools/knowledge_base/main.py", "search"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        collection:
+          type: string
+          default: "default"
+          description: "Collection to search in"
+        top_k:
+          type: integer
+          default: 5
+          description: "Number of results to return"
+        search_type:
+          type: string
+          enum: ["semantic", "keyword", "hybrid"]
+          default: "hybrid"
+          description: "Type of search to perform"
+      required:
+        - query

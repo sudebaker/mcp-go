@@ -1,0 +1,149 @@
+# Local development configuration
+# Usage: go run ./cmd/server -config configs/config.local.yaml
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+  name: "mcp-orchestrator-dev"
+
+execution:
+  default_timeout: "60s"
+  working_dir: "."
+  environment:
+    LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
+    LLM_MODEL: "${LLM_MODEL:-llama3}"
+    DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"
+    PYTHONUNBUFFERED: "1"
+
+tools:
+  # Echo tool for testing
+  - name: "echo"
+    description: "Echo back the provided text. Useful for testing the MCP server."
+    command: "python3"
+    args: ["tools/echo/main.py"]
+    timeout: "10s"
+    input_schema:
+      type: object
+      properties:
+        text:
+          type: string
+          description: "Text to echo back"
+        debug:
+          type: boolean
+          description: "Include context info in output"
+      required:
+        - text
+
+  # PDF Report Generation
+  - name: "generate_report"
+    description: "Generate PDF reports from structured data using Jinja2 templates."
+    command: "python3"
+    args: ["tools/pdf_reports/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        report_type:
+          type: string
+          enum: ["incident", "meeting", "audit"]
+          description: "Type of report to generate"
+        data:
+          type: object
+          description: "Report data to fill in the template"
+        output_path:
+          type: string
+          description: "Path where to save the generated PDF"
+      required:
+        - report_type
+        - data
+
+  # Data Analysis
+  - name: "analyze_data"
+    description: "Execute Python/Pandas analysis on Excel or CSV files."
+    command: "python3"
+    args: ["tools/data_analysis/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Path to the Excel or CSV file to analyze"
+        question:
+          type: string
+          description: "Natural language question about the data"
+        output_format:
+          type: string
+          enum: ["text", "json", "markdown"]
+          default: "text"
+      required:
+        - file_path
+        - question
+
+  # Vision/OCR
+  - name: "analyze_image"
+    description: "Analyze images using OCR and vision models."
+    command: "python3"
+    args: ["tools/vision_ocr/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        image_path:
+          type: string
+          description: "Path to the image file"
+        task:
+          type: string
+          enum: ["ocr", "describe", "extract_entities", "answer"]
+          description: "Type of analysis to perform"
+        question:
+          type: string
+          description: "Question to answer about the image (for 'answer' task)"
+      required:
+        - image_path
+        - task
+
+  # Knowledge Base - Ingest
+  - name: "kb_ingest"
+    description: "Ingest documents into the knowledge base."
+    command: "python3"
+    args: ["tools/knowledge_base/main.py", "ingest"]
+    timeout: "300s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Path to the document to ingest"
+        collection:
+          type: string
+          default: "default"
+        metadata:
+          type: object
+      required:
+        - file_path
+
+  # Knowledge Base - Search
+  - name: "kb_search"
+    description: "Search the knowledge base using semantic and keyword search."
+    command: "python3"
+    args: ["tools/knowledge_base/main.py", "search"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        collection:
+          type: string
+          default: "default"
+        top_k:
+          type: integer
+          default: 5
+        search_type:
+          type: string
+          enum: ["semantic", "keyword", "hybrid"]
+          default: "hybrid"
+      required:
+        - query

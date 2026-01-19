@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="report-header">
+        <h1>{{ title }}</h1>
+    </div>
+
+    <section class="info-grid">
+        <div class="info-item">
+            <label>Meeting ID</label>
+            <span>{{ meeting_id }}</span>
+        </div>
+        <div class="info-item">
+            <label>Date</label>
+            <span>{{ date }}</span>
+        </div>
+        <div class="info-item">
+            <label>Time</label>
+            <span>{{ time }}</span>
+        </div>
+        <div class="info-item">
+            <label>Duration</label>
+            <span>{{ duration }}</span>
+        </div>
+        <div class="info-item">
+            <label>Location</label>
+            <span>{{ location }}</span>
+        </div>
+        <div class="info-item">
+            <label>Organizer</label>
+            <span>{{ organizer }}</span>
+        </div>
+    </section>
+
+    <section>
+        <h2>Attendees</h2>
+        <div class="attendee-list">
+            {% for attendee in attendees %}
+            <span class="attendee">{{ attendee }}</span>
+            {% endfor %}
+        </div>
+        {% if absent %}
+        <h3>Absent</h3>
+        <div class="attendee-list absent">
+            {% for person in absent %}
+            <span class="attendee absent">{{ person }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+
+    {% if agenda %}
+    <section>
+        <h2>Agenda</h2>
+        <ol>
+            {% for item in agenda %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ol>
+    </section>
+    {% endif %}
+
+    {% if discussions %}
+    <section>
+        <h2>Discussions</h2>
+        {% for discussion in discussions %}
+        <div class="discussion-item">
+            <h3>{{ discussion.topic }}</h3>
+            <p>{{ discussion.summary }}</p>
+            {% if discussion.key_points %}
+            <ul>
+                {% for point in discussion.key_points %}
+                <li>{{ point }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if decisions %}
+    <section>
+        <h2>Decisions Made</h2>
+        <table class="decisions-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Decision</th>
+                    <th>Owner</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for decision in decisions %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ decision.description }}</td>
+                    <td>{{ decision.owner | default('TBD') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    {% if action_items %}
+    <section>
+        <h2>Action Items</h2>
+        <table class="action-items-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Action</th>
+                    <th>Assignee</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in action_items %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ action.description }}</td>
+                    <td>{{ action.assignee }}</td>
+                    <td>{{ action.due_date | default('TBD') }}</td>
+                    <td><span class="badge badge-status-{{ action.status | default('pending') | lower }}">{{ action.status | default('Pending') }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    <section>
+        <h2>Next Meeting</h2>
+        <p>{{ next_meeting }}</p>
+    </section>
+
+    <footer>
+        <p class="generated-at">Generated: {{ generated_at }}</p>
+    </footer>
+</body>
+</html>

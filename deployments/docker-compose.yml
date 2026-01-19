@@ -25,6 +25,8 @@ services:
       - ../templates:/app/templates:ro
       # Data directory (read-write)
       - mcp-data:/data
+      # OpenWebUI uploads (read-only) - para acceder a archivos subidos
+      - openwebui_openwebui-data:/openwebui-data:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +40,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # MCPO proxy: converts MCP Streamable HTTP -> OpenAPI for OpenWebUI
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: mcpo-proxy
+    ports:
+      - "8001:8000"
+    command: ["--port", "8000", "--server-type", "streamable-http", "--", "http://mcp-orchestrator:8080/mcp"]
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    networks:
+      - mcp-network
+      - docker_default
+    restart: unless-stopped
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -72,5 +89,5 @@ volumes:
     driver: local
   postgres-data:
     driver: local
-  # ollama-data:
-  #   driver: local
+  openwebui_openwebui-data:
+    external: true

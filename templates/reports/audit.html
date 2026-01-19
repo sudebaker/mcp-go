@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="report-header">
+        <h1>{{ title }}</h1>
+        <div class="meta-info">
+            <span class="badge badge-{{ risk_rating|lower }}">Risk: {{ risk_rating }}</span>
+        </div>
+    </div>
+
+    <section class="info-grid">
+        <div class="info-item">
+            <label>Audit ID</label>
+            <span>{{ audit_id }}</span>
+        </div>
+        <div class="info-item">
+            <label>Audit Type</label>
+            <span>{{ audit_type }}</span>
+        </div>
+        <div class="info-item">
+            <label>Period</label>
+            <span>{{ period_start }} - {{ period_end }}</span>
+        </div>
+        <div class="info-item">
+            <label>Auditor</label>
+            <span>{{ auditor }}</span>
+        </div>
+        <div class="info-item">
+            <label>Department</label>
+            <span>{{ department }}</span>
+        </div>
+    </section>
+
+    <section>
+        <h2>Executive Summary</h2>
+        <div class="executive-summary">
+            <p>{{ executive_summary }}</p>
+        </div>
+    </section>
+
+    {% if scope %}
+    <section>
+        <h2>Audit Scope</h2>
+        <ul>
+            {% for item in scope %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {% if methodology %}
+    <section>
+        <h2>Methodology</h2>
+        <p>{{ methodology }}</p>
+    </section>
+    {% endif %}
+
+    {% if findings %}
+    <section>
+        <h2>Findings</h2>
+        {% for finding in findings %}
+        <div class="finding-item">
+            <div class="finding-header">
+                <h3>{{ finding.title }}</h3>
+                <span class="badge badge-{{ finding.severity | default('medium') | lower }}">{{ finding.severity | default('Medium') }}</span>
+            </div>
+            <p><strong>Description:</strong> {{ finding.description }}</p>
+            {% if finding.evidence %}
+            <p><strong>Evidence:</strong> {{ finding.evidence }}</p>
+            {% endif %}
+            {% if finding.impact %}
+            <p><strong>Impact:</strong> {{ finding.impact }}</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if recommendations %}
+    <section>
+        <h2>Recommendations</h2>
+        <table class="recommendations-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Recommendation</th>
+                    <th>Priority</th>
+                    <th>Target Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in recommendations %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ rec.description }}</td>
+                    <td><span class="badge badge-{{ rec.priority | default('medium') | lower }}">{{ rec.priority | default('Medium') }}</span></td>
+                    <td>{{ rec.target_date | default('TBD') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    {% if management_response %}
+    <section>
+        <h2>Management Response</h2>
+        <div class="management-response">
+            <p>{{ management_response }}</p>
+        </div>
+    </section>
+    {% endif %}
+
+    <footer>
+        <p class="generated-at">Generated: {{ generated_at }}</p>
+    </footer>
+</body>
+</html>

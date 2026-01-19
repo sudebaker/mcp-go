@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: mcp-orchestrator
+    ports:
+      - "8080:8080"
+    environment:
+      # LLM Configuration - can be overridden via .env or CLI
+      LLM_API_URL: ${LLM_API_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-llama3}
+
+      # Database Configuration
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
+
+      # Python settings
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Configuration (read-only)
+      - ../configs:/app/configs:ro
+      # Tools (read-only, for development hot-reload)
+      - ../tools:/app/tools:ro
+      # Templates (read-only)
+      - ../templates:/app/templates:ro
+      # Data directory (read-write)
+      - mcp-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/sse"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mcp-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mcp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mcp}
+      POSTGRES_DB: ${POSTGRES_DB:-knowledge}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp -d knowledge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Optional: Ollama for local LLM inference
+  # Uncomment to run Ollama locally
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: mcp-ollama
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   networks:
+  #     - mcp-network
+  #   restart: unless-stopped
+  #   # GPU support (uncomment for NVIDIA GPU)
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: 1
+  #   #           capabilities: [gpu]
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  mcp-data:
+    driver: local
+  postgres-data:
+    driver: local
+  # ollama-data:
+  #   driver: local

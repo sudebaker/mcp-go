@@ -207,9 +207,12 @@ Dashboard Grafana sugerido:
 - LLM API latency
 - Active connections
 ---
-6. Caching de Respuestas LLM con Redis
-Estado: Pendiente  
-Objetivo: Reducir llamadas LLM para queries repetidas
+  6. Caching de Respuestas LLM con Redis
+  Estado: ✅ Completado  
+  Objetivo: Reducir llamadas LLM para queries repetidas
+ Archivos nuevos:
+ - tools/common/llm_cache.py        # LLMCache con Redis
+ - Integración en tools/data_analysis/main.py
 Implementación:
 # tools/common/llm_cache.py
 import hashlib
@@ -250,9 +253,14 @@ execution:
     REDIS_URL: "redis://redis:6379/0"
     LLM_CACHE_TTL: "3600"
 ---
-7. Connection Pooling para LLM API
-Estado: Pendiente  
-Objetivo: Reutilizar conexiones HTTP a Ollama
+  7. Connection Pooling para LLM API
+  Estado: ✅ Completado  
+  Objetivo: Reutilizar conexiones HTTP a Ollama
+ Archivos nuevos:
+ - internal/executor/llm_client.go  # LLMClient con connection pooling
+   - http.Client con MaxIdleConns=10
+   - IdleConnTimeout=90s
+   - Call(), CallWithModel(), CallWithOptions()
 Implementación en Go:
 // internal/executor/llm_client.go
 package executor
@@ -471,9 +479,18 @@ if err := config.Validate(cfg); err != nil {
     log.Fatal().Err(err).Msg("Configuration validation failed")
 }
 ---
-11. Rate Limiting por Cliente
-Estado: Pendiente  
-Objetivo: Proteger contra DoS
+ 11. Rate Limiting por Cliente
+  Estado: ✅ Completado  
+  Objetivo: Proteger contra DoS
+ Archivos nuevos:
+ - internal/transport/ratelimit.go  # RateLimiter token bucket
+   - Sin dependencias externas
+   - Middleware para http.Handler
+   - X-Forwarded-For support
+ Integración:
+ - internal/config/config.go        # RateLimitRPS, RateLimitBurst
+ - internal/transport/sse.go        # Middleware integrado
+ - configs/config.yaml              # rate_limit_rps, rate_limit_burst
 Implementación:
 // internal/transport/ratelimit.go
 package transport
@@ -921,9 +938,12 @@ func (s *MCPServer) handleHealthDeep(w http.ResponseWriter, r *http.Request) {
     })
 }
 ---
-19. Optimización de Modelos Embeddings
-Estado: Modelo cargado en cada request  
-Objetivo: Cargar una vez y reutilizar
+ 19. Optimización de Modelos Embeddings
+  Estado: ✅ Completado  
+  Objetivo: Cargar una vez y reutilizar
+ Archivos nuevos:
+ - tools/knowledge_base/model_cache.py  # ModelCache singleton thread-safe
+ - Integración en tools/knowledge_base/main.py
 Implementación:
 # tools/knowledge_base/model_cache.py
 import threading
@@ -1025,11 +1045,11 @@ Fase 2: Observabilidad (Semanas 3-4)
 - [ ] Métricas Prometheus
 - [ ] Logging estructurado Python
 - [ ] Health checks profundos
-Fase 3: Performance (Semanas 5-6)
-- [ ] Caching LLM con Redis
-- [ ] Connection pooling HTTP
-- [ ] Model cache para embeddings
-- [ ] Rate limiting
+ Fase 3: Performance (Semanas 5-6)
+ - [x] Caching LLM con Redis
+ - [x] Connection pooling HTTP
+ - [x] Model cache para embeddings
+ - [x] Rate limiting
 Fase 4: Calidad de Código (Semanas 7-8)
 - [ ] Refactorización common library
 - [ ] Linting configurado

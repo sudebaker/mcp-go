@@ -20,9 +20,11 @@ type Config struct {
 
 // ServerConfig holds server-specific settings
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	Name string `yaml:"name"`
+	Host           string  `yaml:"host"`
+	Port           int     `yaml:"port"`
+	Name           string  `yaml:"name"`
+	RateLimitRPS   float64 `yaml:"rate_limit_rps"`
+	RateLimitBurst int     `yaml:"rate_limit_burst"`
 }
 
 // ExecutionConfig holds execution-related settings

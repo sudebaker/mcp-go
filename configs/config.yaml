@@ -10,6 +10,8 @@ execution:
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
     LLM_MODEL: "${LLM_MODEL:-llama3}"
     DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"
+    DB_POOL_MIN: "2"
+    DB_POOL_MAX: "10"
     PYTHONUNBUFFERED: "1"
 
 tools:

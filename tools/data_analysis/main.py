@@ -4,6 +4,8 @@ Data Analysis Tool.
 Analyzes Excel/CSV files using Pandas with LLM-generated code.
 """
 
+from common.retry import call_llm_with_retry
+from common.validators import validate_file_path
 import json
 import sys
 import re
@@ -12,16 +14,23 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 from contextlib import redirect_stdout, redirect_stderr
+import os
+
+# Add the tools directory to the path so we can import common modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 
 try:
     import pandas as pd
     import numpy as np
+
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
@@ -29,33 +38,33 @@ except ImportError:
 
 # Restricted builtins for safe code execution
 SAFE_BUILTINS = {
-    'abs': abs,
-    'all': all,
-    'any': any,
-    'bool': bool,
-    'dict': dict,
-    'enumerate': enumerate,
-    'filter': filter,
-    'float': float,
-    'format': format,
-    'int': int,
-    'isinstance': isinstance,
-    'len': len,
-    'list': list,
-    'map': map,
-    'max': max,
-    'min': min,
-    'print': print,
-    'range': range,
-    'reversed': reversed,
-    'round': round,
-    'set': set,
-    'sorted': sorted,
-    'str': str,
-    'sum': sum,
-    'tuple': tuple,
-    'type': type,
-    'zip': zip,
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "filter": filter,
+    "float": float,
+    "format": format,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "map": map,
+    "max": max,
+    "min": min,
+    "print": print,
+    "range": range,
+    "reversed": reversed,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
 }
 
 
@@ -72,14 +81,14 @@ def write_response(response: dict[str, Any]) -> None:
 
 def load_data(file_path: str) -> pd.DataFrame:
     """Load data from Excel or CSV file."""
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
+    # Validate path for security (prevent path traversal)
+    validate_file_path(file_path)
 
+    path = Path(file_path)
     suffix = path.suffix.lower()
-    if suffix == '.csv':
+    if suffix == ".csv":
         return pd.read_csv(file_path)
-    elif suffix in ('.xlsx', '.xls'):
+    elif suffix in (".xlsx", ".xls"):
         return pd.read_excel(file_path)
     else:
         # Try to infer format
@@ -92,49 +101,20 @@ def load_data(file_path: str) -> pd.DataFrame:
 def get_data_summary(df: pd.DataFrame) -> str:
     """Generate a summary of the dataframe for the LLM."""
     summary = []
-    summary.append(f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
+    summary.append(
+        f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
     summary.append(f"\nColumns ({len(df.columns)}):")
     for col in df.columns:
         dtype = df[col].dtype
         null_count = df[col].isnull().sum()
         sample = df[col].dropna().head(3).tolist()
-        summary.append(f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
+        summary.append(
+            f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
 
     summary.append("\nFirst 5 rows preview:")
     summary.append(df.head().to_string())
 
     return "\n".join(summary)
-
-
-def call_llm(
-    llm_api_url: str,
-    llm_model: str,
-    prompt: str
-) -> str:
-    """Call LLM API to generate analysis code."""
-    # Support for Ollama API format
-    payload = {
-        "model": llm_model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-            "num_predict": 2000
-        }
-    }
-
-    try:
-        response = requests.post(
-            f"{llm_api_url}/api/generate",
-            json=payload,
-            timeout=120
-        )
-        response.raise_for_status()
-
-        result = response.json()
-        return result.get("response", "")
-    except requests.RequestException as e:
-        raise ValueError(f"Failed to call LLM: {str(e)}") from e
 
 
 def extract_code(llm_response: str) -> str:
@@ -147,20 +127,25 @@ def extract_code(llm_response: str) -> str:
         return matches[0].strip()
 
     # If no code blocks, try to extract code-like content
-    lines = llm_response.strip().split('\n')
+    lines = llm_response.strip().split("\n")
     code_lines = []
     in_code = False
 
     for line in lines:
         # Skip obvious non-code lines
-        if line.startswith('#') or '=' in line or line.startswith('df') or line.startswith('result'):
+        if (
+            line.startswith("#")
+            or "=" in line
+            or line.startswith("df")
+            or line.startswith("result")
+        ):
             in_code = True
 
         if in_code:
             code_lines.append(line)
 
     if code_lines:
-        return '\n'.join(code_lines)
+        return "\n".join(code_lines)
 
     return llm_response.strip()
 
@@ -169,10 +154,10 @@ def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
     """Execute code in a restricted environment."""
     # Create restricted globals
     restricted_globals = {
-        '__builtins__': SAFE_BUILTINS,
-        'pd': pd,
-        'np': np,
-        'df': df,
+        "__builtins__": SAFE_BUILTINS,
+        "pd": pd,
+        "np": np,
+        "df": df,
     }
 
     # Capture output
@@ -186,15 +171,16 @@ def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
             exec(code, restricted_globals)
 
             # Look for result variable
-            if 'result' in restricted_globals:
-                result = restricted_globals['result']
-            elif 'answer' in restricted_globals:
-                result = restricted_globals['answer']
-            elif 'output' in restricted_globals:
-                result = restricted_globals['output']
+            if "result" in restricted_globals:
+                result = restricted_globals["result"]
+            elif "answer" in restricted_globals:
+                result = restricted_globals["answer"]
+            elif "output" in restricted_globals:
+                result = restricted_globals["output"]
 
         except Exception as e:
-            stderr_capture.write(f"Execution error: {str(e)}\n{traceback.format_exc()}")
+            stderr_capture.write(
+                f"Execution error: {str(e)}\n{traceback.format_exc()}")
 
     return result, stdout_capture.getvalue(), stderr_capture.getvalue()
 
@@ -236,39 +222,45 @@ def main() -> None:
         output_format = arguments.get("output_format", "text")
 
         if not file_path:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_INPUT",
-                    "message": "file_path is required"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "file_path is required",
+                    },
                 }
-            })
+            )
             return
 
         if not question:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_INPUT",
-                    "message": "question is required"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "question is required",
+                    },
                 }
-            })
+            )
             return
 
         llm_api_url = context.get("llm_api_url")
         llm_model = context.get("llm_model", "llama3")
 
         if not llm_api_url:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "LLM_ERROR",
-                    "message": "LLM_API_URL not configured"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "LLM_ERROR",
+                        "message": "LLM_API_URL not configured",
+                    },
                 }
-            })
+            )
             return
 
         # Load the data
@@ -295,22 +287,24 @@ Python code:
 ```python
 """
 
-        llm_response = call_llm(llm_api_url, llm_model, prompt)
+        llm_response = call_llm_with_retry(llm_api_url, llm_model, prompt)
         code = extract_code(llm_response)
 
         # Execute the code
         result, stdout, stderr = execute_code_safely(code, df)
 
         if stderr and not result:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "EXECUTION_FAILED",
-                    "message": "Code execution failed",
-                    "details": stderr
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "EXECUTION_FAILED",
+                        "message": "Code execution failed",
+                        "details": stderr,
+                    },
                 }
-            })
+            )
             return
 
         # Format the result
@@ -322,48 +316,61 @@ Python code:
             response_text += f"Analysis output:\n{stdout}\n"
         response_text += f"Result:\n{formatted_result}"
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
-            "structured_content": {
-                "question": question,
-                "file_path": file_path,
-                "generated_code": code,
-                "result": result if isinstance(result, (str, int, float, bool, list, dict)) else formatted_result,
-                "stdout": stdout,
-                "data_shape": list(df.shape)
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": response_text}],
+                "structured_content": {
+                    "question": question,
+                    "file_path": file_path,
+                    "generated_code": code,
+                    "result": result
+                    if isinstance(result, (str, int, float, bool, list, dict))
+                    else formatted_result,
+                    "stdout": stdout,
+                    "data_shape": list(df.shape),
+                },
             }
-        })
+        )
 
     except FileNotFoundError as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "FILE_NOT_FOUND",
-                "message": str(e)
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {"code": "FILE_NOT_FOUND", "message": str(e)},
             }
-        })
+        )
     except requests.RequestException as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "LLM_ERROR",
-                "message": f"Failed to call LLM: {str(e)}"
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "LLM_ERROR",
+                    "message": f"Failed to call LLM: {str(e)}",
+                },
             }
-        })
+        )
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": traceback.format_exc()
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                    "details": traceback.format_exc(),
+                },
             }
-        })
+        )
 
 
 if __name__ == "__main__":

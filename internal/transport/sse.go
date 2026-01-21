@@ -21,6 +21,7 @@ type MCPServer struct {
 	serverName   string
 	version      string
 	tools        []config.ToolConfig
+	rateLimiter  *RateLimiter
 }
 
 // MCPConfig holds MCP server configuration
@@ -31,14 +32,20 @@ type MCPConfig struct {
 	ServerName        string
 	Version           string
 	Tools             []config.ToolConfig
+	RateLimitRPS      float64
+	RateLimitBurst    int
 }
 
 // NewMCPServer creates a new MCP server with Streamable HTTP transport
 func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
-	// Create Streamable HTTP server with /mcp endpoint
 	streamServer := server.NewStreamableHTTPServer(mcpServer)
+
+	var rateLimiter *RateLimiter
+	if cfg.RateLimitRPS > 0 {
+		rateLimiter = NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+	}
 
 	return &MCPServer{
 		mcpServer:    mcpServer,
@@ -47,6 +54,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		serverName:   cfg.ServerName,
 		version:      cfg.Version,
 		tools:        cfg.Tools,
+		rateLimiter:  rateLimiter,
 	}
 }
 
@@ -59,7 +67,7 @@ func (s *MCPServer) Start() error {
 	// Create custom mux with additional endpoints
 	mux := http.NewServeMux()
 
-	// Health endpoint
+	// Health endpoint (no rate limiting for health checks)
 	mux.HandleFunc("/health", s.handleHealth)
 
 	// OpenAPI spec (for compatibility info)
@@ -68,8 +76,20 @@ func (s *MCPServer) Start() error {
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
 
+	// Apply rate limiter middleware to MCP endpoint if configured
+	var mcpHandler http.Handler
+	if s.rateLimiter != nil {
+		mcpHandler = s.rateLimiter.Middleware(s.streamServer)
+		log.Info().
+			Float64("rps", s.rateLimiter.rps).
+			Int("burst", s.rateLimiter.burst).
+			Msg("Rate limiting enabled")
+	} else {
+		mcpHandler = s.streamServer
+	}
+
 	// MCP Streamable HTTP endpoint (default: /mcp)
-	mux.Handle("/mcp", s.streamServer)
+	mux.Handle("/mcp", mcpHandler)
 
 	s.httpServer = &http.Server{
 		Addr:    s.addr,

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.validators import validate_file_path
 from .db_pool import init_pool, get_connection, close_pool
+from .model_cache import get_embedding_model
 
 import psycopg2
 from psycopg2.extras import execute_values
@@ -393,8 +394,8 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     # Initialize connection pool if not already done
     init_pool(database_url)
 
-    # Load embedding model
-    model = SentenceTransformer(EMBEDDING_MODEL)
+    # Load embedding model (cached)
+    model = get_embedding_model(EMBEDDING_MODEL)
 
     # Use connection from pool
     with get_connection() as conn:
@@ -437,10 +438,10 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     # Initialize connection pool if not already done
     init_pool(database_url)
 
-    # Load embedding model (needed for semantic search)
+    # Load embedding model (needed for semantic search, cached)
     model = None
     if search_type in ("semantic", "hybrid"):
-        model = SentenceTransformer(EMBEDDING_MODEL)
+        model = get_embedding_model(EMBEDDING_MODEL)
 
     # Use connection from pool
     with get_connection() as conn:

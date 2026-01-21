@@ -31,3 +31,7 @@ go.work.sum
 # .idea/
 .vscode/
 .claude/
+*.pyc
+*.pyo
+__pycache__/
+*.swp

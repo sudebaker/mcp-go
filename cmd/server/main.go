@@ -96,6 +96,8 @@ func main() {
 		ServerName:        cfg.Server.Name,
 		Version:           Version,
 		Tools:             cfg.Tools,
+		RateLimitRPS:      cfg.Server.RateLimitRPS,
+		RateLimitBurst:    cfg.Server.RateLimitBurst,
 	})
 
 	// Setup graceful shutdown

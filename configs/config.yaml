@@ -2,6 +2,8 @@ server:
   host: "0.0.0.0"
   port: 8080
   name: "mcp-orchestrator"
+  rate_limit_rps: 10
+  rate_limit_burst: 20
 
 execution:
   default_timeout: "60s"
@@ -12,6 +14,8 @@ execution:
     DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"
     DB_POOL_MIN: "2"
     DB_POOL_MAX: "10"
+    REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
+    LLM_CACHE_TTL: "3600"
     PYTHONUNBUFFERED: "1"
 
 tools:

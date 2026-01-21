@@ -6,6 +6,7 @@ Analyzes Excel/CSV files using Pandas with LLM-generated code.
 
 from common.retry import call_llm_with_retry
 from common.validators import validate_file_path
+from common.llm_cache import call_llm_with_cache
 import json
 import sys
 import re
@@ -101,15 +102,13 @@ def load_data(file_path: str) -> pd.DataFrame:
 def get_data_summary(df: pd.DataFrame) -> str:
     """Generate a summary of the dataframe for the LLM."""
     summary = []
-    summary.append(
-        f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
+    summary.append(f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
     summary.append(f"\nColumns ({len(df.columns)}):")
     for col in df.columns:
         dtype = df[col].dtype
         null_count = df[col].isnull().sum()
         sample = df[col].dropna().head(3).tolist()
-        summary.append(
-            f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
+        summary.append(f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
 
     summary.append("\nFirst 5 rows preview:")
     summary.append(df.head().to_string())
@@ -179,8 +178,7 @@ def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
                 result = restricted_globals["output"]
 
         except Exception as e:
-            stderr_capture.write(
-                f"Execution error: {str(e)}\n{traceback.format_exc()}")
+            stderr_capture.write(f"Execution error: {str(e)}\n{traceback.format_exc()}")
 
     return result, stdout_capture.getvalue(), stderr_capture.getvalue()
 
@@ -287,7 +285,7 @@ Python code:
 ```python
 """
 
-        llm_response = call_llm_with_retry(llm_api_url, llm_model, prompt)
+        llm_response = call_llm_with_cache(llm_api_url, llm_model, prompt)
         code = extract_code(llm_response)
 
         # Execute the code

@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,39 +16,38 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Executor handles subprocess execution for tool calls
+const (
+	chunkPrefix  = "__CHUNK__:"
+	resultPrefix = "__RESULT__:"
+)
+
 type Executor struct {
 	config *config.Config
 }
 
-// New creates a new Executor with the given configuration
 func New(cfg *config.Config) *Executor {
 	return &Executor{config: cfg}
 }
 
-// UpdateConfig updates the executor's configuration (for hot-reload)
 func (e *Executor) UpdateConfig(cfg *config.Config) {
 	e.config = cfg
 }
 
-// ExecuteResult contains the result of a tool execution
 type ExecuteResult struct {
 	Success           bool
 	Content           []mcptypes.ContentItem
 	StructuredContent map[string]interface{}
 	Error             *mcptypes.SubprocessError
 	Stderr            string
+	Chunks            []map[string]interface{}
 }
 
-// Execute runs a tool by spawning a subprocess and communicating via STDIN/STDOUT
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
-	// Find the tool configuration
 	toolCfg := e.config.GetToolByName(toolName)
 	if toolCfg == nil {
 		return nil, fmt.Errorf("tool '%s' not found in configuration", toolName)
 	}
 
-	// Create timeout context
 	timeout := toolCfg.Timeout
 	if timeout == 0 {
 		timeout = e.config.Execution.DefaultTimeout
@@ -55,7 +55,6 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Prepare the subprocess request
 	requestID := uuid.New().String()
 	subprocReq := mcptypes.SubprocessRequest{
 		RequestID: requestID,
@@ -69,26 +68,20 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		},
 	}
 
-	// Marshal request to JSON
 	inputJSON, err := json.Marshal(subprocReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create the command
 	cmd := exec.CommandContext(execCtx, toolCfg.Command, toolCfg.Args...)
 	cmd.Dir = e.config.Execution.WorkingDir
-
-	// Set up environment
 	cmd.Env = buildEnvironment(e.config.Execution.Environment)
 
-	// Set up stdin, stdout, stderr
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin = bytes.NewReader(inputJSON)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Log execution start
 	log.Debug().
 		Str("tool", toolName).
 		Str("request_id", requestID).
@@ -96,12 +89,10 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		Strs("args", toolCfg.Args).
 		Msg("Executing subprocess")
 
-	// Run the command
 	startTime := time.Now()
 	err = cmd.Run()
 	duration := time.Since(startTime)
 
-	// Log execution result
 	log.Debug().
 		Str("tool", toolName).
 		Str("request_id", requestID).
@@ -109,7 +100,6 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		Int("exit_code", cmd.ProcessState.ExitCode()).
 		Msg("Subprocess completed")
 
-	// Log stderr if present
 	stderrStr := stderr.String()
 	if stderrStr != "" {
 		log.Warn().
@@ -119,7 +109,6 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 			Msg("Subprocess stderr output")
 	}
 
-	// Handle context timeout/cancellation
 	if execCtx.Err() == context.DeadlineExceeded {
 		return &ExecuteResult{
 			Success: false,
@@ -142,7 +131,6 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		}, nil
 	}
 
-	// Handle command execution error
 	if err != nil {
 		return &ExecuteResult{
 			Success: false,
@@ -155,7 +143,6 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		}, nil
 	}
 
-	// Parse the JSON response from stdout
 	stdoutStr := strings.TrimSpace(stdout.String())
 	if stdoutStr == "" {
 		return &ExecuteResult{
@@ -170,19 +157,24 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	}
 
 	var subprocResp mcptypes.SubprocessResponse
-	if err := json.Unmarshal([]byte(stdoutStr), &subprocResp); err != nil {
-		return &ExecuteResult{
-			Success: false,
-			Error: &mcptypes.SubprocessError{
-				Code:    mcptypes.ErrorCodeExecutionFailed,
-				Message: fmt.Sprintf("failed to parse subprocess response: %v", err),
-				Details: stdoutStr,
-			},
-			Stderr: stderrStr,
-		}, nil
+	chunks := []map[string]interface{}{}
+
+	if strings.HasPrefix(stdoutStr, chunkPrefix) || strings.HasPrefix(stdoutStr, resultPrefix) {
+		chunks, subprocResp = e.parseStreamingOutput(stdoutStr, requestID)
+	} else {
+		if err := json.Unmarshal([]byte(stdoutStr), &subprocResp); err != nil {
+			return &ExecuteResult{
+				Success: false,
+				Error: &mcptypes.SubprocessError{
+					Code:    mcptypes.ErrorCodeExecutionFailed,
+					Message: fmt.Sprintf("failed to parse subprocess response: %v", err),
+					Details: stdoutStr,
+				},
+				Stderr: stderrStr,
+			}, nil
+		}
 	}
 
-	// Validate request ID matches
 	if subprocResp.RequestID != requestID {
 		log.Warn().
 			Str("expected", requestID).
@@ -190,16 +182,76 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 			Msg("Request ID mismatch in subprocess response")
 	}
 
-	return &ExecuteResult{
+	result := &ExecuteResult{
 		Success:           subprocResp.Success,
 		Content:           subprocResp.Content,
 		StructuredContent: subprocResp.StructuredContent,
 		Error:             subprocResp.Error,
 		Stderr:            stderrStr,
-	}, nil
+		Chunks:            chunks,
+	}
+
+	if subprocResp.StructuredContent == nil {
+		result.StructuredContent = make(map[string]interface{})
+	}
+	if len(chunks) > 0 {
+		result.StructuredContent["streaming_chunks"] = chunks
+	}
+
+	return result, nil
 }
 
-// buildEnvironment creates the environment variables for the subprocess
+func (e *Executor) parseStreamingOutput(output string, requestID string) ([]map[string]interface{}, mcptypes.SubprocessResponse) {
+	chunks := []map[string]interface{}{}
+	var finalResp mcptypes.SubprocessResponse
+
+	if !strings.HasPrefix(output, chunkPrefix) && !strings.HasPrefix(output, resultPrefix) {
+		var resp mcptypes.SubprocessResponse
+		err := json.Unmarshal([]byte(output), &resp)
+		if err == nil {
+			resp.RequestID = requestID
+			return chunks, resp
+		}
+		return chunks, mcptypes.SubprocessResponse{
+			RequestID: requestID,
+			Success:   false,
+			Error: &mcptypes.SubprocessError{
+				Code:    mcptypes.ErrorCodeExecutionFailed,
+				Message: fmt.Sprintf("failed to parse subprocess response: %v", err),
+			},
+		}
+	}
+
+	scanner := bufio.NewScanner(bytes.NewBufferString(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		if strings.HasPrefix(line, chunkPrefix) {
+			jsonStr := line[len(chunkPrefix):]
+			var chunk map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(jsonStr), &chunk); jsonErr == nil {
+				chunks = append(chunks, chunk)
+			}
+		} else if strings.HasPrefix(line, resultPrefix) {
+			jsonStr := line[len(resultPrefix):]
+			if jsonErr := json.Unmarshal([]byte(jsonStr), &finalResp); jsonErr == nil {
+				finalResp.RequestID = requestID
+			}
+		}
+	}
+
+	if finalResp.RequestID == "" {
+		finalResp.RequestID = requestID
+		finalResp.Success = false
+		finalResp.Error = &mcptypes.SubprocessError{
+			Code:    mcptypes.ErrorCodeExecutionFailed,
+			Message: "no result found in streaming output",
+		}
+	}
+
+	return chunks, finalResp
+}
+
 func buildEnvironment(envMap map[string]string) []string {
 	env := make([]string, 0, len(envMap))
 	for k, v := range envMap {
@@ -208,7 +260,6 @@ func buildEnvironment(envMap map[string]string) []string {
 	return env
 }
 
-// ValidateToolConfig checks if a tool configuration is valid
 func ValidateToolConfig(toolCfg *config.ToolConfig) error {
 	if toolCfg.Name == "" {
 		return fmt.Errorf("tool name is required")

@@ -6,25 +6,23 @@
 - Arquitectura: Orquestador MCP con ejecución de subprocess en Python
 ---
  🔴 CRÍTICAS (Implementar Inmediatamente)
- 1. Seguridad: Sandbox para Ejecución de Código Python
-**Estado:** Pendiente  
-**Archivos afectados:** `tools/data_analysis/main.py:168-199`  
-**Problema:** `exec()` con builtins restringidos no es sandboxing real. El código podría acceder a módulos peligrosos.
-**Implementación:**
-// internal/executor/sandbox.go
-type SandboxConfig struct {
-    AllowedModules    []string
-    MaxExecutionTime  time.Duration
-    MaxMemoryMB      int
-}
-func (e *Executor) ExecuteInSandbox(ctx context.Context, toolName string, args map[string]interface{}) (*ExecuteResult, error)
-# tools/data_analysis/sandbox.py
-from RestrictedPython import compile_restricted
-from RestrictedPython.Guards import safe_builtins
-def execute_restricted_code(code: str, df: pd.DataFrame) -> Any:
-    bytecode = compile_restricted(code, '<string>', 'exec')
-    exec(bytecode, {'__builtins__': safe_builtins, 'df': df})
-Alternativa: Contenerizar cada herramienta en Docker separado con seccomp/AppArmor.
+  1. Seguridad: Sandbox para Ejecución de Código Python
+  Estado: ✅ Completado (Docker-based)
+  Archivos afectados: tools/data_analysis/main.py
+  Implementación: Contenedores Docker efímeros con auto_remove
+  Archivos nuevos:
+  - tools/data_analysis/sandbox.Dockerfile  # Imagen con pandas + matplotlib
+  - tools/common/sandbox.py                  # DockerSandboxedExecutor
+  Límites de recursos:
+  - Memoria: 256MB
+  - CPU: 0.5
+  - Timeout: 60s
+  - PIDs: 50
+  - Red: none (aislamiento total)
+  Protocolo de streaming:
+  - __CHUNK__:{json} - Progreso intermedio
+  - __RESULT__:{json} - Resultado final
+  Fallback: exec() directo si Docker no está disponible
 ---
  2. Prevención de Path Traversal
  Estado: ✅ Completado  
@@ -770,53 +768,25 @@ def handle_search(request: dict, context: dict) -> dict:
     model = ModelCache.get_model()
     # ...
 ---
-20. Streaming de Respuestas LLM
-Estado: Respuestas completas (no streaming)  
-Objetivo: UX más rápida con respuestas parciales
-Implementación:
-// internal/executor/streaming.go
-package executor
-import (
-    "context"
-    "encoding/json"
-    "io"
-)
-type StreamingLLMClient struct {
-    client *http.Client
-    url    string
-}
-func (c *StreamingLLMClient) StreamCall(
-    ctx context.Context,
-    model string,
-    prompt string,
-    callback func(chunk string) error,
-) error {
-    payload := map[string]interface{}{
-        "model":  model,
-        "prompt": prompt,
-        "stream": true,
-    }
-    
-    body, _ := json.Marshal(payload)
-    req, _ := http.NewRequestWithContext(ctx, "POST", c.url+"/api/generate", bytes.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    
-    resp, err := c.client.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    
-    decoder := json.NewDecoder(resp.Body)
-    
-    for {
-        var chunk map[string]interface{}
-        if err := decoder.Decode(&chunk); err != nil {
-            if err == io.EOF {
-                break
-            }
-            return err
-        }
+20. Streaming de Respuestas y Tool Execution
+ Estado: ✅ Completado
+ Objetivo: UX más rápida con respuestas progresivas
+ Archivos nuevos:
+ - internal/executor/subprocess.go   # Parser de streaming chunks
+ - tools/common/sandbox.py           # Emisión de chunks
+ - tools/data_analysis/main.py       # Uso de streaming
+ Protocolo de streaming:
+ Python tool → stdout:
+   __CHUNK__:{"type": "status", "data": {"message": "loading"}}
+   __CHUNK__:{"type": "progress", "data": 50}
+   __RESULT__:{"success": true, "content": [...]}
+
+ Go executor parsea chunks y los incluye en structured_content:
+   structured_content.streaming_chunks = [...]
+ Benefits:
+ - El cliente ve progreso en tiempo real
+ - Mejora UX para operaciones largas
+ - Compatible hacia atrás (no-streaming fallback)
         
         if done, _ := chunk["done"].(bool); done {
             break
@@ -853,11 +823,11 @@ Fase 4: Calidad de Código (Semanas 7-8)
 - [ ] Linting configurado
 - [ ] CI/CD pipeline
 - [ ] Migraciones de DB
-Fase 5: Mejoras (Semanas 9-12)
-- [ ] Sistema de plugins
-- [ ] Streaming LLM
-- [ ] OpenAPI documentation
-- [ ] Sandbox para código Python
+ Fase 5: Mejoras (Semanas 9-12)
+ - [x] Sistema de plugins (descartado - requiere reinicio manual)
+ - [x] Sandbox Docker (tools/common/sandbox.py + sandbox.Dockerfile)
+ - [x] Streaming LLM (internal/executor/subprocess.go + streaming protocol)
+ - [x] OpenAPI documentation (internal/transport/docs.go + Swagger UI)
 ---
  📊 Métricas de Éxito
  | Métrica | Estado Actual | Objetivo |

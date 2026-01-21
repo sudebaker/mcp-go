@@ -2,22 +2,23 @@
 """
 Data Analysis Tool.
 Analyzes Excel/CSV files using Pandas with LLM-generated code.
+Supports sandboxed execution and streaming progress.
 """
 
 from common.retry import call_llm_with_retry
 from common.validators import validate_file_path
 from common.llm_cache import call_llm_with_cache
+from common.sandbox import execute_in_sandbox, DockerSandboxedExecutor
 import json
 import sys
 import re
 import traceback
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 from contextlib import redirect_stdout, redirect_stderr
 import os
 
-# Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -37,36 +38,26 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 
-# Restricted builtins for safe code execution
-SAFE_BUILTINS = {
-    "abs": abs,
-    "all": all,
-    "any": any,
-    "bool": bool,
-    "dict": dict,
-    "enumerate": enumerate,
-    "filter": filter,
-    "float": float,
-    "format": format,
-    "int": int,
-    "isinstance": isinstance,
-    "len": len,
-    "list": list,
-    "map": map,
-    "max": max,
-    "min": min,
-    "print": print,
-    "range": range,
-    "reversed": reversed,
-    "round": round,
-    "set": set,
-    "sorted": sorted,
-    "str": str,
-    "sum": sum,
-    "tuple": tuple,
-    "type": type,
-    "zip": zip,
-}
+CHUNK_PREFIX = "__CHUNK__:"
+RESULT_PREFIX = "__RESULT__:"
+
+_chunks_sent: list = []
+_chunk_callback: Optional[Callable[[dict], None]] = None
+
+
+def set_chunk_callback(callback: Callable[[dict], None]):
+    """Set callback for streaming chunks to the Go executor."""
+    global _chunk_callback
+    _chunk_callback = callback
+
+
+def emit_chunk(chunk_type: str, data: Any):
+    """Emit a chunk to the callback."""
+    global _chunks_sent
+    chunk = {"type": chunk_type, "data": data}
+    _chunks_sent.append(chunk)
+    if _chunk_callback:
+        _chunk_callback(chunk)
 
 
 def read_request() -> dict[str, Any]:
@@ -82,7 +73,6 @@ def write_response(response: dict[str, Any]) -> None:
 
 def load_data(file_path: str) -> pd.DataFrame:
     """Load data from Excel or CSV file."""
-    # Validate path for security (prevent path traversal)
     validate_file_path(file_path)
 
     path = Path(file_path)
@@ -92,7 +82,6 @@ def load_data(file_path: str) -> pd.DataFrame:
     elif suffix in (".xlsx", ".xls"):
         return pd.read_excel(file_path)
     else:
-        # Try to infer format
         try:
             return pd.read_csv(file_path)
         except Exception as e:
@@ -118,20 +107,17 @@ def get_data_summary(df: pd.DataFrame) -> str:
 
 def extract_code(llm_response: str) -> str:
     """Extract Python code from LLM response."""
-    # Look for code blocks
     code_pattern = r"```(?:python)?\s*([\s\S]*?)```"
     matches = re.findall(code_pattern, llm_response)
 
     if matches:
         return matches[0].strip()
 
-    # If no code blocks, try to extract code-like content
     lines = llm_response.strip().split("\n")
     code_lines = []
     in_code = False
 
     for line in lines:
-        # Skip obvious non-code lines
         if (
             line.startswith("#")
             or "=" in line
@@ -149,9 +135,102 @@ def extract_code(llm_response: str) -> str:
     return llm_response.strip()
 
 
-def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
-    """Execute code in a restricted environment."""
-    # Create restricted globals
+def execute_code_in_sandbox(
+    code: str,
+    df: pd.DataFrame,
+    request_id: str,
+) -> dict:
+    """
+    Execute code in Docker sandbox with streaming support.
+
+    Returns dict with keys: success, result, stdout, stderr, chunks
+    """
+    global _chunks_sent
+    _chunks_sent = []
+
+    def on_chunk(chunk: dict):
+        emit_chunk(chunk.get("type", "unknown"), chunk.get("data", {}))
+
+    df_dict = df.to_dict(orient="records")
+
+    from common.sandbox import SandboxConfig
+
+    config = SandboxConfig(
+        image="mcp-python-sandbox:latest",
+        timeout_seconds=60,
+        memory_limit="256m",
+        cpu_limit=0.5,
+        pids_limit=50,
+        network_disabled=True,
+        build_on_missing=True,
+    )
+
+    result = execute_in_sandbox(code, df_dict, config, on_chunk)
+
+    stdout = ""
+    stderr = ""
+    structured_result = {}
+
+    if result.success:
+        stdout = result.output
+        structured_result = {"executed": True}
+    else:
+        stderr = result.error or "Unknown error"
+
+    return {
+        "success": result.success,
+        "result": None,
+        "stdout": stdout,
+        "stderr": stderr,
+        "structured": structured_result,
+        "chunks": _chunks_sent,
+    }
+
+
+def execute_code_safely(
+    code: str,
+    df: pd.DataFrame,
+    request_id: str,
+) -> dict:
+    """
+    Execute code in restricted environment (fallback when no Docker).
+
+    Returns dict with keys: success, result, stdout, stderr
+    """
+    from common.structured_logging import get_logger
+
+    logger = get_logger(__name__, "data_analysis")
+
+    SAFE_BUILTINS = {
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "bool": bool,
+        "dict": dict,
+        "enumerate": enumerate,
+        "filter": filter,
+        "float": float,
+        "format": format,
+        "int": int,
+        "isinstance": isinstance,
+        "len": len,
+        "list": list,
+        "map": map,
+        "max": max,
+        "min": min,
+        "print": print,
+        "range": range,
+        "reversed": reversed,
+        "round": round,
+        "set": set,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+        "tuple": tuple,
+        "type": type,
+        "zip": zip,
+    }
+
     restricted_globals = {
         "__builtins__": SAFE_BUILTINS,
         "pd": pd,
@@ -159,17 +238,14 @@ def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
         "df": df,
     }
 
-    # Capture output
     stdout_capture = StringIO()
     stderr_capture = StringIO()
 
     result = None
     with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
         try:
-            # Execute the code
             exec(code, restricted_globals)
 
-            # Look for result variable
             if "result" in restricted_globals:
                 result = restricted_globals["result"]
             elif "answer" in restricted_globals:
@@ -180,7 +256,12 @@ def execute_code_safely(code: str, df: pd.DataFrame) -> tuple[Any, str, str]:
         except Exception as e:
             stderr_capture.write(f"Execution error: {str(e)}\n{traceback.format_exc()}")
 
-    return result, stdout_capture.getvalue(), stderr_capture.getvalue()
+    return {
+        "success": stderr_capture.tell() == 0,
+        "result": result,
+        "stdout": stdout_capture.getvalue(),
+        "stderr": stderr_capture.getvalue(),
+    }
 
 
 def format_result(result: Any, output_format: str) -> str:
@@ -218,6 +299,7 @@ def main() -> None:
         file_path = arguments.get("file_path")
         question = arguments.get("question")
         output_format = arguments.get("output_format", "text")
+        use_sandbox = arguments.get("use_sandbox", True)
 
         if not file_path:
             write_response(
@@ -261,11 +343,15 @@ def main() -> None:
             )
             return
 
-        # Load the data
+        emit_chunk("status", {"message": "Loading data file", "file": file_path})
+
         df = load_data(file_path)
+        emit_chunk("data_loaded", {"rows": df.shape[0], "columns": df.shape[1]})
+
         data_summary = get_data_summary(df)
 
-        # Generate analysis code using LLM
+        emit_chunk("status", {"message": "Generating analysis code with LLM"})
+
         prompt = f"""You are a data analyst. Given the following pandas DataFrame summary, write Python code to answer the question.
 
 DATA SUMMARY:
@@ -280,6 +366,7 @@ IMPORTANT RULES:
 4. Use pandas (pd) and numpy (np) - they're already imported
 5. Keep the code simple and efficient
 6. Use print() if you need to show intermediate steps
+7. For visualizations, save to /tmp/output directory with .png extension
 
 Python code:
 ```python
@@ -288,10 +375,16 @@ Python code:
         llm_response = call_llm_with_cache(llm_api_url, llm_model, prompt)
         code = extract_code(llm_response)
 
-        # Execute the code
-        result, stdout, stderr = execute_code_safely(code, df)
+        emit_chunk("code_generated", {"code_length": len(code)})
 
-        if stderr and not result:
+        if use_sandbox:
+            emit_chunk("status", {"message": "Executing code in sandbox"})
+            exec_result = execute_code_in_sandbox(code, df, request_id)
+        else:
+            emit_chunk("warning", {"message": "Using unsafe exec() - sandbox disabled"})
+            exec_result = execute_code_safely(code, df, request_id)
+
+        if not exec_result["success"] and not exec_result["result"]:
             write_response(
                 {
                     "success": False,
@@ -299,36 +392,44 @@ Python code:
                     "error": {
                         "code": "EXECUTION_FAILED",
                         "message": "Code execution failed",
-                        "details": stderr,
+                        "details": exec_result["stderr"],
                     },
                 }
             )
             return
 
-        # Format the result
+        emit_chunk("status", {"message": "Formatting results"})
+
+        result = exec_result["result"]
         formatted_result = format_result(result, output_format)
 
-        # Build response
         response_text = f"Question: {question}\n\n"
-        if stdout:
-            response_text += f"Analysis output:\n{stdout}\n"
+        if exec_result["stdout"]:
+            response_text += f"Analysis output:\n{exec_result['stdout']}\n"
         response_text += f"Result:\n{formatted_result}"
+
+        structured = {
+            "question": question,
+            "file_path": file_path,
+            "generated_code": code,
+            "result": result
+            if isinstance(result, (str, int, float, bool, list, dict))
+            else formatted_result,
+            "stdout": exec_result["stdout"],
+            "data_shape": list(df.shape),
+        }
+
+        if "chunks" in exec_result:
+            structured["execution_chunks"] = exec_result["chunks"]
+
+        emit_chunk("complete", {"success": True})
 
         write_response(
             {
                 "success": True,
                 "request_id": request_id,
                 "content": [{"type": "text", "text": response_text}],
-                "structured_content": {
-                    "question": question,
-                    "file_path": file_path,
-                    "generated_code": code,
-                    "result": result
-                    if isinstance(result, (str, int, float, bool, list, dict))
-                    else formatted_result,
-                    "stdout": stdout,
-                    "data_shape": list(df.shape),
-                },
+                "structured_content": structured,
             }
         )
 

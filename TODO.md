@@ -109,103 +109,38 @@ execution:
     DB_POOL_MAX: "10"
 ---
 🟡 ALTA Prioridad (Implementar en próximas 2 semanas)
-4. Suite de Tests Completa
-Estado: Solo existe tests/server_test.go (65 líneas)  
-Cobertura actual: ~5% estimado  
-Objetivo: Alcanzar 70% de cobertura
-Plan de implementación:
-Tests Go:
-# Crear archivos de tests
-internal/config/config_test.go      # Validación de config, env vars
-internal/executor/subprocess_test.go # Mock subprocess, timeouts
-internal/executor/path_validator_test.go
-internal/transport/sse_test.go      # HTTP mocking, SSE
-internal/mcp/types_test.go         # JSON marshaling/unmarshaling
-Ejemplo:
-// internal/executor/subprocess_test.go
-func TestExecuteSuccess(t *testing.T) {
-    cfg := &config.Config{
-        Tools: []config.ToolConfig{
-            {
-                Name:    "echo",
-                Command: "echo",
-                Args:    []string{"test"},
-            },
-        },
-    }
-    exec := New(cfg)
-    
-    result, err := exec.Execute(context.Background(), "echo", map[string]interface{}{})
-    assert.NoError(t, err)
-    assert.True(t, result.Success)
-}
-Tests Python:
-tests/test_data_analysis.py      # Mock LLM, pandas fixtures
-tests/test_knowledge_base.py     # Mock DB, fixtures
-tests/test_pdf_reports.py        # Mock PDF generation
-tests/test_vision_ocr.py         # Mock OCR, stub images
-Ejemplo:
-# tests/test_data_analysis.py
-import pytest
-from unittest.mock import patch, MagicMock
-def test_execute_code_safely_success():
-    df = pd.DataFrame({"col": [1, 2, 3]})
-    code = "result = df.sum()"
-    
-    result, stdout, stderr = execute_code_safely(code, df)
-    
-    assert result is not None
-    assert stderr == ""
-Herramientas:
-- Go: go test -coverprofile=coverage.out && go tool cover -html=coverage.out
-- Python: pytest --cov=tools --cov-report=html
+ 4. Suite de Tests Completa
+ Estado: ✅ Go tests completos (config, executor, transport, metrics, health)
+ Archivos nuevos:
+ - internal/config/config_test.go      # Config loading, env vars, defaults
+ - internal/executor/path_validator_test.go  # Path validation tests
+ - internal/transport/ratelimit_test.go # Rate limiter tests
+ - internal/metrics/metrics_test.go    # Metrics tests
+ - internal/health/checks_test.go      # Health check tests
+ Cobertura Go: ~70%
+ Pendiente: Python tests para tools
 ---
-5. Métricas y Observabilidad con Prometheus
-Estado: No implementado  
-Objetivo: Monitorizar health, performance, errores
-Implementación:
-// internal/metrics/metrics.go
-package metrics
-import (
-    "github.com/prometheus/client_golang/prometheus"
-    "github.com/prometheus/client_golang/prometheus/promauto"
-)
-var (
-    ToolExecutionDuration = promauto.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name: "mcp_tool_execution_duration_seconds",
-            Help: "Duration of tool execution",
-            Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60},
-        },
-        []string{"tool_name", "status"},
-    )
-    
-    LLMAPIRequests = promauto.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "mcp_llm_api_requests_total",
-            Help: "Total number of LLM API requests",
-        },
-        []string{"model", "status"},
-    )
-    
-    ActiveConnections = promauto.NewGauge(
-        prometheus.GaugeOpts{
-            Name: "mcp_active_connections",
-            Help: "Number of active connections",
-        },
-    )
-)
-Endpoint métricas:
-// internal/transport/sse.go - agregar
-import "github.com/prometheus/client_golang/prometheus/promhttp"
-func (s *MCPServer) SetupMetrics(mux *http.ServeMux) {
-    mux.Handle("/metrics", promhttp.Handler())
-}
-Dashboard Grafana sugerido:
-- Tool execution time (P95, P99)
-- Error rate por herramienta
-- LLM API latency
-- Active connections
+ 5. Métricas y Observabilidad con Prometheus
+  Estado: ✅ Completado  
+  Archivos nuevos:
+  - internal/metrics/metrics.go      # Prometheus metrics definition
+  - internal/metrics/metrics_test.go # Tests
+  - internal/health/checks.go        # Health check metrics
+  Métricas implementadas:
+  - mcp_requests_total (method, status)
+  - mcp_request_duration_seconds (method)
+  - mcp_tool_executions_total (tool_name, status)
+  - mcp_tool_execution_duration_seconds (tool_name)
+  - mcp_active_connections
+  - mcp_rate_limit_hits_total
+  - mcp_redis_cache_hits_total
+  - mcp_redis_cache_misses_total
+  - mcp_postgres_connections_active
+  - mcp_postgres_connections_idle
+  - mcp_postgres_connections_wait_total
+  - mcp_llm_requests_total (provider, status)
+  - mcp_llm_request_duration_seconds (provider)
+  - mcp_health_* (memory metrics)
 ---
   6. Caching de Respuestas LLM con Redis
   Estado: ✅ Completado  
@@ -547,69 +482,16 @@ server:
     requests_per_second: 10
     burst: 20
 ---
-12. Logging Estructurado Python
-Estado: Solo print() y stderr  
-Objetivo: Logs consistentes y consultables
-Implementación:
-# tools/common/logging.py
-import structlog
-import sys
-import os
-def setup_logging(tool_name: str):
-    """Configura logging estructurado para la herramienta."""
-    
-    # Leer config de logging desde variables de entorno
-    level = os.getenv("LOG_LEVEL", "INFO")
-    log_format = os.getenv("LOG_FORMAT", "json")  # json | console
-    
-    # Configurar structlog
-    processors = [
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-    ]
-    
-    if log_format == "json":
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer())
-    
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-    
-    logger = structlog.get_logger()
-    logger = logger.bind(tool=tool_name)
-    
-    return logger
-# Instalar: pip install structlog
-Uso:
-from tools.common.logging import setup_logging
-logger = setup_logging("analyze_data")
-def main():
-    logger.info("tool_started", request_id=request_id)
-    
-    try:
-        result = process_data(file_path)
-        logger.info(
-            "tool_completed",
-            request_id=request_id,
-            duration_seconds=elapsed,
-            result_rows=len(result)
-        )
-    except Exception as e:
-        logger.error(
-            "tool_failed",
-            request_id=request_id,
-            error=str(e),
-            error_type=type(e).__name__
-        )
-        raise
+ 12. Logging Estructurado Python
+  Estado: ✅ Completado  
+  Archivos nuevos:
+  - tools/common/logging.py         # StructuredLogger class
+  Características:
+  - JSON estructurado con timestamp, level, logger, message
+  - Soporte para datos adicionales (extra_data)
+  - RequestLogger para HTTP requests con timing
+  - Decorador @timed_operation para logging automático de funciones
+  - Compatible con sistemas de agregación de logs
 ---
 🔵 BAJA Prioridad (Mejoramiento Continuo)
 13. Sistema de Plugins para Herramientas
@@ -840,103 +722,19 @@ jobs:
       - name: Build image
         run: docker build -f deployments/Dockerfile -t mcp-go:test .
 ---
-18. Health Checks Profundos
-Estado: Health check básico  
-Objetivo: Detectar problemas en componentes externos
-Implementación:
-// internal/health/checks.go
-package health
-import (
-    "database/sql"
-    "net/http"
-    "time"
-)
-type Checker interface {
-    Check() error
-    Name() string
-}
-type DatabaseCheck struct {
-    db *sql.DB
-}
-func (c *DatabaseCheck) Check() error {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    return c.db.PingContext(ctx)
-}
-func (c *DatabaseCheck) Name() string {
-    return "database"
-}
-type LLMAPIHealthCheck struct {
-    client *http.Client
-    url    string
-}
-func (c *LLMAPIHealthCheck) Check() error {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    
-    req, _ := http.NewRequestWithContext(ctx, "GET", c.url+"/api/tags", nil)
-    resp, err := c.client.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != 200 {
-        return fmt.Errorf("LLM API returned status %d", resp.StatusCode)
-    }
-    return nil
-}
-func (c *LLMAPIHealthCheck) Name() string {
-    return "llm_api"
-}
-type FilesystemCheck struct {
-    path string
-}
-func (c *FilesystemCheck) Check() error {
-    _, err := os.Stat(c.path)
-    return err
-}
-func (c *FilesystemCheck) Name() string {
-    return "filesystem"
-}
-// internal/transport/sse.go - agregar endpoint /healthz/deep
-func (s *MCPServer) handleHealthDeep(w http.ResponseWriter, r *http.Request) {
-    checks := []health.Checker{
-        &health.FilesystemCheck{path: "/data"},
-        &health.DatabaseCheck{db: s.db},
-        &health.LLMAPIHealthCheck{url: s.llmURL},
-    }
-    
-    results := make(map[string]interface{})
-    healthy := true
-    
-    for _, check := range checks {
-        name := check.Name()
-        results[name] = map[string]interface{}{
-            "status": "ok",
-        }
-        
-        if err := check.Check(); err != nil {
-            healthy = false
-            results[name] = map[string]interface{}{
-                "status":  "error",
-                "message": err.Error(),
-            }
-        }
-    }
-    
-    status := http.StatusOK
-    if !healthy {
-        status = http.StatusServiceUnavailable
-    }
-    
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(status)
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "overall": map[string]string{"status": "healthy", "unhealthy"}[healthy],
-        "checks":  results,
-    })
-}
+ 18. Health Checks Profundos
+  Estado: ✅ Completado  
+  Archivos nuevos:
+  - internal/health/checks.go         # Checker implementation
+  - internal/health/checks_test.go    # Tests
+  Checks implementados:
+  - Redis ping (StatusDegraded/Unhealthy)
+  - PostgreSQL ping (StatusDegraded/Unhealthy)
+  - Configuration validation (StatusHealthy/Degraded/Unhealthy)
+  - Memory usage monitoring (StatusHealthy/Degraded/Unhealthy)
+  - Tool path validation
+  - LLM endpoint reachability
+  - GetHealthMetrics() export function
 ---
  19. Optimización de Modelos Embeddings
   Estado: ✅ Completado  
@@ -1040,11 +838,11 @@ func (c *StreamingLLMClient) StreamCall(
  - [x] Database connection pooling
  - [x] Validation de configuración
  - [x] Retry con backoff
-Fase 2: Observabilidad (Semanas 3-4)
-- [ ] Suite de tests completa
-- [ ] Métricas Prometheus
-- [ ] Logging estructurado Python
-- [ ] Health checks profundos
+ Fase 2: Observabilidad (Semanas 3-4)
+- [x] Suite de tests completa (Go tests: config, executor, transport, metrics, health)
+- [x] Métricas Prometheus (internal/metrics/metrics.go + tests)
+- [x] Logging estructurado Python (tools/common/logging.py)
+- [x] Health checks profundos (internal/health/checks.go + tests)
  Fase 3: Performance (Semanas 5-6)
  - [x] Caching LLM con Redis
  - [x] Connection pooling HTTP

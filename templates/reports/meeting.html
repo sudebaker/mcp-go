@@ -7,7 +7,9 @@
 </head>
 <body>
     <div class="report-header">
+        <div class="report-type">Meeting Minutes</div>
         <h1>{{ title }}</h1>
+        <div class="report-date">Generated: {{ generated_at }}</div>
     </div>
 
     <section class="info-grid">
@@ -37,24 +39,7 @@
         </div>
     </section>
 
-    <section>
-        <h2>Attendees</h2>
-        <div class="attendee-list">
-            {% for attendee in attendees %}
-            <span class="attendee">{{ attendee }}</span>
-            {% endfor %}
-        </div>
-        {% if absent %}
-        <h3>Absent</h3>
-        <div class="attendee-list absent">
-            {% for person in absent %}
-            <span class="attendee absent">{{ person }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </section>
-
-    {% if agenda %}
+    {% if agenda and agenda|length > 0 %}
     <section>
         <h2>Agenda</h2>
         <ol>
@@ -65,14 +50,33 @@
     </section>
     {% endif %}
 
-    {% if discussions %}
+    {% if attendees and attendees|length > 0 %}
     <section>
-        <h2>Discussions</h2>
+        <h2>Attendees</h2>
+        <div class="attendee-list">
+            {% for attendee in attendees %}
+            <span class="attendee">{{ attendee }}</span>
+            {% endfor %}
+        </div>
+        {% if absent and absent|length > 0 %}
+        <h3>Absent</h3>
+        <div class="attendee-list">
+            {% for person in absent %}
+            <span class="attendee absent">{{ person }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% if discussions and discussions|length > 0 %}
+    <section>
+        <h2>Discussion Points</h2>
         {% for discussion in discussions %}
         <div class="discussion-item">
             <h3>{{ discussion.topic }}</h3>
             <p>{{ discussion.summary }}</p>
-            {% if discussion.key_points %}
+            {% if discussion.key_points and discussion.key_points|length > 0 %}
             <ul>
                 {% for point in discussion.key_points %}
                 <li>{{ point }}</li>
@@ -84,10 +88,10 @@
     </section>
     {% endif %}
 
-    {% if decisions %}
+    {% if decisions and decisions|length > 0 %}
     <section>
         <h2>Decisions Made</h2>
-        <table class="decisions-table">
+        <table>
             <thead>
                 <tr>
                     <th>#</th>
@@ -108,10 +112,10 @@
     </section>
     {% endif %}
 
-    {% if action_items %}
+    {% if action_items and action_items|length > 0 %}
     <section>
         <h2>Action Items</h2>
-        <table class="action-items-table">
+        <table>
             <thead>
                 <tr>
                     <th>#</th>
@@ -136,13 +140,16 @@
     </section>
     {% endif %}
 
+    {% if next_meeting and next_meeting != "TBD" %}
     <section>
         <h2>Next Meeting</h2>
         <p>{{ next_meeting }}</p>
     </section>
+    {% endif %}
 
     <footer>
-        <p class="generated-at">Generated: {{ generated_at }}</p>
+        <div class="confidential">Internal Document</div>
+        <p class="generated-at">Minutes generated on {{ generated_at }}</p>
     </footer>
 </body>
 </html>

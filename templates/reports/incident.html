@@ -7,8 +7,10 @@
 </head>
 <body>
     <div class="report-header">
+        <div class="report-type">Incident Report</div>
         <h1>{{ title }}</h1>
-        <div class="meta-info">
+        <div class="report-date">Generated: {{ generated_at }}</div>
+        <div style="margin-top: 12px;">
             <span class="badge badge-{{ severity|lower }}">{{ severity }}</span>
             <span class="badge badge-status-{{ status|lower|replace(' ', '-') }}">{{ status }}</span>
         </div>
@@ -33,12 +35,14 @@
         </div>
     </section>
 
+    {% if description %}
     <section>
         <h2>Description</h2>
         <p>{{ description }}</p>
     </section>
+    {% endif %}
 
-    {% if affected_systems %}
+    {% if affected_systems and affected_systems|length > 0 %}
     <section>
         <h2>Affected Systems</h2>
         <ul>
@@ -49,14 +53,14 @@
     </section>
     {% endif %}
 
-    {% if timeline %}
+    {% if timeline and timeline|length > 0 %}
     <section>
-        <h2>Timeline</h2>
+        <h2>Timeline of Events</h2>
         <table class="timeline-table">
             <thead>
                 <tr>
                     <th>Time</th>
-                    <th>Event</th>
+                    <th>Event Description</th>
                 </tr>
             </thead>
             <tbody>
@@ -81,7 +85,7 @@
         <p>{{ resolution }}</p>
     </section>
 
-    {% if lessons_learned %}
+    {% if lessons_learned and lessons_learned|length > 0 %}
     <section>
         <h2>Lessons Learned</h2>
         <ul>
@@ -93,7 +97,8 @@
     {% endif %}
 
     <footer>
-        <p class="generated-at">Generated: {{ generated_at }}</p>
+        <div class="confidential">Confidential Document</div>
+        <p class="generated-at">Report generated on {{ generated_at }}</p>
     </footer>
 </body>
 </html>

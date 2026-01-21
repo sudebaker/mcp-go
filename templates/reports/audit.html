@@ -7,8 +7,10 @@
 </head>
 <body>
     <div class="report-header">
+        <div class="report-type">Audit Report</div>
         <h1>{{ title }}</h1>
-        <div class="meta-info">
+        <div class="report-date">Generated: {{ generated_at }}</div>
+        <div style="margin-top: 12px;">
             <span class="badge badge-{{ risk_rating|lower }}">Risk: {{ risk_rating }}</span>
         </div>
     </div>
@@ -36,14 +38,16 @@
         </div>
     </section>
 
+    {% if executive_summary %}
     <section>
         <h2>Executive Summary</h2>
         <div class="executive-summary">
             <p>{{ executive_summary }}</p>
         </div>
     </section>
+    {% endif %}
 
-    {% if scope %}
+    {% if scope and scope|length > 0 %}
     <section>
         <h2>Audit Scope</h2>
         <ul>
@@ -61,7 +65,7 @@
     </section>
     {% endif %}
 
-    {% if findings %}
+    {% if findings and findings|length > 0 %}
     <section>
         <h2>Findings</h2>
         {% for finding in findings %}
@@ -82,10 +86,10 @@
     </section>
     {% endif %}
 
-    {% if recommendations %}
+    {% if recommendations and recommendations|length > 0 %}
     <section>
         <h2>Recommendations</h2>
-        <table class="recommendations-table">
+        <table>
             <thead>
                 <tr>
                     <th>#</th>
@@ -118,7 +122,8 @@
     {% endif %}
 
     <footer>
-        <p class="generated-at">Generated: {{ generated_at }}</p>
+        <div class="confidential">Confidential Audit Document</div>
+        <p class="generated-at">Report generated on {{ generated_at }}</p>
     </footer>
 </body>
 </html>

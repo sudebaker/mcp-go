@@ -244,15 +244,22 @@ class DockerSandboxedExecutor:
 
         try:
             import base64
+            import tempfile
+            import os
 
             encoded_code = base64.b64encode(code.encode()).decode()
 
+            output_dir = tempfile.mkdtemp(prefix="sandbox_output_")
+            os.chmod(output_dir, 0o777)
+
             volumes = {
                 host_path: {"bind": "/data", "mode": "ro"},
+                output_dir: {"bind": "/tmp/output", "mode": "rw"},
             }
 
             env = env_vars.copy() if env_vars else {}
             env["MCP_SANDBOX_CODE"] = encoded_code
+            env["MPLCONFIGDIR"] = "/tmp/matplotlib"
 
             self.emit_chunk("status", {"message": "Starting container"})
 
@@ -282,12 +289,25 @@ class DockerSandboxedExecutor:
             for chunk in chunks:
                 self.emit_chunk(chunk.get("type", "unknown"), chunk.get("data", {}))
 
+            files = {}
+            if os.path.exists(output_dir):
+                for filename in os.listdir(output_dir):
+                    filepath = os.path.join(output_dir, filename)
+                    if os.path.isfile(filepath):
+                        with open(filepath, "rb") as f:
+                            files[filename] = base64.b64encode(f.read()).decode()
+                try:
+                    os.rmdir(output_dir)
+                except:
+                    pass
+
             execution_time = int((time.time() - start_time) * 1000)
 
             return SandboxResult(
                 success=True,
                 output=logs,
                 chunks=chunks,
+                files=files,
                 execution_time_ms=execution_time,
             )
 

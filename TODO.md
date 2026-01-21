@@ -769,23 +769,37 @@ def handle_search(request: dict, context: dict) -> dict:
     # ...
 ---
 20. Streaming de Respuestas y Tool Execution
- Estado: ✅ Completado
- Objetivo: UX más rápida con respuestas progresivas
- Archivos nuevos:
- - internal/executor/subprocess.go   # Parser de streaming chunks
- - tools/common/sandbox.py           # Emisión de chunks
- - tools/data_analysis/main.py       # Uso de streaming
+ Estado: ✅ Completado (con soporte para imágenes)
+ Objetivo: UX más rápida con respuestas progresivas y archivos
+ Archivos modificados:
+ - internal/executor/subprocess.go   # Parser de streaming chunks + soporte imagen
+ - tools/common/sandbox.py           # Emisión de chunks + retorno de archivos
+ - tools/data_analysis/main.py       # Uso de streaming + contenido MCP imágenes
  Protocolo de streaming:
  Python tool → stdout:
    __CHUNK__:{"type": "status", "data": {"message": "loading"}}
    __CHUNK__:{"type": "progress", "data": 50}
    __RESULT__:{"success": true, "content": [...]}
 
- Go executor parsea chunks y los incluye en structured_content:
-   structured_content.streaming_chunks = [...]
+ Formato MCP estándar para respuestas:
+ {
+   "content": [
+     {"type": "text", "text": "**Resultado:** análisis completado..."},
+     {"type": "image", "data": "iVBORw0KGgo...", "mimeType": "image/png"}
+   ],
+   "structured_content": {...}
+ }
+
+ Soporte de imágenes:
+ - Archivos PNG generados en /tmp/output/ dentro del sandbox
+ - Mount de volumen temporal para recuperación de archivos
+ - Codificación base64 automática
+ - Inclusión en array content con type: "image"
+ - Go executor convierte a mcp.ImageContent para el cliente
+
  Benefits:
  - El cliente ve progreso en tiempo real
- - Mejora UX para operaciones largas
+ - Gráficos visualizables directamente en la UI
  - Compatible hacia atrás (no-streaming fallback)
         
         if done, _ := chunk["done"].(bool); done {

@@ -174,6 +174,8 @@ def execute_code_in_sandbox(
     if result.success:
         stdout = result.output
         structured_result = {"executed": True}
+        if result.files:
+            structured_result["files"] = result.files
     else:
         stderr = result.error or "Unknown error"
 
@@ -403,10 +405,12 @@ Python code:
         result = exec_result["result"]
         formatted_result = format_result(result, output_format)
 
-        response_text = f"Question: {question}\n\n"
+        response_text = f"**Question:** {question}\n\n"
         if exec_result["stdout"]:
-            response_text += f"Analysis output:\n{exec_result['stdout']}\n"
-        response_text += f"Result:\n{formatted_result}"
+            response_text += (
+                f"**Analysis output:**\n```\n{exec_result['stdout']}\n```\n\n"
+            )
+        response_text += f"**Result:**\n{formatted_result}"
 
         structured = {
             "question": question,
@@ -424,11 +428,21 @@ Python code:
 
         emit_chunk("complete", {"success": True})
 
+        content = [{"type": "text", "text": response_text}]
+
+        files = exec_result.get("structured", {}).get("files", {})
+        if files:
+            for filename, data in files.items():
+                if filename.lower().endswith(".png"):
+                    content.append(
+                        {"type": "image", "data": data, "mimeType": "image/png"}
+                    )
+
         write_response(
             {
                 "success": True,
                 "request_id": request_id,
-                "content": [{"type": "text", "text": response_text}],
+                "content": content,
                 "structured_content": structured,
             }
         )

@@ -70,8 +70,8 @@ func (s *MCPServer) Start() error {
 	// Health endpoint (no rate limiting for health checks)
 	mux.HandleFunc("/health", s.handleHealth)
 
-	// OpenAPI spec (for compatibility info)
-	mux.HandleFunc("/openapi.json", s.handleOpenAPI)
+	// OpenAPI spec and Docs
+	s.setupDocsEndpoints(mux)
 
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
@@ -161,117 +161,7 @@ func (s *MCPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 // handleOpenAPI returns OpenAPI-like documentation
 func (s *MCPServer) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
-	// Build tools list for documentation
-	tools := make([]map[string]interface{}, 0, len(s.tools))
-	for _, t := range s.tools {
-		tools = append(tools, map[string]interface{}{
-			"name":        t.Name,
-			"description": t.Description,
-			"inputSchema": t.InputSchema,
-		})
-	}
-
-	spec := map[string]interface{}{
-		"openapi": "3.0.0",
-		"info": map[string]interface{}{
-			"title":       s.serverName,
-			"version":     s.version,
-			"description": "MCP (Model Context Protocol) Server with Streamable HTTP transport",
-		},
-		"servers": []map[string]string{
-			{"url": "/", "description": "MCP Server"},
-		},
-		"paths": map[string]interface{}{
-			"/health": map[string]interface{}{
-				"get": map[string]interface{}{
-					"summary":     "Health check",
-					"description": "Returns server health status",
-					"responses": map[string]interface{}{
-						"200": map[string]interface{}{
-							"description": "Server is healthy",
-						},
-					},
-				},
-			},
-			"/mcp": map[string]interface{}{
-				"post": map[string]interface{}{
-					"summary":     "MCP Streamable HTTP",
-					"description": "Send MCP JSON-RPC messages. Session ID returned via Mcp-Session-Id header.",
-					"requestBody": map[string]interface{}{
-						"content": map[string]interface{}{
-							"application/json": map[string]interface{}{
-								"schema": map[string]interface{}{
-									"type": "object",
-									"properties": map[string]interface{}{
-										"jsonrpc": map[string]string{"type": "string", "example": "2.0"},
-										"id":      map[string]string{"type": "integer"},
-										"method":  map[string]string{"type": "string"},
-										"params":  map[string]string{"type": "object"},
-									},
-								},
-							},
-						},
-					},
-					"responses": map[string]interface{}{
-						"200": map[string]interface{}{
-							"description": "JSON-RPC response or SSE stream",
-							"headers": map[string]interface{}{
-								"Mcp-Session-Id": map[string]interface{}{
-									"description": "Session ID for subsequent requests",
-									"schema":      map[string]string{"type": "string"},
-								},
-							},
-						},
-					},
-				},
-				"get": map[string]interface{}{
-					"summary":     "MCP SSE Stream",
-					"description": "Establish SSE stream for server-initiated messages (requires Mcp-Session-Id header)",
-				},
-			},
-		},
-		"x-mcp-info": map[string]interface{}{
-			"protocol":        "MCP (Model Context Protocol)",
-			"transport":       "Streamable HTTP (spec 2025-03-26)",
-			"specification":   "https://modelcontextprotocol.io/specification/2025-03-26/basic/transports",
-			"available_tools": tools,
-			"usage": map[string]interface{}{
-				"step1": "POST /mcp with initialize request, receive Mcp-Session-Id header",
-				"step2": "Include Mcp-Session-Id header in subsequent requests",
-				"step3": "POST /mcp with tools/list to discover available tools",
-				"step4": "POST /mcp with tools/call to execute tools",
-			},
-			"example_initialize": map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      1,
-				"method":  "initialize",
-				"params": map[string]interface{}{
-					"protocolVersion": "2025-03-26",
-					"capabilities":    map[string]interface{}{},
-					"clientInfo": map[string]string{
-						"name":    "my-client",
-						"version": "1.0",
-					},
-				},
-			},
-			"example_tools_call": map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      2,
-				"method":  "tools/call",
-				"params": map[string]interface{}{
-					"name": "echo",
-					"arguments": map[string]string{
-						"text": "Hello!",
-					},
-				},
-			},
-		},
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.Encode(spec)
+	s.handleOpenAPISpec(w, r)
 }
 
 // Legacy aliases for backwards compatibility

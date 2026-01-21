@@ -12,27 +12,37 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+# Add the tools directory to the path so we can import common modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.validators import validate_file_path
+from common.retry import call_llm_with_retry
+
 try:
     import cv2
     import numpy as np
+
     OPENCV_AVAILABLE = True
 except ImportError:
     OPENCV_AVAILABLE = False
 
 try:
     from PIL import Image
+
     PILLOW_AVAILABLE = True
 except ImportError:
     PILLOW_AVAILABLE = False
 
 try:
     import pytesseract
+
     TESSERACT_AVAILABLE = True
 except ImportError:
     TESSERACT_AVAILABLE = False
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
@@ -85,24 +95,22 @@ def perform_ocr(image_path: str) -> dict[str, Any]:
 
     # Build word-level data with confidence
     words = []
-    for i, word in enumerate(data['text']):
+    for i, word in enumerate(data["text"]):
         if word.strip():
-            words.append({
-                "text": word,
-                "confidence": data['conf'][i],
-                "bbox": {
-                    "left": data['left'][i],
-                    "top": data['top'][i],
-                    "width": data['width'][i],
-                    "height": data['height'][i]
+            words.append(
+                {
+                    "text": word,
+                    "confidence": data["conf"][i],
+                    "bbox": {
+                        "left": data["left"][i],
+                        "top": data["top"][i],
+                        "width": data["width"][i],
+                        "height": data["height"][i],
+                    },
                 }
-            })
+            )
 
-    return {
-        "full_text": text.strip(),
-        "words": words,
-        "word_count": len(words)
-    }
+    return {"full_text": text.strip(), "words": words, "word_count": len(words)}
 
 
 def encode_image_base64(image_path: str) -> str:
@@ -112,36 +120,13 @@ def encode_image_base64(image_path: str) -> str:
 
 
 def call_vision_model(
-    llm_api_url: str,
-    llm_model: str,
-    image_path: str,
-    prompt: str
+    llm_api_url: str, llm_model: str, image_path: str, prompt: str
 ) -> str:
     """Call vision model (LLaVA) via Ollama API."""
     # Encode image
     image_base64 = encode_image_base64(image_path)
 
-    # Build request for Ollama with vision
-    payload = {
-        "model": llm_model,
-        "prompt": prompt,
-        "images": [image_base64],
-        "stream": False,
-        "options": {
-            "temperature": 0.2,
-            "num_predict": 2000
-        }
-    }
-
-    response = requests.post(
-        f"{llm_api_url}/api/generate",
-        json=payload,
-        timeout=120
-    )
-    response.raise_for_status()
-
-    result = response.json()
-    return result.get("response", "")
+    return call_llm_with_retry(llm_api_url, llm_model, prompt, images=[image_base64])
 
 
 def describe_image(image_path: str, llm_api_url: str, llm_model: str) -> dict[str, Any]:
@@ -157,13 +142,12 @@ Provide a clear, comprehensive description."""
 
     description = call_vision_model(llm_api_url, llm_model, image_path, prompt)
 
-    return {
-        "description": description,
-        "model_used": llm_model
-    }
+    return {"description": description, "model_used": llm_model}
 
 
-def extract_entities(image_path: str, llm_api_url: str, llm_model: str) -> dict[str, Any]:
+def extract_entities(
+    image_path: str, llm_api_url: str, llm_model: str
+) -> dict[str, Any]:
     """Extract structured entities from the image."""
     prompt = """Analyze this image and extract all identifiable entities into a structured format.
 
@@ -185,21 +169,20 @@ Extract all entities:"""
     try:
         # Find JSON array in response
         import re
-        json_match = re.search(r'\[[\s\S]*\]', response)
+
+        json_match = re.search(r"\[[\s\S]*\]", response)
         if json_match:
             entities = json.loads(json_match.group())
     except (json.JSONDecodeError, AttributeError):
         # Return raw response if JSON parsing fails
         pass
 
-    return {
-        "entities": entities,
-        "raw_response": response,
-        "model_used": llm_model
-    }
+    return {"entities": entities, "raw_response": response, "model_used": llm_model}
 
 
-def answer_question(image_path: str, question: str, llm_api_url: str, llm_model: str) -> dict[str, Any]:
+def answer_question(
+    image_path: str, question: str, llm_api_url: str, llm_model: str
+) -> dict[str, Any]:
     """Answer a question about the image."""
     prompt = f"""Look at this image carefully and answer the following question.
 
@@ -209,11 +192,7 @@ Provide a detailed, accurate answer based on what you can see in the image."""
 
     answer = call_vision_model(llm_api_url, llm_model, image_path, prompt)
 
-    return {
-        "question": question,
-        "answer": answer,
-        "model_used": llm_model
-    }
+    return {"question": question, "answer": answer, "model_used": llm_model}
 
 
 def get_image_metadata(image_path: str) -> dict[str, Any]:
@@ -223,11 +202,8 @@ def get_image_metadata(image_path: str) -> dict[str, Any]:
     metadata = {
         "format": img.format,
         "mode": img.mode,
-        "size": {
-            "width": img.width,
-            "height": img.height
-        },
-        "file_size_bytes": os.path.getsize(image_path)
+        "size": {"width": img.width, "height": img.height},
+        "file_size_bytes": os.path.getsize(image_path),
     }
 
     # Get EXIF data if available
@@ -241,36 +217,42 @@ def get_image_metadata(image_path: str) -> dict[str, Any]:
 def main() -> None:
     # Check core dependencies
     if not OPENCV_AVAILABLE:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "DEPENDENCY_MISSING",
-                "message": "opencv-python is required. Install with: pip install opencv-python"
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "DEPENDENCY_MISSING",
+                    "message": "opencv-python is required. Install with: pip install opencv-python",
+                },
             }
-        })
+        )
         return
 
     if not PILLOW_AVAILABLE:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "DEPENDENCY_MISSING",
-                "message": "Pillow is required. Install with: pip install Pillow"
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "DEPENDENCY_MISSING",
+                    "message": "Pillow is required. Install with: pip install Pillow",
+                },
             }
-        })
+        )
         return
 
     if not REQUESTS_AVAILABLE:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "DEPENDENCY_MISSING",
-                "message": "requests is required. Install with: pip install requests"
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "DEPENDENCY_MISSING",
+                    "message": "requests is required. Install with: pip install requests",
+                },
             }
-        })
+        )
         return
 
     try:
@@ -284,36 +266,46 @@ def main() -> None:
         question = arguments.get("question")
 
         if not image_path:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_INPUT",
-                    "message": "image_path is required"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "image_path is required",
+                    },
                 }
-            })
+            )
             return
 
-        if not Path(image_path).exists():
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "FILE_NOT_FOUND",
-                    "message": f"Image file not found: {image_path}"
+        try:
+            validate_file_path(image_path)
+        except (ValueError, FileNotFoundError) as e:
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_FILE_PATH"
+                        if isinstance(e, ValueError)
+                        else "FILE_NOT_FOUND",
+                        "message": str(e),
+                    },
                 }
-            })
+            )
             return
 
         if not task:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_INPUT",
-                    "message": "task is required (ocr, describe, extract_entities, answer)"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "task is required (ocr, describe, extract_entities, answer)",
+                    },
                 }
-            })
+            )
             return
 
         llm_api_url = context.get("llm_api_url")
@@ -325,14 +317,16 @@ def main() -> None:
         # Execute requested task
         if task == "ocr":
             if not TESSERACT_AVAILABLE:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "DEPENDENCY_MISSING",
-                        "message": "pytesseract is required for OCR. Install with: pip install pytesseract"
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "DEPENDENCY_MISSING",
+                            "message": "pytesseract is required for OCR. Install with: pip install pytesseract",
+                        },
                     }
-                })
+                )
                 return
 
             result = perform_ocr(image_path)
@@ -340,14 +334,16 @@ def main() -> None:
 
         elif task == "describe":
             if not llm_api_url:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "LLM_ERROR",
-                        "message": "LLM_API_URL is required for image description"
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "LLM_ERROR",
+                            "message": "LLM_API_URL is required for image description",
+                        },
                     }
-                })
+                )
                 return
 
             result = describe_image(image_path, llm_api_url, llm_model)
@@ -355,89 +351,109 @@ def main() -> None:
 
         elif task == "extract_entities":
             if not llm_api_url:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "LLM_ERROR",
-                        "message": "LLM_API_URL is required for entity extraction"
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "LLM_ERROR",
+                            "message": "LLM_API_URL is required for entity extraction",
+                        },
                     }
-                })
+                )
                 return
 
             result = extract_entities(image_path, llm_api_url, llm_model)
-            response_text = f"Extracted Entities:\n\n{json.dumps(result['entities'], indent=2)}"
+            response_text = (
+                f"Extracted Entities:\n\n{json.dumps(result['entities'], indent=2)}"
+            )
 
         elif task == "answer":
             if not question:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "INVALID_INPUT",
-                        "message": "question is required for 'answer' task"
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_INPUT",
+                            "message": "question is required for 'answer' task",
+                        },
                     }
-                })
+                )
                 return
 
             if not llm_api_url:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "LLM_ERROR",
-                        "message": "LLM_API_URL is required for answering questions"
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "LLM_ERROR",
+                            "message": "LLM_API_URL is required for answering questions",
+                        },
                     }
-                })
+                )
                 return
 
             result = answer_question(image_path, question, llm_api_url, llm_model)
             response_text = f"Q: {question}\n\nA: {result['answer']}"
 
         else:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_INPUT",
-                    "message": f"Unknown task: {task}. Valid tasks: ocr, describe, extract_entities, answer"
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": f"Unknown task: {task}. Valid tasks: ocr, describe, extract_entities, answer",
+                    },
                 }
-            })
+            )
             return
 
         # Add metadata to result
         result["image_metadata"] = metadata
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
-            "structured_content": {
-                "task": task,
-                "image_path": image_path,
-                **result
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": response_text}],
+                "structured_content": {
+                    "task": task,
+                    "image_path": image_path,
+                    **result,
+                },
             }
-        })
+        )
 
     except requests.RequestException as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "LLM_ERROR",
-                "message": f"Failed to call vision model: {str(e)}"
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "LLM_ERROR",
+                    "message": f"Failed to call vision model: {str(e)}",
+                },
             }
-        })
+        )
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": traceback.format_exc()
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                    "details": traceback.format_exc(),
+                },
             }
-        })
+        )
 
 
 if __name__ == "__main__":

@@ -48,6 +48,11 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
+	// Validar config
+	if err := config.Validate(cfg); err != nil {
+		log.Fatal().Err(err).Msg("Configuration validation failed")
+	}
+
 	log.Info().
 		Str("server_name", cfg.Server.Name).
 		Int("port", cfg.Server.Port).
@@ -126,7 +131,6 @@ func main() {
 	log.Info().Msg("Server stopped")
 }
 
-
 // registerTool registers a tool with the MCP server.
 func registerTool(mcpServer *server.MCPServer, exec *executor.Executor, toolCfg config.ToolConfig) {
 	// Build input schema for the tool
@@ -157,7 +161,6 @@ func registerTool(mcpServer *server.MCPServer, exec *executor.Executor, toolCfg 
 		Msg("Registered tool")
 }
 
-
 // buildInputSchema converts config input schema to MCP input schema.
 func buildInputSchema(toolCfg config.ToolConfig) *mcp.ToolInputSchema {
 	if toolCfg.InputSchema == nil {
@@ -173,7 +176,6 @@ func buildInputSchema(toolCfg config.ToolConfig) *mcp.ToolInputSchema {
 		schema.Properties = props
 	}
 
-
 	if required, ok := toolCfg.InputSchema["required"].([]interface{}); ok {
 		for _, r := range required {
 			if s, ok := r.(string); ok {
@@ -184,7 +186,6 @@ func buildInputSchema(toolCfg config.ToolConfig) *mcp.ToolInputSchema {
 
 	return schema
 }
-
 
 // createToolHandler creates a tool handler that delegates to the executor.
 func createToolHandler(exec *executor.Executor, toolName string) server.ToolHandlerFunc {

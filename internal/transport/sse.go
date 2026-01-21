@@ -14,13 +14,13 @@ import (
 
 // MCPServer wraps the mcp-go Streamable HTTP server with additional functionality
 type MCPServer struct {
-	mcpServer      *server.MCPServer
-	streamServer   *server.StreamableHTTPServer
-	httpServer     *http.Server
-	addr           string
-	serverName     string
-	version        string
-	tools          []config.ToolConfig
+	mcpServer    *server.MCPServer
+	streamServer *server.StreamableHTTPServer
+	httpServer   *http.Server
+	addr         string
+	serverName   string
+	version      string
+	tools        []config.ToolConfig
 }
 
 // MCPConfig holds MCP server configuration
@@ -98,14 +98,14 @@ func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "healthy",
-		"service": s.serverName,
-		"version": s.version,
-		"protocol": "mcp",
+		"status":    "healthy",
+		"service":   s.serverName,
+		"version":   s.version,
+		"protocol":  "mcp",
 		"transport": "streamable-http",
 		"endpoints": map[string]string{
-			"mcp":     "/mcp",
-			"health":  "/health",
+			"mcp":    "/mcp",
+			"health": "/health",
 		},
 	})
 }

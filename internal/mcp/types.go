@@ -42,11 +42,11 @@ type SubprocessError struct {
 
 // Common error codes
 const (
-	ErrorCodeFileNotFound     = "FILE_NOT_FOUND"
-	ErrorCodeInvalidInput     = "INVALID_INPUT"
-	ErrorCodeExecutionFailed  = "EXECUTION_FAILED"
-	ErrorCodeTimeout          = "TIMEOUT"
+	ErrorCodeFileNotFound      = "FILE_NOT_FOUND"
+	ErrorCodeInvalidInput      = "INVALID_INPUT"
+	ErrorCodeExecutionFailed   = "EXECUTION_FAILED"
+	ErrorCodeTimeout           = "TIMEOUT"
 	ErrorCodeDependencyMissing = "DEPENDENCY_MISSING"
-	ErrorCodeLLMError         = "LLM_ERROR"
-	ErrorCodeDatabaseError    = "DATABASE_ERROR"
+	ErrorCodeLLMError          = "LLM_ERROR"
+	ErrorCodeDatabaseError     = "DATABASE_ERROR"
 )

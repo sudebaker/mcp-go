@@ -12,18 +12,40 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
+# Add the tools directory to the path so we can import common modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.validators import validate_file_path
+from .db_pool import init_pool, get_connection, close_pool
+
+import psycopg2
+from psycopg2.extras import execute_values
+
 try:
-    import psycopg2
-    from psycopg2.extras import execute_values
     PSYCOPG2_AVAILABLE = True
 except ImportError:
     PSYCOPG2_AVAILABLE = False
 
+from sentence_transformers import SentenceTransformer
+
 try:
-    from sentence_transformers import SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
+
+try:
+    import pypdf
+
+    PYPDF_AVAILABLE = True
+except ImportError:
+    PYPDF_AVAILABLE = False
+
+try:
+    from docx import Document
+
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 
 # Configuration
@@ -36,6 +58,7 @@ CHUNK_OVERLAP = 50
 @dataclass
 class DocumentChunk:
     """Represents a chunk of a document."""
+
     content: str
     metadata: dict[str, Any]
     embedding: list[float] | None = None
@@ -50,11 +73,6 @@ def read_request() -> dict[str, Any]:
 def write_response(response: dict[str, Any]) -> None:
     """Write JSON response to STDOUT."""
     print(json.dumps(response))
-
-
-def get_db_connection(database_url: str):
-    """Create database connection."""
-    return psycopg2.connect(database_url)
 
 
 def ensure_schema(conn) -> None:
@@ -103,10 +121,10 @@ def ensure_schema(conn) -> None:
             ON kb_chunks USING gin(to_tsvector('english', content))
         """)
 
-        conn.commit()
 
-
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+def chunk_text(
+    text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
+) -> list[str]:
     """Split text into overlapping chunks."""
     if len(text) <= chunk_size:
         return [text]
@@ -119,7 +137,7 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
         # Try to break at sentence boundary
         if end < len(text):
             # Look for sentence end markers
-            for marker in ['. ', '.\n', '? ', '?\n', '! ', '!\n']:
+            for marker in [". ", ".\n", "? ", "?\n", "! ", "!\n"]:
                 last_marker = text[start:end].rfind(marker)
                 if last_marker > chunk_size // 2:
                     end = start + last_marker + len(marker)
@@ -135,34 +153,33 @@ def read_document(file_path: Path) -> str:
     """Read document content based on file type."""
     suffix = file_path.suffix.lower()
 
-    if suffix == '.txt':
-        return file_path.read_text(encoding='utf-8')
+    if suffix == ".txt":
+        return file_path.read_text(encoding="utf-8")
 
-    elif suffix == '.md':
-        return file_path.read_text(encoding='utf-8')
+    elif suffix == ".md":
+        return file_path.read_text(encoding="utf-8")
 
-    elif suffix == '.pdf':
-        try:
-            import pypdf
-            reader = pypdf.PdfReader(str(file_path))
-            text = []
-            for page in reader.pages:
-                text.append(page.extract_text())
-            return '\n'.join(text)
-        except ImportError:
-            raise ImportError("pypdf is required for PDF files. Install with: pip install pypdf")
+    elif suffix == ".pdf":
+        if not PYPDF_AVAILABLE:
+            raise ImportError(
+                "pypdf is required for PDF files. Install with: pip install pypdf"
+            )
+        reader = pypdf.PdfReader(str(file_path))
+        text = []
+        for page in reader.pages:
+            text.append(page.extract_text())
+        return "\n".join(text)
 
-    elif suffix == '.docx':
-        try:
-            from docx import Document
-            doc = Document(str(file_path))
-            return '\n'.join([para.text for para in doc.paragraphs])
-        except ImportError:
-            raise ImportError("python-docx is required for DOCX files. Install with: pip install python-docx")
+    elif suffix == ".docx":
+        if not DOCX_AVAILABLE:
+            raise ImportError(
+                "python-docx is required for DOCX files. Install with: pip install python-docx"
+            )
+        doc = Document(str(file_path))
+        return "\n".join([para.text for para in doc.paragraphs])
 
     else:
-        # Try to read as text
-        return file_path.read_text(encoding='utf-8')
+        return file_path.read_text(encoding="utf-8")
 
 
 def compute_doc_hash(content: str, file_path: str) -> str:
@@ -175,12 +192,12 @@ def ingest_document(
     model: SentenceTransformer,
     file_path: str,
     collection: str,
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Ingest a document into the knowledge base."""
+    # Validate path for security (prevent path traversal)
+    validate_file_path(file_path)
     path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
 
     # Read document
     content = read_document(path)
@@ -194,7 +211,7 @@ def ingest_document(
             return {
                 "status": "skipped",
                 "reason": "Document already exists",
-                "document_id": existing[0]
+                "document_id": existing[0],
             }
 
     # Chunk the document
@@ -212,7 +229,7 @@ def ingest_document(
             VALUES (%s, %s, %s, %s)
             RETURNING id
             """,
-            (doc_hash, file_path, collection, json.dumps(metadata or {}))
+            (doc_hash, file_path, collection, json.dumps(metadata or {})),
         )
         doc_id = cur.fetchone()[0]
 
@@ -228,26 +245,20 @@ def ingest_document(
             VALUES %s
             """,
             chunk_data,
-            template="(%s, %s, %s, %s::vector, %s)"
+            template="(%s, %s, %s, %s::vector, %s)",
         )
-
-        conn.commit()
 
     return {
         "status": "ingested",
         "document_id": doc_id,
         "chunks_count": len(chunks),
         "file_path": file_path,
-        "collection": collection
+        "collection": collection,
     }
 
 
 def search_semantic(
-    conn,
-    model: SentenceTransformer,
-    query: str,
-    collection: str,
-    top_k: int
+    conn, model: SentenceTransformer, query: str, collection: str, top_k: int
 ) -> list[dict[str, Any]]:
     """Perform semantic search using vector similarity."""
     query_embedding = model.encode([query], show_progress_bar=False)[0]
@@ -267,27 +278,26 @@ def search_semantic(
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
             """,
-            (query_embedding.tolist(), collection, query_embedding.tolist(), top_k)
+            (query_embedding.tolist(), collection, query_embedding.tolist(), top_k),
         )
 
         results = []
         for row in cur.fetchall():
-            results.append({
-                "content": row[0],
-                "metadata": row[1],
-                "file_path": row[2],
-                "collection": row[3],
-                "score": float(row[4])
-            })
+            results.append(
+                {
+                    "content": row[0],
+                    "metadata": row[1],
+                    "file_path": row[2],
+                    "collection": row[3],
+                    "score": float(row[4]),
+                }
+            )
 
         return results
 
 
 def search_keyword(
-    conn,
-    query: str,
-    collection: str,
-    top_k: int
+    conn, query: str, collection: str, top_k: int
 ) -> list[dict[str, Any]]:
     """Perform keyword search using PostgreSQL full-text search."""
     with conn.cursor() as cur:
@@ -306,28 +316,26 @@ def search_keyword(
             ORDER BY rank DESC
             LIMIT %s
             """,
-            (query, collection, query, top_k)
+            (query, collection, query, top_k),
         )
 
         results = []
         for row in cur.fetchall():
-            results.append({
-                "content": row[0],
-                "metadata": row[1],
-                "file_path": row[2],
-                "collection": row[3],
-                "score": float(row[4])
-            })
+            results.append(
+                {
+                    "content": row[0],
+                    "metadata": row[1],
+                    "file_path": row[2],
+                    "collection": row[3],
+                    "score": float(row[4]),
+                }
+            )
 
         return results
 
 
 def search_hybrid(
-    conn,
-    model: SentenceTransformer,
-    query: str,
-    collection: str,
-    top_k: int
+    conn, model: SentenceTransformer, query: str, collection: str, top_k: int
 ) -> list[dict[str, Any]]:
     """Perform hybrid search combining semantic and keyword search."""
     # Get results from both methods
@@ -369,10 +377,7 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     if not file_path:
         return {
             "success": False,
-            "error": {
-                "code": "INVALID_INPUT",
-                "message": "file_path is required"
-            }
+            "error": {"code": "INVALID_INPUT", "message": "file_path is required"},
         }
 
     database_url = context.get("database_url")
@@ -381,26 +386,28 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             "success": False,
             "error": {
                 "code": "DATABASE_ERROR",
-                "message": "DATABASE_URL not configured"
-            }
+                "message": "DATABASE_URL not configured",
+            },
         }
+
+    # Initialize connection pool if not already done
+    init_pool(database_url)
 
     # Load embedding model
     model = SentenceTransformer(EMBEDDING_MODEL)
 
-    # Connect to database
-    conn = get_db_connection(database_url)
-    try:
+    # Use connection from pool
+    with get_connection() as conn:
         ensure_schema(conn)
         result = ingest_document(conn, model, file_path, collection, metadata)
 
         return {
             "success": True,
-            "content": [{"type": "text", "text": f"Document ingested: {result['status']}"}],
-            "structured_content": result
+            "content": [
+                {"type": "text", "text": f"Document ingested: {result['status']}"}
+            ],
+            "structured_content": result,
         }
-    finally:
-        conn.close()
 
 
 def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -414,10 +421,7 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     if not query:
         return {
             "success": False,
-            "error": {
-                "code": "INVALID_INPUT",
-                "message": "query is required"
-            }
+            "error": {"code": "INVALID_INPUT", "message": "query is required"},
         }
 
     database_url = context.get("database_url")
@@ -426,18 +430,20 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             "success": False,
             "error": {
                 "code": "DATABASE_ERROR",
-                "message": "DATABASE_URL not configured"
-            }
+                "message": "DATABASE_URL not configured",
+            },
         }
+
+    # Initialize connection pool if not already done
+    init_pool(database_url)
 
     # Load embedding model (needed for semantic search)
     model = None
     if search_type in ("semantic", "hybrid"):
         model = SentenceTransformer(EMBEDDING_MODEL)
 
-    # Connect to database
-    conn = get_db_connection(database_url)
-    try:
+    # Use connection from pool
+    with get_connection() as conn:
         ensure_schema(conn)
 
         if search_type == "semantic":
@@ -462,35 +468,37 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
                 "collection": collection,
                 "search_type": search_type,
                 "results_count": len(results),
-                "results": results
-            }
+                "results": results,
+            },
         }
-    finally:
-        conn.close()
 
 
 def main() -> None:
     # Check dependencies
     if not PSYCOPG2_AVAILABLE:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "DEPENDENCY_MISSING",
-                "message": "psycopg2 is required. Install with: pip install psycopg2-binary"
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "DEPENDENCY_MISSING",
+                    "message": "psycopg2 is required. Install with: pip install psycopg2-binary",
+                },
             }
-        })
+        )
         return
 
     if not SENTENCE_TRANSFORMERS_AVAILABLE:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "DEPENDENCY_MISSING",
-                "message": "sentence-transformers is required. Install with: pip install sentence-transformers"
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "DEPENDENCY_MISSING",
+                    "message": "sentence-transformers is required. Install with: pip install sentence-transformers",
+                },
             }
-        })
+        )
         return
 
     try:
@@ -510,23 +518,27 @@ def main() -> None:
                 "success": False,
                 "error": {
                     "code": "INVALID_INPUT",
-                    "message": f"Unknown operation: {operation}"
-                }
+                    "message": f"Unknown operation: {operation}",
+                },
             }
 
         result["request_id"] = request_id
         write_response(result)
 
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": str(type(e).__name__)
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                    "details": str(type(e).__name__),
+                },
             }
-        })
+        )
 
 
 if __name__ == "__main__":

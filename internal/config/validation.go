@@ -25,8 +25,17 @@ func Validate(cfg *Config) error {
 	if cfg.Execution.DefaultTimeout <= 0 {
 		return fmt.Errorf("%w: %v", ErrInvalidTimeout, cfg.Execution.DefaultTimeout)
 	}
-	if _, err := os.Stat(cfg.Execution.WorkingDir); os.IsNotExist(err) {
-		return fmt.Errorf("%w: %s", ErrWorkingDirNotExists, cfg.Execution.WorkingDir)
+	if info, err := os.Stat(cfg.Execution.WorkingDir); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrWorkingDirNotExists, cfg.Execution.WorkingDir)
+		}
+		return fmt.Errorf("cannot access working directory %s: %w", cfg.Execution.WorkingDir, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("working directory path is not a directory: %s", cfg.Execution.WorkingDir)
+	}
+
+	if err := checkDirectoryWritable(cfg.Execution.WorkingDir); err != nil {
+		return fmt.Errorf("working directory not writable: %w", err)
 	}
 	for i := range cfg.Tools {
 		if err := ValidateToolConfig(&cfg.Tools[i]); err != nil {
@@ -50,4 +59,14 @@ func ValidateToolConfig(tool *ToolConfig) error {
 		return fmt.Errorf("command not found: %s", tool.Command)
 	}
 	return nil
+}
+
+func checkDirectoryWritable(dir string) error {
+	testFile := dir + "/.write_test"
+	file, err := os.Create(testFile)
+	if err != nil {
+		return err
+	}
+	file.Close()
+	return os.Remove(testFile)
 }

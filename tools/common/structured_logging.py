@@ -6,15 +6,35 @@ Provides JSON-structured logging compatible with log aggregation systems.
 
 import json
 import logging
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Set
 
 
 class StructuredLogger:
-    """JSON-structured logger for MCP tools."""
+    """JSON-structured logger for MCP tools with sanitization."""
+
+    SENSITIVE_KEYS: Set[str] = {
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "auth",
+        "authorization",
+        "credential",
+        "private_key",
+        "access_token",
+        "refresh_token",
+        "session_id",
+        "cookie",
+    }
+
+    MAX_MESSAGE_LENGTH = 10000
+    MAX_FIELD_LENGTH = 1000
 
     def __init__(
         self,
@@ -34,6 +54,47 @@ class StructuredLogger:
             handler.setFormatter(self._JSONFormatter(tool_name=self.tool_name))
             self.logger.addHandler(handler)
 
+    @staticmethod
+    def _sanitize_value(value: Any, max_length: int = MAX_FIELD_LENGTH) -> Any:
+        """Sanitize log values to prevent injection and information disclosure."""
+        if isinstance(value, str):
+            if len(value) > max_length:
+                value = value[:max_length] + "...[truncated]"
+
+            value = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", value)
+
+            return value
+
+        elif isinstance(value, (list, tuple)):
+            return [
+                StructuredLogger._sanitize_value(v, max_length) for v in value[:100]
+            ]
+
+        elif isinstance(value, dict):
+            return StructuredLogger._sanitize_dict(value, max_length)
+
+        return value
+
+    @staticmethod
+    def _sanitize_dict(
+        data: Dict[str, Any], max_length: int = MAX_FIELD_LENGTH
+    ) -> Dict[str, Any]:
+        """Sanitize dictionary, redacting sensitive keys."""
+        sanitized = {}
+        for key, value in data.items():
+            key_lower = str(key).lower()
+
+            is_sensitive = any(
+                sensitive in key_lower for sensitive in StructuredLogger.SENSITIVE_KEYS
+            )
+
+            if is_sensitive:
+                sanitized[key] = "***REDACTED***"
+            else:
+                sanitized[key] = StructuredLogger._sanitize_value(value, max_length)
+
+        return sanitized
+
     class _JSONFormatter(logging.Formatter):
         """Custom formatter that outputs JSON log records."""
 
@@ -42,23 +103,32 @@ class StructuredLogger:
             self.tool_name = tool_name
 
         def format(self, record: logging.LogRecord) -> str:
+            message = record.getMessage()
+            if len(message) > StructuredLogger.MAX_MESSAGE_LENGTH:
+                message = (
+                    message[: StructuredLogger.MAX_MESSAGE_LENGTH] + "...[truncated]"
+                )
+
             log_data: Dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "level": record.levelname,
                 "logger": self.tool_name,
-                "message": record.getMessage(),
+                "message": message,
             }
 
             if record.exc_info:
                 log_data["exception"] = self.formatException(record.exc_info)
 
-            if hasattr(record, "extra_data") and record.extra_data:
-                log_data.update(record.extra_data)
+            if hasattr(record, "extra_data"):
+                extra_data = getattr(record, "extra_data")
+                if extra_data:
+                    sanitized_extra = StructuredLogger._sanitize_dict(extra_data)
+                    log_data.update(sanitized_extra)
 
             if record.name != self.tool_name:
                 log_data["module"] = record.name
 
-            return json.dumps(log_data, default=str)
+            return json.dumps(log_data, default=str, ensure_ascii=False)
 
     def log(
         self,
@@ -142,8 +212,8 @@ def timed_operation(
 
             extra_data = {}
             if log_args:
-                extra_data["args"] = str(args)
-                extra_data["kwargs"] = str(kwargs)
+                extra_data["args"] = logger._sanitize_value(str(args), 500)
+                extra_data["kwargs"] = logger._sanitize_dict(kwargs, 500)
 
             logger.info(f"Starting operation: {op_name}", extra_data=extra_data)
 
@@ -157,7 +227,10 @@ def timed_operation(
                     "success": True,
                 }
                 if log_result:
-                    success_data["result"] = str(result)[:1000]
+                    result_str = str(result)
+                    if len(result_str) > 1000:
+                        result_str = result_str[:1000] + "...[truncated]"
+                    success_data["result"] = result_str
 
                 logger.info(f"Completed operation: {op_name}", extra_data=success_data)
                 return result
@@ -169,7 +242,7 @@ def timed_operation(
                     "duration_seconds": round(duration, 4),
                     "success": False,
                     "error_type": type(e).__name__,
-                    "error_message": str(e),
+                    "error_message": logger._sanitize_value(str(e), 1000),
                 }
                 logger.error(
                     f"Failed operation: {op_name}", extra_data=error_data, exc_info=True

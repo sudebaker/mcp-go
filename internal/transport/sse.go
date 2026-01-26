@@ -92,8 +92,12 @@ func (s *MCPServer) Start() error {
 	mux.Handle("/mcp", mcpHandler)
 
 	s.httpServer = &http.Server{
-		Addr:    s.addr,
-		Handler: mux,
+		Addr:           s.addr,
+		Handler:        mux,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	return s.httpServer.ListenAndServe()

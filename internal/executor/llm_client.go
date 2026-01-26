@@ -4,8 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
+	"unicode/utf8"
+)
+
+const (
+	maxPromptLength = 100000
+	maxPromptBytes  = 1 << 20
+)
+
+var (
+	ErrPromptTooLong  = errors.New("prompt exceeds maximum length")
+	ErrPromptTooLarge = errors.New("prompt exceeds maximum size")
+	ErrInvalidUTF8    = errors.New("prompt contains invalid UTF-8")
 )
 
 type LLMClient struct {
@@ -49,10 +62,17 @@ func NewLLMClient(endpoint string, model string, timeout time.Duration) *LLMClie
 }
 
 func (c *LLMClient) Call(ctx context.Context, prompt string) (string, error) {
+	if err := validatePrompt(prompt); err != nil {
+		return "", err
+	}
 	return c.CallWithModel(ctx, c.model, prompt)
 }
 
 func (c *LLMClient) CallWithModel(ctx context.Context, model string, prompt string) (string, error) {
+	if err := validatePrompt(prompt); err != nil {
+		return "", err
+	}
+
 	req := LLMRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -97,6 +117,10 @@ func (c *LLMClient) CallWithModel(ctx context.Context, model string, prompt stri
 }
 
 func (c *LLMClient) CallWithOptions(ctx context.Context, prompt string, opts LLMRequestOptions) (string, error) {
+	if err := validatePrompt(prompt); err != nil {
+		return "", err
+	}
+
 	req := LLMRequest{
 		Model:   c.model,
 		Prompt:  prompt,
@@ -151,4 +175,20 @@ func (e *LLMError) Error() string {
 
 func (c *LLMClient) CloseIdleConnections() {
 	c.client.CloseIdleConnections()
+}
+
+func validatePrompt(prompt string) error {
+	if len(prompt) > maxPromptLength {
+		return ErrPromptTooLong
+	}
+
+	if len([]byte(prompt)) > maxPromptBytes {
+		return ErrPromptTooLarge
+	}
+
+	if !utf8.ValidString(prompt) {
+		return ErrInvalidUTF8
+	}
+
+	return nil
 }

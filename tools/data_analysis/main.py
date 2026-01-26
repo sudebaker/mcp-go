@@ -3,23 +3,31 @@
 Data Analysis Tool.
 Analyzes Excel/CSV files using Pandas with LLM-generated code.
 Supports sandboxed execution and streaming progress.
+
+Security Features:
+- Input validation (file size, question length, format)
+- Safe file operations via SafeFileOperations
+- Sandboxed code execution
+- Memory limits and timeouts
 """
 
-from common.retry import call_llm_with_retry
-from common.validators import validate_file_path
-from common.llm_cache import call_llm_with_cache
-from common.sandbox import execute_in_sandbox, DockerSandboxedExecutor
 import json
 import sys
 import re
 import traceback
+import os
 from io import StringIO
 from pathlib import Path
 from typing import Any, Callable, Optional
 from contextlib import redirect_stdout, redirect_stderr
-import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.retry import call_llm_with_retry
+from common.validators import validate_read_path
+from common.llm_cache import call_llm_with_cache
+from common.sandbox import execute_in_sandbox, SandboxConfig
+from common.safe_file_ops import SafeFileOperations
 
 
 try:
@@ -29,6 +37,8 @@ try:
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
+    pd = None  # type: ignore
+    np = None  # type: ignore
 
 try:
     import requests
@@ -36,10 +46,19 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
+    requests = None  # type: ignore
 
 
+# Constants
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
+
+# Input validation limits
+MAX_QUESTION_LENGTH = 2000
+MAX_FILE_SIZE_MB = 100
+MAX_PROMPT_LENGTH = 50000
+ALLOWED_OUTPUT_FORMATS = {"text", "json", "markdown"}
+SUPPORTED_FILE_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 _chunks_sent: list = []
 _chunk_callback: Optional[Callable[[dict], None]] = None
@@ -71,21 +90,87 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def load_data(file_path: str) -> pd.DataFrame:
-    """Load data from Excel or CSV file."""
-    validate_file_path(file_path)
+def validate_request_input(
+    file_path: str, question: str, output_format: str
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate all request inputs.
+
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    # Validate file path
+    if not file_path or not isinstance(file_path, str):
+        return False, "file_path must be a non-empty string"
 
     path = Path(file_path)
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
-        return pd.read_csv(file_path)
-    elif suffix in (".xlsx", ".xls"):
-        return pd.read_excel(file_path)
-    else:
-        try:
-            return pd.read_csv(file_path)
-        except Exception as e:
-            raise ValueError(f"Invalid file format: {file_path}") from e
+    if path.suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
+        return (
+            False,
+            f"Unsupported file extension. Allowed: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+        )
+
+    # Validate question
+    if not question or not isinstance(question, str):
+        return False, "question must be a non-empty string"
+
+    if len(question) > MAX_QUESTION_LENGTH:
+        return (
+            False,
+            f"question exceeds maximum length of {MAX_QUESTION_LENGTH} characters",
+        )
+
+    # Validate output format
+    if output_format not in ALLOWED_OUTPUT_FORMATS:
+        return (
+            False,
+            f"Invalid output_format. Allowed: {', '.join(ALLOWED_OUTPUT_FORMATS)}",
+        )
+
+    return True, None
+
+
+def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
+    """
+    Load data from Excel or CSV file using safe file operations.
+
+    Args:
+        file_path: Path to the file to load
+        safe_ops: SafeFileOperations instance for secure file access
+
+    Returns:
+        pandas DataFrame with loaded data
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If file format is unsupported or file is too large
+        PermissionError: If file access is denied
+    """
+    if not PANDAS_AVAILABLE:
+        raise ImportError("pandas is not installed")
+
+    # Validate file path (returns Path object, raises on error)
+    validated_path = validate_read_path(file_path)
+
+    # Check file extension
+    suffix = validated_path.suffix.lower()
+    if suffix not in SUPPORTED_FILE_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file format: {suffix}. "
+            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}"
+        )
+
+    # Load using safe file operations (includes size validation)
+    try:
+        if suffix == ".csv":
+            return safe_ops.read_csv(str(validated_path))
+        elif suffix in (".xlsx", ".xls"):
+            return safe_ops.read_excel(str(validated_path))
+        else:
+            # Fallback: try CSV
+            return safe_ops.read_csv(str(validated_path))
+    except Exception as e:
+        raise ValueError(f"Failed to load file {file_path}: {str(e)}") from e
 
 
 def get_data_summary(df: pd.DataFrame) -> str:
@@ -153,16 +238,22 @@ def execute_code_in_sandbox(
 
     df_dict = df.to_dict(orient="records")
 
-    from common.sandbox import SandboxConfig
+    # Get directories from environment
+    readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
+    writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
+    max_size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
     config = SandboxConfig(
         image="mcp-python-sandbox:latest",
         timeout_seconds=60,
-        memory_limit="256m",
+        memory_limit="512m",  # Increased from 256m for data processing
         cpu_limit=0.5,
         pids_limit=50,
         network_disabled=True,
         build_on_missing=True,
+        readonly_dir=readonly_dir,
+        writable_dir=writable_dir,
+        max_file_size_mb=max_size_mb,
     )
 
     result = execute_in_sandbox(code, df_dict, config, on_chunk)
@@ -292,43 +383,34 @@ def format_result(result: Any, output_format: str) -> str:
 
 
 def main() -> None:
+    request = {}
     try:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
         context = request.get("context", {})
 
-        file_path = arguments.get("file_path")
-        question = arguments.get("question")
+        file_path = arguments.get("file_path", "")
+        question = arguments.get("question", "")
         output_format = arguments.get("output_format", "text")
         use_sandbox = arguments.get("use_sandbox", True)
 
-        if not file_path:
+        # Validate all inputs
+        is_valid, error_msg = validate_request_input(file_path, question, output_format)
+        if not is_valid:
             write_response(
                 {
                     "success": False,
                     "request_id": request_id,
                     "error": {
                         "code": "INVALID_INPUT",
-                        "message": "file_path is required",
+                        "message": error_msg,
                     },
                 }
             )
             return
 
-        if not question:
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "INVALID_INPUT",
-                        "message": "question is required",
-                    },
-                }
-            )
-            return
-
+        # Validate LLM configuration
         llm_api_url = context.get("llm_api_url")
         llm_model = context.get("llm_model", "llama3")
 
@@ -345,34 +427,63 @@ def main() -> None:
             )
             return
 
+        # Initialize safe file operations
+        readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
+        writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
+        max_size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
+
+        safe_ops = SafeFileOperations(
+            readonly_dir=readonly_dir,
+            writable_dir=writable_dir,
+            max_file_size_mb=max_size_mb,
+        )
+
         emit_chunk("status", {"message": "Loading data file", "file": file_path})
 
-        df = load_data(file_path)
+        # Load data with safe file operations
+        df = load_data(file_path, safe_ops)
         emit_chunk("data_loaded", {"rows": df.shape[0], "columns": df.shape[1]})
 
         data_summary = get_data_summary(df)
 
         emit_chunk("status", {"message": "Generating analysis code with LLM"})
 
-        prompt = f"""You are a data analyst. Given the following pandas DataFrame summary, write Python code to answer the question.
+        # Build prompt with length validation
+        prompt_parts = [
+            "You are a data analyst. Given the following pandas DataFrame summary, write Python code to answer the question.\n\n",
+            "DATA SUMMARY:\n",
+            data_summary[:10000],  # Limit data summary to prevent huge prompts
+            "\n\nQUESTION: ",
+            question,
+            "\n\nIMPORTANT RULES:\n",
+            "1. Write ONLY Python code, no explanations\n",
+            "2. Use the variable 'df' for the DataFrame (it's already loaded)\n",
+            "3. Store the final answer in a variable called 'result'\n",
+            "4. Use pandas (pd) and numpy (np) - they're already imported\n",
+            "5. Keep the code simple and efficient\n",
+            "6. Use print() if you need to show intermediate steps\n",
+            "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
+            "8. For visualizations, save to writable directory with .png extension\n",
+            "9. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
+            "10. DO NOT import any modules - use only pre-imported: pd, np, json, datetime, math, re\n\n",
+            "Python code:\n```python\n",
+        ]
 
-DATA SUMMARY:
-{data_summary}
+        prompt = "".join(prompt_parts)
 
-QUESTION: {question}
-
-IMPORTANT RULES:
-1. Write ONLY Python code, no explanations
-2. Use the variable 'df' for the DataFrame (it's already loaded)
-3. Store the final answer in a variable called 'result'
-4. Use pandas (pd) and numpy (np) - they're already imported
-5. Keep the code simple and efficient
-6. Use print() if you need to show intermediate steps
-7. For visualizations, save to /tmp/output directory with .png extension
-
-Python code:
-```python
-"""
+        # Validate prompt length
+        if len(prompt) > MAX_PROMPT_LENGTH:
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "PROMPT_TOO_LONG",
+                        "message": f"Generated prompt exceeds maximum length of {MAX_PROMPT_LENGTH} characters",
+                    },
+                }
+            )
+            return
 
         llm_response = call_llm_with_cache(llm_api_url, llm_model, prompt)
         code = extract_code(llm_response)
@@ -451,35 +562,43 @@ Python code:
         write_response(
             {
                 "success": False,
-                "request_id": request.get("request_id", "")
-                if "request" in dir()
-                else "",
+                "request_id": request.get("request_id", ""),
                 "error": {"code": "FILE_NOT_FOUND", "message": str(e)},
             }
         )
-    except requests.RequestException as e:
+    except ValueError as e:
         write_response(
             {
                 "success": False,
-                "request_id": request.get("request_id", "")
-                if "request" in dir()
-                else "",
-                "error": {
-                    "code": "LLM_ERROR",
-                    "message": f"Failed to call LLM: {str(e)}",
-                },
+                "request_id": request.get("request_id", ""),
+                "error": {"code": "INVALID_INPUT", "message": str(e)},
+            }
+        )
+    except PermissionError as e:
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", ""),
+                "error": {"code": "PERMISSION_DENIED", "message": str(e)},
             }
         )
     except Exception as e:
+        # Check if it's a requests exception
+        error_code = "EXECUTION_FAILED"
+        error_message = str(e)
+
+        if REQUESTS_AVAILABLE and requests is not None:
+            if isinstance(e, requests.RequestException):
+                error_code = "LLM_ERROR"
+                error_message = f"Failed to call LLM: {str(e)}"
+
         write_response(
             {
                 "success": False,
-                "request_id": request.get("request_id", "")
-                if "request" in dir()
-                else "",
+                "request_id": request.get("request_id", ""),
                 "error": {
-                    "code": "EXECUTION_FAILED",
-                    "message": str(e),
+                    "code": error_code,
+                    "message": error_message,
                     "details": traceback.format_exc(),
                 },
             }

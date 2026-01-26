@@ -31,11 +31,14 @@ class SandboxConfig:
         self,
         image: str = "mcp-python-sandbox:latest",
         timeout_seconds: int = 60,
-        memory_limit: str = "256m",
+        memory_limit: str = "512m",
         cpu_limit: float = 0.5,
         pids_limit: int = 50,
         network_disabled: bool = True,
         build_on_missing: bool = True,
+        readonly_dir: str = "/data/input",
+        writable_dir: str = "/data/output",
+        max_file_size_mb: int = 100,
     ):
         self.image = image
         self.timeout = timeout_seconds
@@ -44,6 +47,9 @@ class SandboxConfig:
         self.pids = pids_limit
         self.network_disabled = network_disabled
         self.build_on_missing = build_on_missing
+        self.readonly_dir = readonly_dir
+        self.writable_dir = writable_dir
+        self.max_file_size_mb = max_file_size_mb
 
 
 class SandboxResult:
@@ -441,6 +447,159 @@ if __name__ == "__main__":
                     pass
         return chunks, {}
 
+    def _validate_code_safety(self, code: str) -> tuple[bool, Optional[str]]:
+        """
+        Validate code for dangerous operations using AST parsing.
+        Returns (is_safe, error_message).
+        """
+        import ast
+
+        ALLOWED_IMPORTS = {
+            # Data processing core
+            "pandas",
+            "pd",
+            "numpy",
+            "np",
+            # Excel and file formats
+            "openpyxl",
+            "xlrd",
+            "xlsxwriter",
+            "xlwt",
+            "csv",
+            "json",
+            "yaml",
+            # Visualization
+            "matplotlib",
+            "plt",
+            "seaborn",
+            "sns",
+            "plotly",
+            # File and path handling
+            "pathlib",
+            "os.path",
+            "io",
+            "tempfile",
+            "shutil",
+            # Data utilities
+            "datetime",
+            "time",
+            "math",
+            "statistics",
+            "collections",
+            "itertools",
+            "functools",
+            "re",
+            "base64",
+            "hashlib",
+            # Additional data science
+            "scipy",
+            "sklearn",
+            "scikit-learn",
+        }
+
+        DANGEROUS_NAMES = {
+            "__import__",
+            "eval",
+            "exec",
+            "compile",
+            "file",
+            "input",
+            "raw_input",
+            "execfile",
+            "__builtins__",
+            "globals",
+            "locals",
+            "vars",
+            "dir",
+            "help",
+            "reload",
+            "__dict__",
+            "__class__",
+            "__bases__",
+            "__subclasses__",
+            "__mro__",
+        }
+
+        ALLOWED_ATTRIBUTE_ACCESS = {
+            "delattr",
+            "setattr",
+            "getattr",
+            "hasattr",
+        }
+
+        DANGEROUS_ATTRS = {
+            "__code__",
+            "__globals__",
+            "__closure__",
+            "__dict__",
+            "__class__",
+            "__bases__",
+            "__subclasses__",
+            "__import__",
+        }
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return False, f"Syntax error: {e}"
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_parts = alias.name.split(".")
+                    module_base = module_parts[0]
+
+                    if (
+                        module_base not in ALLOWED_IMPORTS
+                        and alias.name not in ALLOWED_IMPORTS
+                    ):
+                        return (
+                            False,
+                            f"Import of '{alias.name}' not allowed. Allowed: {', '.join(sorted(ALLOWED_IMPORTS))}",
+                        )
+
+            if isinstance(node, ast.ImportFrom):
+                module_parts = node.module.split(".") if node.module else []
+                module_base = module_parts[0] if module_parts else ""
+
+                if (
+                    module_base not in ALLOWED_IMPORTS
+                    and node.module not in ALLOWED_IMPORTS
+                ):
+                    return (
+                        False,
+                        f"Import from '{node.module}' not allowed. Allowed: {', '.join(sorted(ALLOWED_IMPORTS))}",
+                    )
+
+            if isinstance(node, ast.Name) and node.id in DANGEROUS_NAMES:
+                return False, f"Dangerous name '{node.id}' not allowed"
+
+            if isinstance(node, ast.Attribute):
+                if node.attr in DANGEROUS_ATTRS:
+                    return False, f"Dangerous attribute '.{node.attr}' not allowed"
+
+                if (
+                    node.attr.startswith("_")
+                    and not node.attr.startswith("__")
+                    and not node.attr.endswith("__")
+                ):
+                    return False, f"Private attribute access not allowed: {node.attr}"
+
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    func_name = node.func.id
+
+                    if func_name in DANGEROUS_NAMES:
+                        return False, f"Dangerous function '{func_name}' not allowed"
+
+                    if func_name == "open":
+                        return (
+                            False,
+                            "Direct 'open()' not allowed. Use 'open_read()' or 'open_write()' instead",
+                        )
+
+        return True, None
+
     def execute_fallback(
         self,
         code: str,
@@ -450,12 +609,24 @@ if __name__ == "__main__":
         if on_chunk:
             self.set_chunk_callback(on_chunk)
 
-        self.emit_chunk("warning", {"message": "Using unsafe exec() fallback"})
+        is_safe, error_msg = self._validate_code_safety(code)
+        if not is_safe:
+            return SandboxResult(
+                success=False,
+                error=f"Code validation failed: {error_msg}",
+                execution_time_ms=0,
+            )
+
+        self.emit_chunk(
+            "warning",
+            {"message": "Using restricted exec() fallback - limited functionality"},
+        )
 
         start_time = time.time()
 
         try:
             import pandas as pd
+            import numpy as np
 
             df = None
             if input_data is not None:
@@ -465,35 +636,99 @@ if __name__ == "__main__":
                     else pd.DataFrame([input_data])
                 )
 
+            try:
+                from safe_file_ops import SafeFileOperations
+
+                file_ops = SafeFileOperations(
+                    readonly_dir=getattr(self.config, "readonly_dir", "/data/input"),
+                    writable_dir=getattr(self.config, "writable_dir", "/data/output"),
+                    max_file_size_mb=getattr(self.config, "max_file_size_mb", 100),
+                )
+            except ImportError:
+                file_ops = None
+                import logging
+
+                logging.warning(
+                    "SafeFileOperations not available, file operations disabled"
+                )
+
+            safe_builtins = {
+                "print": print,
+                "len": len,
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "list": list,
+                "tuple": tuple,
+                "dict": dict,
+                "set": set,
+                "range": range,
+                "abs": abs,
+                "max": max,
+                "min": min,
+                "sum": sum,
+                "sorted": sorted,
+                "reversed": reversed,
+                "enumerate": enumerate,
+                "zip": zip,
+                "map": map,
+                "filter": filter,
+                "any": any,
+                "all": all,
+                "round": round,
+                "pow": pow,
+                "divmod": divmod,
+                "isinstance": isinstance,
+                "issubclass": issubclass,
+                "type": type,
+            }
+
             restricted_globals = {
-                "_builtins_": {
-                    "print": print,
-                    "len": len,
-                    "str": str,
-                    "int": int,
-                    "float": float,
-                    "list": list,
-                    "dict": dict,
-                    "range": range,
-                    "abs": abs,
-                    "max": max,
-                    "min": min,
-                    "sum": sum,
-                    "sorted": sorted,
-                    "zip": zip,
-                    "map": map,
-                    "filter": filter,
-                    "open": None,
-                    "__import__": None,
-                    "exec": None,
-                    "eval": None,
-                },
+                "__builtins__": safe_builtins,
                 "pd": pd,
+                "np": np,
                 "input_data": df,
                 "emit_chunk": self.emit_chunk,
             }
 
-            self.emit_chunk("status", {"message": "Executing code (unsafe mode)"})
+            if file_ops:
+                restricted_globals.update(
+                    {
+                        "open_read": file_ops.open_read,
+                        "open_write": file_ops.open_write,
+                        "read_text": file_ops.read_text,
+                        "read_bytes": file_ops.read_bytes,
+                        "write_text": file_ops.write_text,
+                        "write_bytes": file_ops.write_bytes,
+                        "read_csv": file_ops.read_csv,
+                        "read_excel": file_ops.read_excel,
+                        "read_json": file_ops.read_json,
+                        "to_csv": file_ops.to_csv,
+                        "to_excel": file_ops.to_excel,
+                        "to_json": file_ops.to_json,
+                        "list_input_files": file_ops.list_input_files,
+                        "list_output_files": file_ops.list_output_files,
+                        "file_exists": file_ops.file_exists,
+                        "get_file_info": file_ops.get_file_info,
+                        "INPUT_DIR": self.config.readonly_dir
+                        if hasattr(self.config, "readonly_dir")
+                        else "/data/input",
+                        "OUTPUT_DIR": self.config.writable_dir
+                        if hasattr(self.config, "writable_dir")
+                        else "/data/output",
+                    }
+                )
+
+            restricted_globals = {
+                "__builtins__": safe_builtins,
+                "pd": pd,
+                "np": np,
+                "input_data": df,
+                "emit_chunk": self.emit_chunk,
+            }
+
+            self.emit_chunk("status", {"message": "Executing code (restricted mode)"})
 
             exec(code, restricted_globals)
 
@@ -503,7 +738,7 @@ if __name__ == "__main__":
 
             return SandboxResult(
                 success=True,
-                output="Code executed",
+                output="Code executed successfully in restricted mode",
                 execution_time_ms=execution_time,
             )
 
@@ -511,14 +746,15 @@ if __name__ == "__main__":
             import traceback
 
             execution_time = int((time.time() - start_time) * 1000)
-            self.emit_chunk(
-                "error", {"message": str(e), "traceback": traceback.format_exc()}
-            )
+            error_trace = traceback.format_exc()
+
+            self.emit_chunk("error", {"message": str(e), "traceback": error_trace})
 
             return SandboxResult(
                 success=False,
-                error=str(e),
+                error=f"{type(e).__name__}: {str(e)}",
                 execution_time_ms=execution_time,
+                exit_code=1,
             )
 
 

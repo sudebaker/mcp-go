@@ -264,15 +264,17 @@ func (c *Checker) checkLLMEndpoint(ctx context.Context, endpoint string) CheckRe
 		result.Status = StatusDegraded
 		result.Message = fmt.Sprintf("LLM endpoint unreachable: %v", err)
 		log.Warn().Err(err).Str("endpoint", endpoint).Msg("LLM health check failed")
+		result.Duration = time.Since(start)
+		return result
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		result.Status = StatusDegraded
+		result.Message = fmt.Sprintf("LLM endpoint returned status %d", resp.StatusCode)
 	} else {
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			result.Status = StatusDegraded
-			result.Message = fmt.Sprintf("LLM endpoint returned status %d", resp.StatusCode)
-		} else {
-			result.Status = StatusHealthy
-			result.Message = "LLM endpoint reachable"
-		}
+		result.Status = StatusHealthy
+		result.Message = "LLM endpoint reachable"
 	}
 
 	result.Duration = time.Since(start)
@@ -283,14 +285,20 @@ func GetHealthMetrics() map[string]float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
+	var gcPauseNs uint64
+	if m.NumGC > 0 {
+		gcPauseNs = m.PauseNs[(m.NumGC+255)%256]
+	}
+
 	return map[string]float64{
 		"heap_alloc_bytes":  float64(m.HeapAlloc),
 		"heap_sys_bytes":    float64(m.Sys),
 		"heap_idle_bytes":   float64(m.HeapIdle),
 		"heap_inuse_bytes":  float64(m.HeapInuse),
 		"stack_inuse_bytes": float64(m.StackInuse),
-		"gc_pause_ns":       float64(m.PauseNs[(m.NumGC+255)%256]),
+		"gc_pause_ns":       float64(gcPauseNs),
 		"goroutines":        float64(runtime.NumGoroutine()),
+		"num_gc":            float64(m.NumGC),
 	}
 }
 

@@ -29,10 +29,6 @@ func New(cfg *config.Config) *Executor {
 	return &Executor{config: cfg}
 }
 
-func (e *Executor) UpdateConfig(cfg *config.Config) {
-	e.config = cfg
-}
-
 type ExecuteResult struct {
 	Success           bool
 	Content           []mcptypes.ContentItem

@@ -261,6 +261,30 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 						Data:     item.Data,
 						MIMEType: item.MIMEType,
 					})
+				case "resource":
+					if item.Resource != nil {
+						// Create embedded resource content for MCP
+						// Use TextResourceContents since we're sending base64 text
+						resourceContent := mcp.EmbeddedResource{
+							Type: "resource",
+							Resource: mcp.TextResourceContents{
+								URI:      item.Resource.URI,
+								MIMEType: item.Resource.MIMEType,
+								Text:     item.Resource.Text,
+							},
+						}
+						contents = append(contents, resourceContent)
+						log.Info().
+							Str("tool", toolName).
+							Str("uri", item.Resource.URI).
+							Str("mime_type", item.Resource.MIMEType).
+							Int("text_length", len(item.Resource.Text)).
+							Msg("Returning resource content")
+					} else {
+						log.Warn().
+							Str("tool", toolName).
+							Msg("Resource type with nil resource field, skipping")
+					}
 				default:
 					log.Warn().
 						Str("tool", toolName).

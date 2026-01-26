@@ -48,6 +48,12 @@ docker exec -it mcp-orchestrator bash
 # Run Excel analysis test suite
 ./tests/test_excel_analysis.sh
 
+# Run quick test suite (all services)
+./tests/test_quick.sh
+
+# Test HTTP request logging
+./tests/test_logging.sh
+
 # List available tools
 docker exec mcp-orchestrator python3 -c "import json; print(json.dumps({'test': True}))" | python3 /app/tools/echo/main.py
 ```
@@ -256,3 +262,73 @@ mcp-go/
 3. **Timeouts**: Respect configured timeouts for tool execution
 4. **Context Cancellation**: Always handle context cancellation gracefully
 5. **Structured Responses**: Use consistent error codes in JSON responses
+
+## HTTP Request Logging
+
+The MCP server includes automatic HTTP request logging via middleware. Every HTTP request generates two log entries:
+
+### Log Format
+
+**Request Received:**
+```json
+{
+  "level": "info",
+  "method": "GET",
+  "path": "/health",
+  "remote_addr": "172.20.0.1:12345",
+  "user_agent": "curl/8.0.0",
+  "message": "Request received"
+}
+```
+
+**Request Completed:**
+```json
+{
+  "level": "info",
+  "method": "GET",
+  "path": "/health",
+  "status": 200,
+  "bytes": 161,
+  "duration_ms": 0.035,
+  "message": "Request completed"
+}
+```
+
+### Viewing Logs
+
+```bash
+# Real-time logs
+docker logs -f mcp-orchestrator
+
+# Filter HTTP requests only
+docker logs mcp-orchestrator | grep "Request"
+
+# View last 20 requests
+docker logs mcp-orchestrator --tail 40 | grep "Request"
+
+# Test logging
+./tests/test_logging.sh
+```
+
+### Implementation
+
+- **Middleware**: `internal/transport/logging.go`
+- **Integration**: Applied in `internal/transport/sse.go`
+- **Documentation**: See `docs/LOGGING.md` for detailed usage
+
+### Analyzing Logs
+
+```bash
+# Find slow requests (>100ms)
+docker logs mcp-orchestrator | grep "Request completed" | \
+  jq 'select(.duration_ms > 100)'
+
+# Count by endpoint
+docker logs mcp-orchestrator | grep "Request completed" | \
+  jq -r '.path' | sort | uniq -c
+
+# View errors (4xx, 5xx)
+docker logs mcp-orchestrator | grep "Request completed" | \
+  jq 'select(.status >= 400)'
+```
+

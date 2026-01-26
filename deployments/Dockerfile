@@ -53,6 +53,8 @@ WORKDIR /app
 COPY <<EOF /app/requirements.txt
 # Core dependencies
 requests>=2.31.0
+tenacity>=8.2.0
+validators>=0.20.0
 
 # PDF Reports
 jinja2>=3.1.2

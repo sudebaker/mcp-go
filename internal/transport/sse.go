@@ -91,9 +91,12 @@ func (s *MCPServer) Start() error {
 	// MCP Streamable HTTP endpoint (default: /mcp)
 	mux.Handle("/mcp", mcpHandler)
 
+	// Wrap entire mux with logging middleware
+	handler := LoggingMiddleware(mux)
+
 	s.httpServer = &http.Server{
 		Addr:           s.addr,
-		Handler:        mux,
+		Handler:        handler,
 		ReadTimeout:    15 * time.Second,
 		WriteTimeout:   15 * time.Second,
 		IdleTimeout:    60 * time.Second,

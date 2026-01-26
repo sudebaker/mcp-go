@@ -35,4 +35,5 @@ go.work.sum
 *.pyo
 __pycache__/
 *.swp
-bin/*
+#binaries
+bin/

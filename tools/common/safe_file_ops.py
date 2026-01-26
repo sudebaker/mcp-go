@@ -8,9 +8,13 @@ path validation and security controls.
 
 import io
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional, Union
 import logging
+
+# Add parent dir to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 try:
     import pandas as pd
@@ -19,7 +23,7 @@ try:
 except ImportError:
     PANDAS_AVAILABLE = False
 
-from validators import (
+from common.validators import (
     validate_read_path,
     validate_write_path,
     list_files,

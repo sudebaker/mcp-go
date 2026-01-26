@@ -25,12 +25,20 @@ type SubprocessResponse struct {
 	Error             *SubprocessError       `json:"error,omitempty"`
 }
 
-// ContentItem represents a content item in the response (text, image, etc.)
+// ContentItem represents a content item in the response (text, image, resource, etc.)
 type ContentItem struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Data     string `json:"data,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Data     string           `json:"data,omitempty"`
+	MIMEType string           `json:"mimeType,omitempty"`
+	Resource *ResourceContent `json:"resource,omitempty"`
+}
+
+// ResourceContent represents a resource (file, PDF, etc.) in the response
+type ResourceContent struct {
+	URI      string `json:"uri"`
 	MIMEType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
 }
 
 // SubprocessError represents an error from a Python script

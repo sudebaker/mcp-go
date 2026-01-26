@@ -2,12 +2,21 @@
 """
 PDF Report Generation Tool.
 Generates PDF reports from structured data using Jinja2 templates and WeasyPrint.
+
+Supported report types:
+- incident: Incident reports
+- meeting: Meeting minutes
+- audit: Audit reports
+- executive_summary: Executive summary reports with key findings
+- formal_report: Formal reports with charts and tables
+- corporate_email: Corporate email format (plain text style)
 """
 
 import json
 import os
 import sys
 import traceback
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,7 +24,9 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.validators import validate_output_path
-from common.retry import call_llm_with_retry
+from common.structured_logging import get_logger
+
+logger = get_logger(__name__, "pdf_reports")
 
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -156,6 +167,86 @@ def render_audit_report(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
+def render_executive_summary_report(data: dict[str, Any], env: Environment) -> str:
+    """Render executive summary report template."""
+    template = env.get_template("executive_summary.html")
+
+    context = build_base_context(data, "executive_summary")
+    context.update(
+        {
+            "logo_url": data.get("logo_url"),
+            "prepared_by": data.get("prepared_by", ""),
+            "reviewed_by": data.get("reviewed_by", ""),
+            "period": data.get("period", ""),
+            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "executive_summary": data.get("executive_summary", ""),
+            "key_findings": data.get("key_findings", []),
+            "recommendations": data.get("recommendations", []),
+            "next_steps": data.get("next_steps", []),
+            "additional_notes": data.get("additional_notes", ""),
+        }
+    )
+
+    return template.render(**context)
+
+
+def render_formal_report(data: dict[str, Any], env: Environment) -> str:
+    """Render formal report with charts template."""
+    template = env.get_template("formal_report.html")
+
+    context = build_base_context(data, "formal_report")
+    context.update(
+        {
+            "logo_url": data.get("logo_url"),
+            "report_id": data.get("report_id", ""),
+            "author": data.get("author", ""),
+            "department": data.get("department", ""),
+            "period_start": data.get("period_start", ""),
+            "period_end": data.get("period_end", ""),
+            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "classification": data.get("classification", ""),
+            "executive_summary": data.get("executive_summary", ""),
+            "sections": data.get("sections", []),
+            "recommendations": data.get("recommendations", []),
+            "conclusion": data.get("conclusion", ""),
+            "appendix": data.get("appendix", []),
+            "confidentiality": data.get("confidentiality", "Confidential Document"),
+        }
+    )
+
+    return template.render(**context)
+
+
+def render_corporate_email(data: dict[str, Any], env: Environment) -> str:
+    """Render corporate email template."""
+    template = env.get_template("corporate_email.html")
+
+    context = build_base_context(data, "corporate_email")
+    context.update(
+        {
+            "logo_url": data.get("logo_url"),
+            "from": data.get("from", ""),
+            "to": data.get("to", ""),
+            "cc": data.get("cc", ""),
+            "bcc": data.get("bcc", ""),
+            "subject": data.get("subject", "Email Communication"),
+            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "salutation": data.get("salutation", ""),
+            "body": data.get("body", ""),
+            "body_sections": data.get("body_sections", []),
+            "action_required": data.get("action_required", ""),
+            "attachments": data.get("attachments", []),
+            "closing": data.get("closing", ""),
+            "signature": data.get("signature", {}),
+            "confidentiality": data.get(
+                "confidentiality", "Confidential Email Communication"
+            ),
+        }
+    )
+
+    return template.render(**context)
+
+
 def main() -> None:
     if not DEPENDENCIES_AVAILABLE:
         write_response(
@@ -206,6 +297,9 @@ def main() -> None:
             "incident": render_incident_report,
             "meeting": render_meeting_report,
             "audit": render_audit_report,
+            "executive_summary": render_executive_summary_report,
+            "formal_report": render_formal_report,
+            "corporate_email": render_corporate_email,
         }
 
         if report_type not in renderers:
@@ -231,6 +325,11 @@ def main() -> None:
             styles_css_path if styles_css_path.exists() else None,
         )
 
+        # Read the generated PDF file and encode as base64
+        with open(output_path, "rb") as pdf_file:
+            pdf_content = pdf_file.read()
+            pdf_base64 = base64.b64encode(pdf_content).decode("utf-8")
+
         write_response(
             {
                 "success": True,
@@ -239,7 +338,15 @@ def main() -> None:
                     {
                         "type": "text",
                         "text": f"Report generated successfully: {output_path}",
-                    }
+                    },
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": f"file://{output_path}",
+                            "mimeType": "application/pdf",
+                            "text": pdf_base64,
+                        },
+                    },
                 ],
                 "structured_content": {
                     "report_type": report_type,
@@ -247,6 +354,7 @@ def main() -> None:
                     "file_size": output_path.stat().st_size
                     if output_path.exists()
                     else 0,
+                    "pdf_base64": pdf_base64,
                 },
             }
         )

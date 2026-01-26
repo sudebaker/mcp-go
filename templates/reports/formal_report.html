@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    {% if logo_url %}
+    <div class="logo-container">
+        <img src="{{ logo_url }}" alt="Company Logo">
+    </div>
+    {% endif %}
+
+    <div class="report-header">
+        <div class="report-type">Formal Report</div>
+        <h1>{{ title }}</h1>
+        <div class="report-date">Generated: {{ generated_at }}</div>
+        {% if report_id %}
+        <div style="margin-top: 8px;">
+            <span class="badge badge-info">Report ID: {{ report_id }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <section class="info-grid">
+        {% if author %}
+        <div class="info-item">
+            <label>Author</label>
+            <span>{{ author }}</span>
+        </div>
+        {% endif %}
+        {% if department %}
+        <div class="info-item">
+            <label>Department</label>
+            <span>{{ department }}</span>
+        </div>
+        {% endif %}
+        {% if period_start and period_end %}
+        <div class="info-item">
+            <label>Period</label>
+            <span>{{ period_start }} - {{ period_end }}</span>
+        </div>
+        {% endif %}
+        {% if date %}
+        <div class="info-item">
+            <label>Date</label>
+            <span>{{ date }}</span>
+        </div>
+        {% endif %}
+        {% if classification %}
+        <div class="info-item">
+            <label>Classification</label>
+            <span class="badge badge-{{ classification|lower }}">{{ classification }}</span>
+        </div>
+        {% endif %}
+    </section>
+
+    {% if executive_summary %}
+    <section>
+        <h2>Executive Summary</h2>
+        <div class="executive-summary">
+            <p>{{ executive_summary }}</p>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if sections and sections|length > 0 %}
+    {% for section in sections %}
+    <section>
+        <h2>{{ section.title }}</h2>
+        
+        {% if section.content %}
+        <p>{{ section.content }}</p>
+        {% endif %}
+
+        {% if section.subsections and section.subsections|length > 0 %}
+        {% for subsection in section.subsections %}
+        <h3>{{ subsection.title }}</h3>
+        <p>{{ subsection.content }}</p>
+        {% endfor %}
+        {% endif %}
+
+        {% if section.chart %}
+        <div class="chart-container">
+            {% if section.chart.title %}
+            <div class="chart-title">{{ section.chart.title }}</div>
+            {% endif %}
+            
+            <div class="chart-wrapper">
+                {% if section.chart.image_url %}
+                <img src="{{ section.chart.image_url }}" alt="{{ section.chart.title }}" class="chart-image">
+                {% elif section.chart.svg_data %}
+                {{ section.chart.svg_data | safe }}
+                {% else %}
+                <div class="chart-placeholder">
+                    <p><strong>Chart: {{ section.chart.type | default('Visualization') | title }}</strong></p>
+                    <p>{{ section.chart.description | default('Chart data visualization') }}</p>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if section.chart.caption %}
+            <div class="chart-caption">{{ section.chart.caption }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if section.table %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    {% for header in section.table.headers %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in section.table.rows %}
+                <tr>
+                    {% for cell in row %}
+                    <td {% if loop.index > 1 and cell is number %}class="numeric"{% endif %}>{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if section.table.caption %}
+        <div class="chart-caption">{{ section.table.caption }}</div>
+        {% endif %}
+        {% endif %}
+
+        {% if section.key_points and section.key_points|length > 0 %}
+        <div class="key-points">
+            <h3>Key Points</h3>
+            <ul>
+                {% for point in section.key_points %}
+                <li>{{ point }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </section>
+    {% endfor %}
+    {% endif %}
+
+    {% if recommendations and recommendations|length > 0 %}
+    <section>
+        <h2>Recommendations</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Recommendation</th>
+                    <th>Priority</th>
+                    <th>Timeline</th>
+                    <th>Owner</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in recommendations %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ rec.description }}</td>
+                    <td><span class="badge badge-{{ rec.priority | default('medium') | lower }}">{{ rec.priority | default('Medium') }}</span></td>
+                    <td>{{ rec.timeline | default('TBD') }}</td>
+                    <td>{{ rec.owner | default('TBD') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    {% if conclusion %}
+    <section>
+        <h2>Conclusion</h2>
+        <p>{{ conclusion }}</p>
+    </section>
+    {% endif %}
+
+    {% if appendix and appendix|length > 0 %}
+    <div class="page-break"></div>
+    <div class="appendix">
+        <h2>Appendix</h2>
+        {% for item in appendix %}
+        <section>
+            <h3>{{ item.title }}</h3>
+            <p>{{ item.content }}</p>
+            {% if item.table %}
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        {% for header in item.table.headers %}
+                        <th>{{ header }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in item.table.rows %}
+                    <tr>
+                        {% for cell in row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </section>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <footer>
+        <div class="confidential">{{ confidentiality | default('Confidential Document') }}</div>
+        <p class="generated-at">Report generated on {{ generated_at }}</p>
+    </footer>
+</body>
+</html>

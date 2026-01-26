@@ -2,22 +2,35 @@
 """
 Knowledge Base Tool.
 Manages document ingestion and semantic search using PostgreSQL with pgvector.
+
+Security Features:
+- SQL injection prevention via parameterized queries
+- Path traversal protection with safe file operations
+- Resource limits (document size, chunks, query length)
+- Input validation and sanitization
+- Secure database connection pooling
 """
 
 import json
 import os
 import sys
 import hashlib
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from dataclasses import dataclass
 
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.validators import validate_file_path
+from common.validators import validate_read_path
+from common.safe_file_ops import SafeFileOperations
+from common.structured_logging import get_logger
 from .db_pool import init_pool, get_connection, close_pool
 from .model_cache import get_embedding_model
+
+# Initialize logger
+logger = get_logger(__name__, "knowledge_base")
 
 import psycopg2
 from psycopg2.extras import execute_values
@@ -55,6 +68,23 @@ EMBEDDING_DIM = 384
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
+# Security Limits
+MAX_DOC_SIZE_MB = int(os.getenv("MAX_DOC_SIZE_MB", "50"))
+MAX_CHUNKS_PER_DOC = int(os.getenv("MAX_CHUNKS_PER_DOC", "1000"))
+MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "1000"))
+MAX_COLLECTION_NAME_LENGTH = 100
+MAX_TOP_K = 100
+MIN_TOP_K = 1
+SUPPORTED_FILE_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
+
+# Regex patterns for input validation
+COLLECTION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+# Allow common search characters for natural language queries
+# Permits: letters, numbers, spaces, punctuation, symbols commonly used in search
+SAFE_QUERY_PATTERN = re.compile(
+    r"^[\w\s\-.,!?;:()'\"&/\\%#@+=\$\[\]<>~`|]+$", re.UNICODE
+)
+
 
 @dataclass
 class DocumentChunk:
@@ -76,8 +106,132 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response))
 
 
+def validate_collection_name(collection: str) -> tuple[bool, Optional[str]]:
+    """
+    Validate collection name to prevent SQL injection and other attacks.
+
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    if not collection or not isinstance(collection, str):
+        return False, "collection must be a non-empty string"
+
+    if len(collection) > MAX_COLLECTION_NAME_LENGTH:
+        return (
+            False,
+            f"collection name exceeds maximum length of {MAX_COLLECTION_NAME_LENGTH}",
+        )
+
+    if not COLLECTION_NAME_PATTERN.match(collection):
+        return (
+            False,
+            "collection name must contain only alphanumeric, underscore, and hyphen characters",
+        )
+
+    return True, None
+
+
+def validate_query(query: str) -> tuple[bool, Optional[str]]:
+    """
+    Validate search query to prevent injection attacks.
+
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    if not query or not isinstance(query, str):
+        return False, "query must be a non-empty string"
+
+    if len(query) > MAX_QUERY_LENGTH:
+        return False, f"query exceeds maximum length of {MAX_QUERY_LENGTH} characters"
+
+    # Basic sanitization - allow common search characters
+    if not SAFE_QUERY_PATTERN.match(query):
+        return False, "query contains invalid characters"
+
+    return True, None
+
+
+def validate_top_k(top_k: Any) -> tuple[bool, Optional[str], int]:
+    """
+    Validate and sanitize top_k parameter.
+
+    Returns:
+        (is_valid, error_message, sanitized_value) tuple
+    """
+    try:
+        top_k_int = int(top_k)
+    except (TypeError, ValueError):
+        return False, "top_k must be an integer", 0
+
+    if top_k_int < MIN_TOP_K or top_k_int > MAX_TOP_K:
+        return False, f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}", 0
+
+    return True, None, top_k_int
+
+
+def validate_ingest_request(
+    file_path: str, collection: str, metadata: Any
+) -> tuple[bool, Optional[str]]:
+    """
+    Validate ingestion request parameters.
+
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    # Validate file path
+    if not file_path or not isinstance(file_path, str):
+        return False, "file_path must be a non-empty string"
+
+    # Validate collection
+    is_valid, error = validate_collection_name(collection)
+    if not is_valid:
+        return False, error
+
+    # Validate metadata
+    if metadata is not None and not isinstance(metadata, dict):
+        return False, "metadata must be a dictionary or null"
+
+    return True, None
+
+
+def validate_search_request(
+    query: str, collection: str, top_k: Any, search_type: str
+) -> tuple[bool, Optional[str], int]:
+    """
+    Validate search request parameters.
+
+    Returns:
+        (is_valid, error_message, sanitized_top_k) tuple
+    """
+    # Validate query
+    is_valid, error = validate_query(query)
+    if not is_valid:
+        return False, error, 0
+
+    # Validate collection
+    is_valid, error = validate_collection_name(collection)
+    if not is_valid:
+        return False, error, 0
+
+    # Validate top_k
+    is_valid, error, top_k_sanitized = validate_top_k(top_k)
+    if not is_valid:
+        return False, error, 0
+
+    # Validate search_type
+    valid_search_types = {"semantic", "keyword", "hybrid"}
+    if search_type not in valid_search_types:
+        return False, f"search_type must be one of: {', '.join(valid_search_types)}", 0
+
+    return True, None, top_k_sanitized
+
+
 def ensure_schema(conn) -> None:
-    """Ensure the required database schema exists."""
+    """
+    Ensure the required database schema exists.
+
+    Security: Uses parameterized queries and validated constants to prevent SQL injection.
+    """
     with conn.cursor() as cur:
         # Enable pgvector extension
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -95,6 +249,14 @@ def ensure_schema(conn) -> None:
         """)
 
         # Create chunks table with vector column
+        # SECURITY: EMBEDDING_DIM is a validated constant, safe to interpolate
+        if (
+            not isinstance(EMBEDDING_DIM, int)
+            or EMBEDDING_DIM <= 0
+            or EMBEDDING_DIM > 10000
+        ):
+            raise ValueError(f"Invalid EMBEDDING_DIM: {EMBEDDING_DIM}")
+
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS kb_chunks (
                 id SERIAL PRIMARY KEY,
@@ -126,13 +288,37 @@ def ensure_schema(conn) -> None:
 def chunk_text(
     text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
 ) -> list[str]:
-    """Split text into overlapping chunks."""
+    """
+    Split text into overlapping chunks with resource limits.
+
+    Security: Limits maximum number of chunks to prevent memory exhaustion.
+
+    Raises:
+        ValueError: If text would produce too many chunks
+    """
     if len(text) <= chunk_size:
         return [text]
+
+    # SECURITY: Estimate max chunks and enforce limit
+    estimated_chunks = (len(text) // (chunk_size - overlap)) + 1
+    if estimated_chunks > MAX_CHUNKS_PER_DOC:
+        raise ValueError(
+            f"Document would produce {estimated_chunks} chunks, "
+            f"exceeding limit of {MAX_CHUNKS_PER_DOC}. "
+            f"Consider increasing chunk_size or reducing document size."
+        )
 
     chunks = []
     start = 0
     while start < len(text):
+        # SECURITY: Double-check chunk count during processing
+        if len(chunks) >= MAX_CHUNKS_PER_DOC:
+            logger.warning(
+                "Chunk limit reached during processing",
+                extra={"chunks_created": len(chunks), "limit": MAX_CHUNKS_PER_DOC},
+            )
+            break
+
         end = start + chunk_size
 
         # Try to break at sentence boundary
@@ -144,31 +330,65 @@ def chunk_text(
                     end = start + last_marker + len(marker)
                     break
 
-        chunks.append(text[start:end].strip())
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
         start = end - overlap
 
-    return [c for c in chunks if c]
+    return chunks
 
 
-def read_document(file_path: Path) -> str:
-    """Read document content based on file type."""
+def read_document(file_path: Path, safe_ops: SafeFileOperations) -> str:
+    """
+    Read document content based on file type using safe file operations.
+
+    Args:
+        file_path: Path to the document
+        safe_ops: SafeFileOperations instance for secure file access
+
+    Returns:
+        Document content as string
+
+    Raises:
+        ValueError: If file type is unsupported or file is too large
+        ImportError: If required library for file type is not installed
+    """
     suffix = file_path.suffix.lower()
 
-    if suffix == ".txt":
-        return file_path.read_text(encoding="utf-8")
+    # SECURITY: Validate file extension
+    if suffix not in SUPPORTED_FILE_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file extension: {suffix}. "
+            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}"
+        )
 
-    elif suffix == ".md":
-        return file_path.read_text(encoding="utf-8")
+    # SECURITY: Check file size before reading
+    file_size_mb = file_path.stat().st_size / (1024 * 1024)
+    if file_size_mb > MAX_DOC_SIZE_MB:
+        raise ValueError(
+            f"Document size ({file_size_mb:.2f}MB) exceeds limit of {MAX_DOC_SIZE_MB}MB"
+        )
+
+    if suffix in (".txt", ".md"):
+        # Use safe file operations for text files
+        return safe_ops.read_text(str(file_path))
 
     elif suffix == ".pdf":
         if not PYPDF_AVAILABLE:
             raise ImportError(
                 "pypdf is required for PDF files. Install with: pip install pypdf"
             )
+        # PDF reading requires direct file access (library limitation)
+        # File path is already validated by validate_read_path
         reader = pypdf.PdfReader(str(file_path))
         text = []
         for page in reader.pages:
-            text.append(page.extract_text())
+            page_text = page.extract_text()
+            text.append(page_text)
+            # SECURITY: Check accumulated text size
+            total_length = sum(len(t) for t in text)
+            if total_length > MAX_DOC_SIZE_MB * 1024 * 1024:
+                raise ValueError(f"PDF content size exceeds {MAX_DOC_SIZE_MB}MB limit")
         return "\n".join(text)
 
     elif suffix == ".docx":
@@ -176,11 +396,22 @@ def read_document(file_path: Path) -> str:
             raise ImportError(
                 "python-docx is required for DOCX files. Install with: pip install python-docx"
             )
+        # DOCX reading requires direct file access (library limitation)
+        # File path is already validated by validate_read_path
         doc = Document(str(file_path))
-        return "\n".join([para.text for para in doc.paragraphs])
+        paragraphs = []
+        total_length = 0
+        for para in doc.paragraphs:
+            paragraphs.append(para.text)
+            total_length += len(para.text)
+            # SECURITY: Check accumulated text size
+            if total_length > MAX_DOC_SIZE_MB * 1024 * 1024:
+                raise ValueError(f"DOCX content size exceeds {MAX_DOC_SIZE_MB}MB limit")
+        return "\n".join(paragraphs)
 
     else:
-        return file_path.read_text(encoding="utf-8")
+        # Fallback to safe text reading
+        return safe_ops.read_text(str(file_path))
 
 
 def compute_doc_hash(content: str, file_path: str) -> str:
@@ -194,14 +425,32 @@ def ingest_document(
     file_path: str,
     collection: str,
     metadata: dict[str, Any] | None,
+    safe_ops: SafeFileOperations,
 ) -> dict[str, Any]:
-    """Ingest a document into the knowledge base."""
-    # Validate path for security (prevent path traversal)
-    validate_file_path(file_path)
-    path = Path(file_path)
+    """
+    Ingest a document into the knowledge base.
 
-    # Read document
-    content = read_document(path)
+    Security: Uses validated file paths, size limits, and safe file operations.
+
+    Args:
+        conn: Database connection
+        model: Embedding model
+        file_path: Path to document (validated)
+        collection: Collection name (validated)
+        metadata: Optional metadata
+        safe_ops: SafeFileOperations instance
+
+    Returns:
+        Ingestion result dictionary
+
+    Raises:
+        ValueError: If validation fails or limits exceeded
+    """
+    # SECURITY: Validate path for path traversal prevention
+    validated_path = validate_read_path(file_path)
+
+    # Read document with safe file operations
+    content = read_document(validated_path, safe_ops)
     doc_hash = compute_doc_hash(content, file_path)
 
     # Check if document already exists
@@ -369,16 +618,23 @@ def search_hybrid(
 
 
 def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Handle document ingestion."""
+    """
+    Handle document ingestion with comprehensive validation.
+
+    Security: Validates all inputs before processing.
+    """
     arguments = request.get("arguments", {})
-    file_path = arguments.get("file_path")
+    file_path = arguments.get("file_path", "")
     collection = arguments.get("collection", "default")
     metadata = arguments.get("metadata")
 
-    if not file_path:
+    # SECURITY: Validate all inputs
+    is_valid, error_msg = validate_ingest_request(file_path, collection, metadata)
+    if not is_valid:
+        logger.warning("Invalid ingest request", extra={"error": error_msg})
         return {
             "success": False,
-            "error": {"code": "INVALID_INPUT", "message": "file_path is required"},
+            "error": {"code": "INVALID_INPUT", "message": error_msg},
         }
 
     database_url = context.get("database_url")
@@ -391,6 +647,16 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             },
         }
 
+    # Initialize safe file operations
+    readonly_dir = os.getenv("INPUT_DIR", "/data/input")
+    writable_dir = os.getenv("OUTPUT_DIR", "/data/output")
+
+    safe_ops = SafeFileOperations(
+        readonly_dir=readonly_dir,
+        writable_dir=writable_dir,
+        max_file_size_mb=MAX_DOC_SIZE_MB,
+    )
+
     # Initialize connection pool if not already done
     init_pool(database_url)
 
@@ -398,31 +664,62 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     model = get_embedding_model(EMBEDDING_MODEL)
 
     # Use connection from pool
-    with get_connection() as conn:
-        ensure_schema(conn)
-        result = ingest_document(conn, model, file_path, collection, metadata)
+    try:
+        with get_connection() as conn:
+            ensure_schema(conn)
+            result = ingest_document(
+                conn, model, file_path, collection, metadata, safe_ops
+            )
 
+            logger.info(
+                "Document ingested successfully",
+                extra={
+                    "file_path": file_path,
+                    "collection": collection,
+                    "status": result["status"],
+                    "chunks_count": result.get("chunks_count", 0),
+                },
+            )
+
+            return {
+                "success": True,
+                "content": [
+                    {"type": "text", "text": f"Document ingested: {result['status']}"}
+                ],
+                "structured_content": result,
+            }
+    except ValueError as e:
+        logger.error("Validation error during ingestion", extra={"error": str(e)})
         return {
-            "success": True,
-            "content": [
-                {"type": "text", "text": f"Document ingested: {result['status']}"}
-            ],
-            "structured_content": result,
+            "success": False,
+            "error": {"code": "VALIDATION_ERROR", "message": str(e)},
         }
+    except Exception as e:
+        logger.error("Unexpected error during ingestion", extra={"error": str(e)})
+        raise
 
 
 def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Handle knowledge base search."""
+    """
+    Handle knowledge base search with comprehensive validation.
+
+    Security: Validates all inputs and sanitizes top_k parameter.
+    """
     arguments = request.get("arguments", {})
-    query = arguments.get("query")
+    query = arguments.get("query", "")
     collection = arguments.get("collection", "default")
     top_k = arguments.get("top_k", 5)
     search_type = arguments.get("search_type", "hybrid")
 
-    if not query:
+    # SECURITY: Validate all inputs
+    is_valid, error_msg, top_k_sanitized = validate_search_request(
+        query, collection, top_k, search_type
+    )
+    if not is_valid:
+        logger.warning("Invalid search request", extra={"error": error_msg})
         return {
             "success": False,
-            "error": {"code": "INVALID_INPUT", "message": "query is required"},
+            "error": {"code": "INVALID_INPUT", "message": error_msg},
         }
 
     database_url = context.get("database_url")
@@ -444,37 +741,61 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
         model = get_embedding_model(EMBEDDING_MODEL)
 
     # Use connection from pool
-    with get_connection() as conn:
-        ensure_schema(conn)
+    try:
+        with get_connection() as conn:
+            ensure_schema(conn)
 
-        if search_type == "semantic":
-            results = search_semantic(conn, model, query, collection, top_k)
-        elif search_type == "keyword":
-            results = search_keyword(conn, query, collection, top_k)
-        else:  # hybrid
-            results = search_hybrid(conn, model, query, collection, top_k)
+            # Use sanitized top_k value
+            if search_type == "semantic":
+                results = search_semantic(
+                    conn, model, query, collection, top_k_sanitized
+                )
+            elif search_type == "keyword":
+                results = search_keyword(conn, query, collection, top_k_sanitized)
+            else:  # hybrid
+                results = search_hybrid(conn, model, query, collection, top_k_sanitized)
 
-        # Format results for output
-        output_text = f"Found {len(results)} results for: {query}\n\n"
-        for i, result in enumerate(results, 1):
-            output_text += f"--- Result {i} (score: {result['score']:.3f}) ---\n"
-            output_text += f"Source: {result['file_path']}\n"
-            output_text += f"{result['content'][:500]}...\n\n"
+            logger.info(
+                "Search completed",
+                extra={
+                    "query_length": len(query),
+                    "collection": collection,
+                    "search_type": search_type,
+                    "results_count": len(results),
+                },
+            )
 
-        return {
-            "success": True,
-            "content": [{"type": "text", "text": output_text}],
-            "structured_content": {
-                "query": query,
-                "collection": collection,
-                "search_type": search_type,
-                "results_count": len(results),
-                "results": results,
-            },
-        }
+            # Format results for output
+            output_text = f"Found {len(results)} results for: {query}\n\n"
+            for i, result in enumerate(results, 1):
+                output_text += f"--- Result {i} (score: {result['score']:.3f}) ---\n"
+                output_text += f"Source: {result['file_path']}\n"
+                # Limit content preview to 500 chars
+                content_preview = result["content"][:500]
+                if len(result["content"]) > 500:
+                    content_preview += "..."
+                output_text += f"{content_preview}\n\n"
+
+            return {
+                "success": True,
+                "content": [{"type": "text", "text": output_text}],
+                "structured_content": {
+                    "query": query,
+                    "collection": collection,
+                    "search_type": search_type,
+                    "results_count": len(results),
+                    "results": results,
+                },
+            }
+    except Exception as e:
+        logger.error("Error during search", extra={"error": str(e)})
+        raise
 
 
 def main() -> None:
+    """Main entry point with comprehensive error handling."""
+    request = {}
+
     # Check dependencies
     if not PSYCOPG2_AVAILABLE:
         write_response(
@@ -510,29 +831,62 @@ def main() -> None:
         # Determine operation from command line args
         operation = sys.argv[1] if len(sys.argv) > 1 else "search"
 
-        if operation == "ingest":
-            result = handle_ingest(request, context)
-        elif operation == "search":
-            result = handle_search(request, context)
-        else:
+        # SECURITY: Validate operation
+        valid_operations = {"ingest", "search"}
+        if operation not in valid_operations:
+            logger.warning(
+                "Invalid operation requested", extra={"operation": operation}
+            )
             result = {
                 "success": False,
                 "error": {
                     "code": "INVALID_INPUT",
-                    "message": f"Unknown operation: {operation}",
+                    "message": f"Unknown operation: {operation}. Valid: {', '.join(valid_operations)}",
                 },
             }
+        elif operation == "ingest":
+            result = handle_ingest(request, context)
+        else:  # search
+            result = handle_search(request, context)
 
         result["request_id"] = request_id
         write_response(result)
 
-    except Exception as e:
+    except ValueError as e:
+        # Validation errors
+        logger.error("Validation error", extra={"error": str(e)})
         write_response(
             {
                 "success": False,
-                "request_id": request.get("request_id", "")
-                if "request" in dir()
-                else "",
+                "request_id": request.get("request_id", ""),
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": str(e),
+                },
+            }
+        )
+    except PermissionError as e:
+        # File access errors
+        logger.error("Permission denied", extra={"error": str(e)})
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", ""),
+                "error": {
+                    "code": "PERMISSION_DENIED",
+                    "message": str(e),
+                },
+            }
+        )
+    except Exception as e:
+        # Unexpected errors
+        logger.error(
+            "Unexpected error", extra={"error": str(e), "type": type(e).__name__}
+        )
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", ""),
                 "error": {
                     "code": "EXECUTION_FAILED",
                     "message": str(e),
@@ -540,6 +894,12 @@ def main() -> None:
                 },
             }
         )
+    finally:
+        # Cleanup connection pool
+        try:
+            close_pool()
+        except Exception as e:
+            logger.warning("Error closing connection pool", extra={"error": str(e)})
 
 
 if __name__ == "__main__":

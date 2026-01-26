@@ -387,6 +387,248 @@ footer {
     margin-bottom: 5px;
 }
 
+/* Logo Container */
+.logo-container {
+    text-align: right;
+    margin-bottom: 15px;
+    min-height: 60px;
+}
+
+.logo-container img {
+    max-height: 60px;
+    max-width: 200px;
+}
+
+/* Chart Styles */
+.chart-container {
+    margin: 20px 0;
+    text-align: center;
+    page-break-inside: avoid;
+}
+
+.chart-title {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    font-weight: 600;
+    color: #0d1b2a;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.chart-wrapper {
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    padding: 15px;
+    margin: 10px 0;
+}
+
+.chart-placeholder {
+    background: #f8f9fa;
+    border: 2px dashed #dee2e6;
+    padding: 40px 20px;
+    margin: 10px 0;
+    text-align: center;
+    color: #6c757d;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10pt;
+}
+
+.chart-image {
+    max-width: 100%;
+    height: auto;
+}
+
+.chart-caption {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 9pt;
+    color: #6c757d;
+    text-align: center;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* Email Format Styles */
+.email-container {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.email-header {
+    background: #f8f9fa;
+    padding: 20px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 25px;
+}
+
+.email-field {
+    display: flex;
+    margin-bottom: 8px;
+    font-size: 10pt;
+}
+
+.email-field label {
+    width: 100px;
+    font-weight: 600;
+    color: #495057;
+    flex-shrink: 0;
+}
+
+.email-field span {
+    color: #1a1a1a;
+}
+
+.email-subject {
+    font-size: 14pt;
+    font-weight: 600;
+    color: #0d1b2a;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #dee2e6;
+}
+
+.email-body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1a1a1a;
+}
+
+.email-salutation {
+    margin-bottom: 15px;
+}
+
+.email-section {
+    margin-bottom: 20px;
+}
+
+.email-section h3 {
+    font-size: 12pt;
+    color: #0d1b2a;
+    margin-bottom: 10px;
+}
+
+.email-closing {
+    margin-top: 25px;
+    margin-bottom: 10px;
+}
+
+.email-signature {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #dee2e6;
+}
+
+.signature-name {
+    font-weight: 600;
+    font-size: 11pt;
+    color: #0d1b2a;
+}
+
+.signature-title,
+.signature-company,
+.signature-contact {
+    font-size: 10pt;
+    color: #6c757d;
+    line-height: 1.4;
+}
+
+/* Key Points / Highlights */
+.key-points {
+    background: #f8f9fa;
+    border-left: 4px solid #0d1b2a;
+    padding: 15px 20px;
+    margin: 15px 0;
+}
+
+.key-points h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #0d1b2a;
+}
+
+.key-points ul {
+    margin: 0;
+}
+
+.key-points li {
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+/* Numbered Sections for Executive Summary */
+.numbered-section {
+    margin-bottom: 25px;
+    page-break-inside: avoid;
+}
+
+.numbered-section .section-number {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    background: #0d1b2a;
+    color: #ffffff;
+    text-align: center;
+    line-height: 30px;
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 12pt;
+    margin-right: 10px;
+    vertical-align: middle;
+}
+
+.numbered-section h2 {
+    display: inline-block;
+    margin: 0;
+    vertical-align: middle;
+    border: none;
+    padding: 0;
+}
+
+/* Data Table Enhancements */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+    font-size: 10pt;
+}
+
+.data-table th {
+    background-color: #0d1b2a;
+    color: #ffffff;
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+.data-table td {
+    padding: 10px 12px;
+    border: 1px solid #dee2e6;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+.data-table .numeric {
+    text-align: right;
+    font-family: 'Courier New', monospace;
+}
+
+/* Appendix Styles */
+.appendix {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid #0d1b2a;
+}
+
+.appendix h2 {
+    font-size: 14pt;
+    color: #0d1b2a;
+}
+
 /* Print optimization */
 @media print {
     .info-grid {
@@ -402,6 +644,22 @@ footer {
 
     .badge {
         border: 1px solid #000;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    
+    .chart-container,
+    .chart-wrapper {
+        page-break-inside: avoid;
+    }
+    
+    .numbered-section {
+        page-break-inside: avoid;
+    }
+    
+    .data-table th {
+        background-color: #333 !important;
+        color: #fff !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }

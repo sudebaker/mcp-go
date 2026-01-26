@@ -1,0 +1,101 @@
+{
+  "request_id": "test-formal-001",
+  "arguments": {
+    "report_type": "formal_report",
+    "data": {
+      "title": "Annual Performance Report 2024",
+      "logo_url": "",
+      "report_id": "RPT-2024-001",
+      "author": "Michael Johnson",
+      "department": "Corporate Strategy & Analytics",
+      "period_start": "2024-01-01",
+      "period_end": "2024-12-31",
+      "date": "2025-01-15",
+      "classification": "CONFIDENTIAL - INTERNAL USE ONLY",
+      "executive_summary": "This comprehensive annual report presents a detailed analysis of organizational performance throughout 2024. The year marked significant achievements across financial, operational, and strategic dimensions. Revenue targets were exceeded by 18%, operational efficiency improved substantially, and customer satisfaction reached unprecedented levels. This report provides stakeholders with in-depth insights into key performance indicators, strategic initiatives, and recommendations for sustained growth.",
+      "sections": [
+        {
+          "title": "Financial Performance Overview",
+          "content": "The fiscal year 2024 demonstrated robust financial health with revenue reaching $450M, representing an 18% increase over 2023. Gross profit margins improved from 42% to 46% due to strategic cost optimization and pricing adjustments. Operating expenses were maintained at 28% of revenue despite significant investments in technology infrastructure. Net profit grew by 23% to $95M, exceeding board projections. Cash flow from operations increased by 15%, strengthening our balance sheet position and enabling strategic investments.",
+          "subsections": [
+            {
+              "subtitle": "Revenue Analysis",
+              "content": "Revenue growth was driven by three primary factors: product line expansion (contributing 40% of growth), geographic market expansion (35%), and organic growth in existing markets (25%). The new enterprise software division exceeded first-year targets by 145%, generating $42M in revenue. International markets now represent 32% of total revenue, up from 24% in 2023."
+            },
+            {
+              "subtitle": "Cost Management",
+              "content": "Strategic initiatives reduced operational costs by $12M annually through process automation, vendor consolidation, and efficiency improvements. Supply chain optimization saved $4.2M, while technology infrastructure modernization reduced IT operational costs by 18%. These savings were partially reinvested in R&D and market expansion."
+            }
+          ],
+          "chart": {
+            "type": "bar",
+            "title": "Quarterly Revenue Performance 2024",
+            "description": "Bar chart showing quarterly revenue growth trend throughout 2024, with Q1: $98M, Q2: $108M, Q3: $118M, Q4: $126M"
+          }
+        },
+        {
+          "title": "Operational Excellence",
+          "content": "Operational performance metrics showed consistent improvement across all measured dimensions. Customer satisfaction scores averaged 91.5%, up from 85% in 2023. Service delivery times improved by 22%, and first-contact resolution rates increased to 87%. Employee productivity metrics improved by 15% following the implementation of new collaboration tools and process optimization initiatives.",
+          "table": {
+            "title": "Key Performance Indicators",
+            "headers": ["Metric", "2023", "2024", "Change"],
+            "rows": [
+              ["Customer Satisfaction", "85%", "91.5%", "+6.5%"],
+              ["On-time Delivery", "92%", "96%", "+4%"],
+              ["First Contact Resolution", "78%", "87%", "+9%"],
+              ["Employee Engagement", "82%", "89%", "+7%"],
+              ["System Uptime", "99.2%", "99.7%", "+0.5%"]
+            ]
+          }
+        },
+        {
+          "title": "Market Position and Growth",
+          "content": "Market analysis indicates strengthened competitive positioning across all segments. Market share in core segments increased from 18% to 21%, driven by product innovation and customer-centric strategies. Brand recognition improved significantly, with aided awareness reaching 67% in target demographics. The successful launch of three major product lines and expansion into two new geographic regions positioned the organization for sustained growth.",
+          "chart": {
+            "type": "line",
+            "title": "Market Share Growth Trajectory",
+            "description": "Line chart illustrating market share progression from Q1 2023 (16%) through Q4 2024 (21%)"
+          }
+        },
+        {
+          "title": "Strategic Initiatives Progress",
+          "content": "All five strategic initiatives launched in Q1 2024 achieved or exceeded milestone targets. The digital transformation program completed Phase 1 ahead of schedule, migrating 85% of core systems to cloud infrastructure. The customer experience enhancement initiative resulted in NPS scores improving from 42 to 61. Market expansion efforts established presence in 12 new cities across three countries, contributing $28M in new revenue.",
+          "subsections": [
+            {
+              "subtitle": "Technology Modernization",
+              "content": "Completed migration of 85% of applications to cloud infrastructure, improving scalability and reducing infrastructure costs by 32%. Implemented advanced analytics platform enabling real-time business intelligence. Cybersecurity posture strengthened with zero security incidents in 2024."
+            },
+            {
+              "subtitle": "Talent Development",
+              "content": "Invested $4.2M in employee development programs, with 92% of employees completing at least one professional development course. Leadership development program graduated 45 high-potential employees. Employee retention improved to 94%, significantly above industry average of 87%."
+            }
+          ]
+        }
+      ],
+      "recommendations": [
+        "Accelerate international expansion with focus on Asia-Pacific markets, allocating $15M for market entry and establishment",
+        "Increase R&D investment by 25% to maintain competitive advantage in product innovation and technology leadership",
+        "Implement comprehensive sustainability program with target of 40% carbon reduction by 2027",
+        "Establish strategic partnerships with 3-5 key technology providers to enhance product capabilities",
+        "Launch employee stock ownership program to improve retention and alignment with shareholder interests",
+        "Invest $8M in advanced analytics and AI capabilities to enhance operational efficiency and customer insights"
+      ],
+      "conclusion": "The 2024 fiscal year represents a period of exceptional achievement and strategic progress. Financial performance exceeded targets, operational excellence initiatives delivered measurable results, and strategic positioning strengthened significantly. The organization is well-positioned for sustained growth and value creation. Implementation of the recommendations outlined in this report will further enhance competitive advantage and long-term success. Management expresses confidence in achieving the ambitious targets set for 2025 and beyond.",
+      "appendix": [
+        {
+          "title": "Appendix A: Detailed Financial Statements",
+          "content": "Complete audited financial statements including balance sheet, income statement, cash flow statement, and notes to financial statements are available in separate document FIN-2024-ANNUAL."
+        },
+        {
+          "title": "Appendix B: Methodology and Data Sources",
+          "content": "This report synthesizes data from multiple sources including internal financial systems, customer satisfaction surveys (n=12,450), employee engagement surveys (n=2,840), market research studies conducted by independent firms, and operational performance dashboards. All financial data has been audited by Ernst & Young LLP."
+        },
+        {
+          "title": "Appendix C: Risk Factors and Mitigation",
+          "content": "Key risks include market volatility, regulatory changes in international markets, cybersecurity threats, and talent competition. Mitigation strategies have been developed for each identified risk area and are detailed in the separate Enterprise Risk Management Report."
+        }
+      ],
+      "confidentiality": "CONFIDENTIAL - INTERNAL USE ONLY - NOT FOR DISTRIBUTION"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    {% if logo_url %}
+    <div class="logo-container">
+        <img src="{{ logo_url }}" alt="Company Logo">
+    </div>
+    {% endif %}
+
+    <div class="report-header">
+        <div class="report-type">Executive Summary Report</div>
+        <h1>{{ title }}</h1>
+        <div class="report-date">Generated: {{ generated_at }}</div>
+    </div>
+
+    <section class="info-grid">
+        {% if prepared_by %}
+        <div class="info-item">
+            <label>Prepared By</label>
+            <span>{{ prepared_by }}</span>
+        </div>
+        {% endif %}
+        {% if reviewed_by %}
+        <div class="info-item">
+            <label>Reviewed By</label>
+            <span>{{ reviewed_by }}</span>
+        </div>
+        {% endif %}
+        {% if period %}
+        <div class="info-item">
+            <label>Period</label>
+            <span>{{ period }}</span>
+        </div>
+        {% endif %}
+        {% if date %}
+        <div class="info-item">
+            <label>Date</label>
+            <span>{{ date }}</span>
+        </div>
+        {% endif %}
+    </section>
+
+    {% if executive_summary %}
+    <section>
+        <h2>Executive Summary</h2>
+        <div class="executive-summary">
+            <p>{{ executive_summary }}</p>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if key_findings and key_findings|length > 0 %}
+    <section class="numbered-section">
+        <span class="section-number">1</span>
+        <h2>Key Findings</h2>
+        <div class="key-points">
+            <ul>
+                {% for finding in key_findings %}
+                <li>{{ finding }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if recommendations and recommendations|length > 0 %}
+    <section class="numbered-section">
+        <span class="section-number">2</span>
+        <h2>Recommendations</h2>
+        <div class="key-points">
+            <ul>
+                {% for recommendation in recommendations %}
+                <li>{{ recommendation }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if next_steps and next_steps|length > 0 %}
+    <section class="numbered-section">
+        <span class="section-number">3</span>
+        <h2>Next Steps</h2>
+        <div class="key-points">
+            <ul>
+                {% for step in next_steps %}
+                <li>{{ step }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if additional_notes %}
+    <section>
+        <h2>Additional Notes</h2>
+        <p>{{ additional_notes }}</p>
+    </section>
+    {% endif %}
+
+    <footer>
+        <div class="confidential">Confidential Document</div>
+        <p class="generated-at">Report generated on {{ generated_at }}</p>
+    </footer>
+</body>
+</html>

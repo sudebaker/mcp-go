@@ -1,0 +1,37 @@
+{
+  "request_id": "test-exec-001",
+  "arguments": {
+    "report_type": "executive_summary",
+    "data": {
+      "title": "Q3 2024 Executive Summary",
+      "logo_url": "",
+      "prepared_by": "John Smith, CFO",
+      "reviewed_by": "Jane Doe, CEO",
+      "period": "Q3 2024 (July - September)",
+      "date": "2024-10-15",
+      "executive_summary": "The third quarter of 2024 demonstrated exceptional performance across all key business metrics. Revenue growth exceeded projections by 15%, driven primarily by expansion into new markets and successful product launches. Operational efficiency improvements resulted in an 8% reduction in costs while maintaining service quality standards. Customer satisfaction scores reached an all-time high of 92%, reflecting our commitment to excellence and continuous improvement.",
+      "key_findings": [
+        "Revenue increased by 15% year-over-year, surpassing quarterly targets",
+        "Customer satisfaction score improved to 92%, the highest in company history",
+        "Operating costs reduced by 8% through process optimization initiatives",
+        "Market share expanded by 3.2% in key demographic segments",
+        "Employee retention rate improved to 94%, above industry average",
+        "New product line launched successfully with 120% of projected adoption"
+      ],
+      "recommendations": [
+        "Accelerate expansion into European and Asian markets to capitalize on current momentum",
+        "Increase investment in customer retention programs by 20% for Q4",
+        "Implement advanced analytics tools to further optimize supply chain efficiency",
+        "Expand R&D budget by 15% to maintain competitive product innovation",
+        "Establish strategic partnerships with key industry players to strengthen market position"
+      ],
+      "next_steps": [
+        "Board of Directors review and approval scheduled for October 20, 2024",
+        "Implementation of approved initiatives to commence Q4 2024",
+        "Mid-quarter progress review scheduled for November 15, 2024",
+        "Comprehensive Q4 results and annual review planned for January 2025"
+      ],
+      "additional_notes": "This executive summary reflects data validated by our external auditors and incorporates feedback from department heads across all business units. Detailed financial statements and supporting documentation are available upon request."
+    }
+  }
+}

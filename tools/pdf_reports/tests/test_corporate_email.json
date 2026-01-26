@@ -1,0 +1,56 @@
+{
+  "request_id": "test-email-001",
+  "arguments": {
+    "report_type": "corporate_email",
+    "data": {
+      "title": "Q4 2024 Strategy Update and Action Items",
+      "logo_url": "",
+      "from": "sarah.williams@company.com",
+      "to": "executive-team@company.com",
+      "cc": "board-members@company.com",
+      "bcc": "",
+      "subject": "Q4 2024 Strategy Update and Required Actions",
+      "date": "2024-10-18",
+      "salutation": "Dear Executive Team,",
+      "body": "Following our successful Q3 performance review, I am writing to provide an update on our strategic initiatives for Q4 2024 and outline critical action items requiring your immediate attention and approval.",
+      "body_sections": [
+        {
+          "title": "Q3 Performance Summary",
+          "content": "Our Q3 results exceeded expectations across all key metrics. Revenue reached $118M (+15% YoY), customer satisfaction improved to 92%, and operational costs were reduced by 8%. These achievements position us strongly for Q4 execution and 2025 planning."
+        },
+        {
+          "title": "Q4 Strategic Priorities",
+          "content": "For Q4, we are focusing on three strategic priorities: (1) Accelerating international market expansion, particularly in the Asia-Pacific region; (2) Launching our next-generation product suite scheduled for November 15; (3) Completing the technology infrastructure modernization initiative. Each priority has dedicated resources and clear success metrics."
+        },
+        {
+          "title": "Budget Allocation Request",
+          "content": "To support Q4 initiatives, we are requesting approval for additional budget allocation of $5.2M distributed as follows: $2.5M for Asia-Pacific market entry, $1.8M for product launch marketing campaign, and $0.9M for technology infrastructure completion. Detailed financial projections and ROI analysis are attached for your review."
+        },
+        {
+          "title": "Organizational Changes",
+          "content": "To better support our growth trajectory, I am proposing the creation of two new senior leadership positions: VP of International Operations and VP of Product Innovation. Job descriptions and compensation packages are included in the attached documentation. These positions are critical for executing our 2025 strategic plan."
+        },
+        {
+          "title": "Risk Management Update",
+          "content": "Our risk management team has identified three emerging risks requiring attention: increased competitive pressure in core markets, potential supply chain disruptions, and cybersecurity threats. Mitigation strategies have been developed and will be presented at the upcoming board meeting. No immediate concerns, but proactive monitoring continues."
+        }
+      ],
+      "action_required": "Please review the attached documents and provide your approval on the following items by October 25, 2024: (1) Q4 budget allocation request of $5.2M, (2) Creation of two new VP positions, (3) Asia-Pacific expansion timeline and resource allocation. Your prompt response is essential to maintain our implementation schedule.",
+      "attachments": [
+        "Q3_Performance_Detailed_Report.pdf",
+        "Q4_Budget_Proposal_Financial_Analysis.xlsx",
+        "VP_Position_Descriptions_Compensation.pdf",
+        "Asia_Pacific_Market_Entry_Strategy.pdf",
+        "Product_Launch_Marketing_Plan.pdf"
+      ],
+      "closing": "Thank you for your continued leadership and support. I am confident that with your approval of these initiatives, we will achieve our ambitious Q4 targets and position the organization for exceptional performance in 2025.",
+      "signature": {
+        "name": "Sarah Williams",
+        "title": "Chief Strategy Officer",
+        "email": "sarah.williams@company.com",
+        "phone": "+1 (555) 123-4567"
+      },
+      "confidentiality": "CONFIDENTIAL - This email contains proprietary and confidential information intended solely for the recipients listed above. Unauthorized disclosure, distribution, or copying is strictly prohibited."
+    }
+  }
+}

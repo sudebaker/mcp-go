@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ subject }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="email-container">
+        {% if logo_url %}
+        <div class="logo-container">
+            <img src="{{ logo_url }}" alt="Company Logo">
+        </div>
+        {% endif %}
+
+        <div class="email-header">
+            <div class="email-field">
+                <label>From:</label>
+                <span>{{ from }}</span>
+            </div>
+            <div class="email-field">
+                <label>To:</label>
+                <span>{{ to }}</span>
+            </div>
+            {% if cc %}
+            <div class="email-field">
+                <label>CC:</label>
+                <span>{{ cc }}</span>
+            </div>
+            {% endif %}
+            {% if bcc %}
+            <div class="email-field">
+                <label>BCC:</label>
+                <span>{{ bcc }}</span>
+            </div>
+            {% endif %}
+            <div class="email-field">
+                <label>Date:</label>
+                <span>{{ date | default(generated_at) }}</span>
+            </div>
+            <div class="email-subject">
+                <strong>Subject:</strong> {{ subject }}
+            </div>
+        </div>
+
+        <div class="email-body">
+            {% if salutation %}
+            <p class="email-salutation">{{ salutation }}</p>
+            {% endif %}
+
+            {% if body %}
+            <p>{{ body }}</p>
+            {% endif %}
+
+            {% if body_sections and body_sections|length > 0 %}
+            {% for section in body_sections %}
+            <div class="email-section">
+                {% if section.title %}
+                <h3>{{ section.title }}</h3>
+                {% endif %}
+                
+                {% if section.content %}
+                <p>{{ section.content }}</p>
+                {% endif %}
+
+                {% if section.points and section.points|length > 0 %}
+                <ul>
+                    {% for point in section.points %}
+                    <li>{{ point }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if section.table %}
+                <table>
+                    <thead>
+                        <tr>
+                            {% for header in section.table.headers %}
+                            <th>{{ header }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in section.table.rows %}
+                        <tr>
+                            {% for cell in row %}
+                            <td>{{ cell }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
+
+            {% if action_required %}
+            <div class="email-section">
+                <h3>Action Required</h3>
+                <div class="key-points">
+                    <p>{{ action_required }}</p>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if attachments and attachments|length > 0 %}
+            <div class="email-section">
+                <h3>Attachments</h3>
+                <ul>
+                    {% for attachment in attachments %}
+                    <li>{{ attachment }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {% if closing %}
+            <p class="email-closing">{{ closing }}</p>
+            {% endif %}
+
+            <div class="email-signature">
+                {% if signature %}
+                {% if signature.name %}
+                <div class="signature-name">{{ signature.name }}</div>
+                {% endif %}
+                {% if signature.title %}
+                <div class="signature-title">{{ signature.title }}</div>
+                {% endif %}
+                {% if signature.company %}
+                <div class="signature-company">{{ signature.company }}</div>
+                {% endif %}
+                {% if signature.email %}
+                <div class="signature-contact">Email: {{ signature.email }}</div>
+                {% endif %}
+                {% if signature.phone %}
+                <div class="signature-contact">Phone: {{ signature.phone }}</div>
+                {% endif %}
+                {% if signature.address %}
+                <div class="signature-contact">{{ signature.address }}</div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <footer>
+            {% if confidentiality %}
+            <div class="confidential">{{ confidentiality }}</div>
+            {% else %}
+            <div class="confidential">Confidential Email Communication</div>
+            {% endif %}
+            <p class="generated-at">Email generated on {{ generated_at }}</p>
+        </footer>
+    </div>
+</body>
+</html>

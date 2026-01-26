@@ -1,16 +1,20 @@
 package transport
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 	"time"
 )
 
 type RateLimiter struct {
-	limiters map[string]*tokenBucket
-	mu       sync.RWMutex
-	rps      float64
-	burst    int
+	limiters      map[string]*tokenBucket
+	mu            sync.RWMutex
+	rps           float64
+	burst         int
+	cleanupTicker *time.Ticker
+	cleanupStop   chan struct{}
+	maxIdleTime   time.Duration
 }
 
 type tokenBucket struct {
@@ -21,11 +25,15 @@ type tokenBucket struct {
 }
 
 func NewRateLimiter(rps float64, burst int) *RateLimiter {
-	return &RateLimiter{
-		limiters: make(map[string]*tokenBucket),
-		rps:      rps,
-		burst:    burst,
+	rl := &RateLimiter{
+		limiters:    make(map[string]*tokenBucket),
+		rps:         rps,
+		burst:       burst,
+		cleanupStop: make(chan struct{}),
+		maxIdleTime: 10 * time.Minute,
 	}
+	rl.startCleanup()
+	return rl
 }
 
 func (rl *RateLimiter) getLimiter(clientID string) *tokenBucket {
@@ -86,9 +94,13 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 
 		err := rl.allowN(clientID, 1)
 		if err != nil {
-			rateErr := err.(*RateLimitExceededError)
-			w.Header().Set("Retry-After", rateErr.RetryAfter.String())
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			var rateErr *RateLimitExceededError
+			if errors.As(err, &rateErr) {
+				w.Header().Set("Retry-After", rateErr.RetryAfter.String())
+				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			} else {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+			}
 			return
 		}
 
@@ -122,4 +134,35 @@ func (rl *RateLimiter) ResetAll() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	rl.limiters = make(map[string]*tokenBucket)
+}
+
+func (rl *RateLimiter) startCleanup() {
+	rl.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-rl.cleanupTicker.C:
+				rl.cleanup()
+			case <-rl.cleanupStop:
+				rl.cleanupTicker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (rl *RateLimiter) cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	for clientID, limiter := range rl.limiters {
+		if now.Sub(limiter.lastUpdate) > rl.maxIdleTime {
+			delete(rl.limiters, clientID)
+		}
+	}
+}
+
+func (rl *RateLimiter) Stop() {
+	close(rl.cleanupStop)
 }

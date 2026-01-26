@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,7 +20,9 @@ import (
 )
 
 const (
-	Version = "0.1.0"
+	Version       = "0.1.0"
+	maxArgsSize   = 1 << 20 // 1MB max argument size
+	maxArgsSizeMB = 1
 )
 
 // main function initializes and runs the MCP Orchestrator server.
@@ -71,22 +75,18 @@ func main() {
 		server.WithRecovery(),
 	)
 
-	// Register tools from configuration
+	// Validate and register tools from configuration
 	for _, toolCfg := range cfg.Tools {
+		if err := executor.ValidateToolConfig(&toolCfg); err != nil {
+			log.Fatal().
+				Err(err).
+				Str("tool", toolCfg.Name).
+				Msg("Invalid tool configuration")
+		}
 		registerTool(mcpServer, exec, toolCfg)
 	}
 
-	// Setup configuration hot-reload
-	if err := config.Watch(*configPath, func(newCfg *config.Config) {
-		log.Info().Msg("Reloading configuration")
-		exec.UpdateConfig(newCfg)
-		// Re-register tools with new configuration
-		for _, toolCfg := range newCfg.Tools {
-			registerTool(mcpServer, exec, toolCfg)
-		}
-	}); err != nil {
-		log.Warn().Err(err).Msg("Failed to setup config watcher")
-	}
+	log.Info().Msg("Configuration changes require server restart")
 
 	// Create SSE server
 	sseServer := transport.NewSSEServer(mcpServer, transport.SSEConfig{
@@ -122,9 +122,13 @@ func main() {
 	case <-ctx.Done():
 	}
 
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Graceful shutdown with configurable timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer shutdownCancel()
+
+	log.Info().
+		Dur("timeout", cfg.Server.ShutdownTimeout).
+		Msg("Shutting down server")
 
 	if err := sseServer.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")
@@ -176,12 +180,21 @@ func buildInputSchema(toolCfg config.ToolConfig) *mcp.ToolInputSchema {
 
 	if props, ok := toolCfg.InputSchema["properties"].(map[string]interface{}); ok {
 		schema.Properties = props
+	} else {
+		log.Warn().
+			Str("tool", toolCfg.Name).
+			Msg("InputSchema 'properties' field is not a map or is missing")
 	}
 
 	if required, ok := toolCfg.InputSchema["required"].([]interface{}); ok {
 		for _, r := range required {
 			if s, ok := r.(string); ok {
 				schema.Required = append(schema.Required, s)
+			} else {
+				log.Warn().
+					Str("tool", toolCfg.Name).
+					Interface("value", r).
+					Msg("InputSchema 'required' contains non-string value")
 			}
 		}
 	}
@@ -201,6 +214,20 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
 			return mcp.NewToolResultError("Invalid arguments format"), nil
+		}
+
+		// Validate argument size to prevent DoS
+		argsJSON, err := json.Marshal(args)
+		if err != nil {
+			return mcp.NewToolResultError("Failed to serialize arguments"), nil
+		}
+		if len(argsJSON) > maxArgsSize {
+			log.Warn().
+				Str("tool", toolName).
+				Int("size", len(argsJSON)).
+				Int("max_size", maxArgsSize).
+				Msg("Arguments exceed maximum size")
+			return mcp.NewToolResultError(fmt.Sprintf("Arguments exceed maximum size of %dMB", maxArgsSizeMB)), nil
 		}
 
 		// Execute via subprocess
@@ -234,6 +261,11 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 						Data:     item.Data,
 						MIMEType: item.MIMEType,
 					})
+				default:
+					log.Warn().
+						Str("tool", toolName).
+						Str("content_type", item.Type).
+						Msg("Unknown content type, skipping")
 				}
 			}
 			return &mcp.CallToolResult{

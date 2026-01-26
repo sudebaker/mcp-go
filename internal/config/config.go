@@ -3,11 +3,8 @@ package config
 import (
 	"os"
 	"regexp"
-	"strings"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,11 +17,12 @@ type Config struct {
 
 // ServerConfig holds server-specific settings
 type ServerConfig struct {
-	Host           string  `yaml:"host"`
-	Port           int     `yaml:"port"`
-	Name           string  `yaml:"name"`
-	RateLimitRPS   float64 `yaml:"rate_limit_rps"`
-	RateLimitBurst int     `yaml:"rate_limit_burst"`
+	Host            string        `yaml:"host"`
+	Port            int           `yaml:"port"`
+	Name            string        `yaml:"name"`
+	RateLimitRPS    float64       `yaml:"rate_limit_rps"`
+	RateLimitBurst  int           `yaml:"rate_limit_burst"`
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 }
 
 // ExecutionConfig holds execution-related settings
@@ -101,6 +99,9 @@ func Load(path string) (*Config, error) {
 	if cfg.Server.Name == "" {
 		cfg.Server.Name = "mcp-orchestrator"
 	}
+	if cfg.Server.ShutdownTimeout == 0 {
+		cfg.Server.ShutdownTimeout = 10 * time.Second
+	}
 	if cfg.Execution.DefaultTimeout == 0 {
 		cfg.Execution.DefaultTimeout = 60 * time.Second
 	}
@@ -121,49 +122,6 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
-}
-
-// Watch monitors the configuration file for changes and reloads it
-func Watch(path string, onChange func(*Config)) error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		defer watcher.Close()
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-					log.Info().Str("file", path).Msg("Config file changed, reloading")
-					cfg, err := Load(path)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to reload config")
-						continue
-					}
-					onChange(cfg)
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Error().Err(err).Msg("Config watcher error")
-			}
-		}
-	}()
-
-	// Watch the directory containing the config file to handle editors that
-	// create new files instead of modifying in place
-	dir := path
-	if idx := strings.LastIndex(path, "/"); idx != -1 {
-		dir = path[:idx]
-	}
-
-	return watcher.Add(dir)
 }
 
 // GetToolByName finds a tool configuration by name

@@ -95,7 +95,7 @@ def init_pool(
         minconn, maxconn
     )
     if not is_valid:
-        logger.error("Invalid pool parameters", extra={"error": error_msg})
+        logger.error("Invalid pool parameters", extra_data={"error": error_msg})
         raise ValueError(f"Invalid pool parameters: {error_msg}")
 
     # SECURITY: Validate database URL format
@@ -114,10 +114,10 @@ def init_pool(
         )
         logger.info(
             "Connection pool initialized",
-            extra={"minconn": minconn_safe, "maxconn": maxconn_safe},
+            extra_data={"minconn": minconn_safe, "maxconn": maxconn_safe},
         )
     except Exception as e:
-        logger.error("Failed to initialize connection pool", extra={"error": str(e)})
+        logger.error("Failed to initialize connection pool", extra_data={"error": str(e)})
         raise RuntimeError(f"Failed to initialize connection pool: {str(e)}") from e
 
 
@@ -149,12 +149,12 @@ def get_connection():
             try:
                 conn.rollback()
                 logger.warning(
-                    "Transaction rolled back due to error", extra={"error": str(e)}
+                    "Transaction rolled back due to error", extra_data={"error": str(e)}
                 )
             except Exception as rollback_error:
                 logger.error(
                     "Failed to rollback transaction",
-                    extra={"error": str(rollback_error)},
+                    extra_data={"error": str(rollback_error)},
                 )
         raise
 
@@ -164,7 +164,7 @@ def get_connection():
                 _connection_pool.putconn(conn)
             except Exception as e:
                 logger.error(
-                    "Failed to return connection to pool", extra={"error": str(e)}
+                    "Failed to return connection to pool", extra_data={"error": str(e)}
                 )
 
 
@@ -180,6 +180,6 @@ def close_pool():
             _connection_pool.closeall()
             logger.info("Connection pool closed successfully")
         except Exception as e:
-            logger.error("Error closing connection pool", extra={"error": str(e)})
+            logger.error("Error closing connection pool", extra_data={"error": str(e)})
         finally:
             _connection_pool = None

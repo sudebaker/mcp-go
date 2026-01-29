@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Knowledge Base Tool.
-Manages document ingestion and semantic search using PostgreSQL with pgvector.
+Knowledge Base Tool - Memory System.
+Manages content memorization and semantic search using PostgreSQL with pgvector.
 
 Security Features:
 - SQL injection prevention via parameterized queries
-- Path traversal protection with safe file operations
-- Resource limits (document size, chunks, query length)
+- Resource limits (content size, chunks, query length)
 - Input validation and sanitization
 - Secure database connection pooling
 """
@@ -16,18 +15,22 @@ import os
 import sys
 import hashlib
 import re
-from pathlib import Path
 from typing import Any, Optional
 from dataclasses import dataclass
 
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.validators import validate_read_path
-from common.safe_file_ops import SafeFileOperations
 from common.structured_logging import get_logger
-from .db_pool import init_pool, get_connection, close_pool
-from .model_cache import get_embedding_model
+
+# Import local modules with fallback for direct execution
+try:
+    from .db_pool import init_pool, get_connection, close_pool
+    from .model_cache import get_embedding_model
+except ImportError:
+    # If running as script directly, use absolute imports
+    from db_pool import init_pool, get_connection, close_pool
+    from model_cache import get_embedding_model
 
 # Initialize logger
 logger = get_logger(__name__, "knowledge_base")
@@ -47,20 +50,6 @@ try:
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
-try:
-    import pypdf
-
-    PYPDF_AVAILABLE = True
-except ImportError:
-    PYPDF_AVAILABLE = False
-
-try:
-    from docx import Document
-
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
-
 
 # Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
@@ -69,13 +58,12 @@ CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
 # Security Limits
-MAX_DOC_SIZE_MB = int(os.getenv("MAX_DOC_SIZE_MB", "50"))
-MAX_CHUNKS_PER_DOC = int(os.getenv("MAX_CHUNKS_PER_DOC", "1000"))
+MAX_CONTENT_SIZE_MB = int(os.getenv("MAX_CONTENT_SIZE_MB", "10"))
+MAX_CHUNKS_PER_CONTENT = int(os.getenv("MAX_CHUNKS_PER_CONTENT", "1000"))
 MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "1000"))
 MAX_COLLECTION_NAME_LENGTH = 100
 MAX_TOP_K = 100
 MIN_TOP_K = 1
-SUPPORTED_FILE_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 
 # Regex patterns for input validation
 COLLECTION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
@@ -170,7 +158,7 @@ def validate_top_k(top_k: Any) -> tuple[bool, Optional[str], int]:
 
 
 def validate_ingest_request(
-    file_path: str, collection: str, metadata: Any
+    content: str, collection: str, metadata: Any
 ) -> tuple[bool, Optional[str]]:
     """
     Validate ingestion request parameters.
@@ -178,9 +166,21 @@ def validate_ingest_request(
     Returns:
         (is_valid, error_message) tuple
     """
-    # Validate file path
-    if not file_path or not isinstance(file_path, str):
-        return False, "file_path must be a non-empty string"
+    # Content must be provided
+    if not content:
+        return False, "content must be provided"
+
+    # Validate content
+    if not isinstance(content, str):
+        return False, "content must be a string"
+
+    # SECURITY: Check content size
+    content_size_mb = len(content.encode("utf-8")) / (1024 * 1024)
+    if content_size_mb > MAX_CONTENT_SIZE_MB:
+        return (
+            False,
+            f"content size ({content_size_mb:.2f}MB) exceeds limit of {MAX_CONTENT_SIZE_MB}MB",
+        )
 
     # Validate collection
     is_valid, error = validate_collection_name(collection)
@@ -301,10 +301,10 @@ def chunk_text(
 
     # SECURITY: Estimate max chunks and enforce limit
     estimated_chunks = (len(text) // (chunk_size - overlap)) + 1
-    if estimated_chunks > MAX_CHUNKS_PER_DOC:
+    if estimated_chunks > MAX_CHUNKS_PER_CONTENT:
         raise ValueError(
             f"Document would produce {estimated_chunks} chunks, "
-            f"exceeding limit of {MAX_CHUNKS_PER_DOC}. "
+            f"exceeding limit of {MAX_CHUNKS_PER_CONTENT}. "
             f"Consider increasing chunk_size or reducing document size."
         )
 
@@ -312,10 +312,13 @@ def chunk_text(
     start = 0
     while start < len(text):
         # SECURITY: Double-check chunk count during processing
-        if len(chunks) >= MAX_CHUNKS_PER_DOC:
+        if len(chunks) >= MAX_CHUNKS_PER_CONTENT:
             logger.warning(
                 "Chunk limit reached during processing",
-                extra={"chunks_created": len(chunks), "limit": MAX_CHUNKS_PER_DOC},
+                extra_data={
+                    "chunks_created": len(chunks),
+                    "limit": MAX_CHUNKS_PER_CONTENT,
+                },
             )
             break
 
@@ -338,107 +341,37 @@ def chunk_text(
     return chunks
 
 
-def read_document(file_path: Path, safe_ops: SafeFileOperations) -> str:
+def compute_doc_hash(content: str) -> str:
     """
-    Read document content based on file type using safe file operations.
+    Compute hash for content deduplication.
 
     Args:
-        file_path: Path to the document
-        safe_ops: SafeFileOperations instance for secure file access
+        content: Text content
 
     Returns:
-        Document content as string
-
-    Raises:
-        ValueError: If file type is unsupported or file is too large
-        ImportError: If required library for file type is not installed
+        SHA256 hash string
     """
-    suffix = file_path.suffix.lower()
-
-    # SECURITY: Validate file extension
-    if suffix not in SUPPORTED_FILE_EXTENSIONS:
-        raise ValueError(
-            f"Unsupported file extension: {suffix}. "
-            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}"
-        )
-
-    # SECURITY: Check file size before reading
-    file_size_mb = file_path.stat().st_size / (1024 * 1024)
-    if file_size_mb > MAX_DOC_SIZE_MB:
-        raise ValueError(
-            f"Document size ({file_size_mb:.2f}MB) exceeds limit of {MAX_DOC_SIZE_MB}MB"
-        )
-
-    if suffix in (".txt", ".md"):
-        # Use safe file operations for text files
-        return safe_ops.read_text(str(file_path))
-
-    elif suffix == ".pdf":
-        if not PYPDF_AVAILABLE:
-            raise ImportError(
-                "pypdf is required for PDF files. Install with: pip install pypdf"
-            )
-        # PDF reading requires direct file access (library limitation)
-        # File path is already validated by validate_read_path
-        reader = pypdf.PdfReader(str(file_path))
-        text = []
-        for page in reader.pages:
-            page_text = page.extract_text()
-            text.append(page_text)
-            # SECURITY: Check accumulated text size
-            total_length = sum(len(t) for t in text)
-            if total_length > MAX_DOC_SIZE_MB * 1024 * 1024:
-                raise ValueError(f"PDF content size exceeds {MAX_DOC_SIZE_MB}MB limit")
-        return "\n".join(text)
-
-    elif suffix == ".docx":
-        if not DOCX_AVAILABLE:
-            raise ImportError(
-                "python-docx is required for DOCX files. Install with: pip install python-docx"
-            )
-        # DOCX reading requires direct file access (library limitation)
-        # File path is already validated by validate_read_path
-        doc = Document(str(file_path))
-        paragraphs = []
-        total_length = 0
-        for para in doc.paragraphs:
-            paragraphs.append(para.text)
-            total_length += len(para.text)
-            # SECURITY: Check accumulated text size
-            if total_length > MAX_DOC_SIZE_MB * 1024 * 1024:
-                raise ValueError(f"DOCX content size exceeds {MAX_DOC_SIZE_MB}MB limit")
-        return "\n".join(paragraphs)
-
-    else:
-        # Fallback to safe text reading
-        return safe_ops.read_text(str(file_path))
-
-
-def compute_doc_hash(content: str, file_path: str) -> str:
-    """Compute hash for document deduplication."""
-    return hashlib.sha256(f"{file_path}:{content}".encode()).hexdigest()
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 def ingest_document(
     conn,
     model: SentenceTransformer,
-    file_path: str,
+    content: str,
     collection: str,
     metadata: dict[str, Any] | None,
-    safe_ops: SafeFileOperations,
 ) -> dict[str, Any]:
     """
-    Ingest a document into the knowledge base.
+    Ingest content into the knowledge base.
 
-    Security: Uses validated file paths, size limits, and safe file operations.
+    Security: Uses size limits and content validation.
 
     Args:
         conn: Database connection
         model: Embedding model
-        file_path: Path to document (validated)
+        content: Text content to ingest
         collection: Collection name (validated)
         metadata: Optional metadata
-        safe_ops: SafeFileOperations instance
 
     Returns:
         Ingestion result dictionary
@@ -446,12 +379,11 @@ def ingest_document(
     Raises:
         ValueError: If validation fails or limits exceeded
     """
-    # SECURITY: Validate path for path traversal prevention
-    validated_path = validate_read_path(file_path)
+    # Generate source identifier from content hash
+    source_identifier = f"memorized_{hashlib.sha256(content.encode()).hexdigest()[:16]}"
 
-    # Read document with safe file operations
-    content = read_document(validated_path, safe_ops)
-    doc_hash = compute_doc_hash(content, file_path)
+    # Compute document hash for deduplication
+    doc_hash = compute_doc_hash(content)
 
     # Check if document already exists
     with conn.cursor() as cur:
@@ -460,7 +392,7 @@ def ingest_document(
         if existing:
             return {
                 "status": "skipped",
-                "reason": "Document already exists",
+                "reason": "Content already memorized",
                 "document_id": existing[0],
             }
 
@@ -479,7 +411,7 @@ def ingest_document(
             VALUES (%s, %s, %s, %s)
             RETURNING id
             """,
-            (doc_hash, file_path, collection, json.dumps(metadata or {})),
+            (doc_hash, source_identifier, collection, json.dumps(metadata or {})),
         )
         doc_id = cur.fetchone()[0]
 
@@ -502,7 +434,7 @@ def ingest_document(
         "status": "ingested",
         "document_id": doc_id,
         "chunks_count": len(chunks),
-        "file_path": file_path,
+        "source_identifier": source_identifier,
         "collection": collection,
     }
 
@@ -619,19 +551,19 @@ def search_hybrid(
 
 def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
-    Handle document ingestion with comprehensive validation.
+    Handle content ingestion with comprehensive validation.
 
     Security: Validates all inputs before processing.
     """
     arguments = request.get("arguments", {})
-    file_path = arguments.get("file_path", "")
+    content = arguments.get("content", "")
     collection = arguments.get("collection", "default")
     metadata = arguments.get("metadata")
 
     # SECURITY: Validate all inputs
-    is_valid, error_msg = validate_ingest_request(file_path, collection, metadata)
+    is_valid, error_msg = validate_ingest_request(content, collection, metadata)
     if not is_valid:
-        logger.warning("Invalid ingest request", extra={"error": error_msg})
+        logger.warning("Invalid ingest request", extra_data={"error": error_msg})
         return {
             "success": False,
             "error": {"code": "INVALID_INPUT", "message": error_msg},
@@ -647,16 +579,6 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             },
         }
 
-    # Initialize safe file operations
-    readonly_dir = os.getenv("INPUT_DIR", "/data/input")
-    writable_dir = os.getenv("OUTPUT_DIR", "/data/output")
-
-    safe_ops = SafeFileOperations(
-        readonly_dir=readonly_dir,
-        writable_dir=writable_dir,
-        max_file_size_mb=MAX_DOC_SIZE_MB,
-    )
-
     # Initialize connection pool if not already done
     init_pool(database_url)
 
@@ -667,14 +589,11 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     try:
         with get_connection() as conn:
             ensure_schema(conn)
-            result = ingest_document(
-                conn, model, file_path, collection, metadata, safe_ops
-            )
+            result = ingest_document(conn, model, content, collection, metadata)
 
             logger.info(
-                "Document ingested successfully",
-                extra={
-                    "file_path": file_path,
+                "Content memorized successfully",
+                extra_data={
                     "collection": collection,
                     "status": result["status"],
                     "chunks_count": result.get("chunks_count", 0),
@@ -684,18 +603,18 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             return {
                 "success": True,
                 "content": [
-                    {"type": "text", "text": f"Document ingested: {result['status']}"}
+                    {"type": "text", "text": f"Content memorized: {result['status']}"}
                 ],
                 "structured_content": result,
             }
     except ValueError as e:
-        logger.error("Validation error during ingestion", extra={"error": str(e)})
+        logger.error("Validation error during ingestion", extra_data={"error": str(e)})
         return {
             "success": False,
             "error": {"code": "VALIDATION_ERROR", "message": str(e)},
         }
     except Exception as e:
-        logger.error("Unexpected error during ingestion", extra={"error": str(e)})
+        logger.error("Unexpected error during ingestion", extra_data={"error": str(e)})
         raise
 
 
@@ -716,7 +635,7 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
         query, collection, top_k, search_type
     )
     if not is_valid:
-        logger.warning("Invalid search request", extra={"error": error_msg})
+        logger.warning("Invalid search request", extra_data={"error": error_msg})
         return {
             "success": False,
             "error": {"code": "INVALID_INPUT", "message": error_msg},
@@ -757,7 +676,7 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
 
             logger.info(
                 "Search completed",
-                extra={
+                extra_data={
                     "query_length": len(query),
                     "collection": collection,
                     "search_type": search_type,
@@ -788,7 +707,7 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
                 },
             }
     except Exception as e:
-        logger.error("Error during search", extra={"error": str(e)})
+        logger.error("Error during search", extra_data={"error": str(e)})
         raise
 
 
@@ -835,7 +754,7 @@ def main() -> None:
         valid_operations = {"ingest", "search"}
         if operation not in valid_operations:
             logger.warning(
-                "Invalid operation requested", extra={"operation": operation}
+                "Invalid operation requested", extra_data={"operation": operation}
             )
             result = {
                 "success": False,
@@ -854,7 +773,7 @@ def main() -> None:
 
     except ValueError as e:
         # Validation errors
-        logger.error("Validation error", extra={"error": str(e)})
+        logger.error("Validation error", extra_data={"error": str(e)})
         write_response(
             {
                 "success": False,
@@ -867,7 +786,7 @@ def main() -> None:
         )
     except PermissionError as e:
         # File access errors
-        logger.error("Permission denied", extra={"error": str(e)})
+        logger.error("Permission denied", extra_data={"error": str(e)})
         write_response(
             {
                 "success": False,
@@ -881,7 +800,7 @@ def main() -> None:
     except Exception as e:
         # Unexpected errors
         logger.error(
-            "Unexpected error", extra={"error": str(e), "type": type(e).__name__}
+            "Unexpected error", extra_data={"error": str(e), "type": type(e).__name__}
         )
         write_response(
             {
@@ -899,7 +818,9 @@ def main() -> None:
         try:
             close_pool()
         except Exception as e:
-            logger.warning("Error closing connection pool", extra={"error": str(e)})
+            logger.warning(
+                "Error closing connection pool", extra_data={"error": str(e)}
+            )
 
 
 if __name__ == "__main__":

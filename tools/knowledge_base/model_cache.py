@@ -79,13 +79,13 @@ class ModelCache:
             if cls._model is None or cls._model_name != model_name:
                 logger.info(
                     "Loading embedding model",
-                    extra={"model_name": model_name, "reload": cls._model is not None},
+                    extra_data={"model_name": model_name, "reload": cls._model is not None},
                 )
 
                 # Clear old model if switching
                 if cls._model is not None and cls._model_name != model_name:
                     logger.info(
-                        "Clearing old model", extra={"old_model": cls._model_name}
+                        "Clearing old model", extra_data={"old_model": cls._model_name}
                     )
                     cls._model = None
 
@@ -93,12 +93,12 @@ class ModelCache:
                     cls._model = SentenceTransformer(model_name)
                     cls._model_name = model_name
                     logger.info(
-                        "Model loaded successfully", extra={"model_name": model_name}
+                        "Model loaded successfully", extra_data={"model_name": model_name}
                     )
                 except Exception as e:
                     logger.error(
                         "Failed to load model",
-                        extra={"model_name": model_name, "error": str(e)},
+                        extra_data={"model_name": model_name, "error": str(e)},
                     )
                     raise RuntimeError(
                         f"Failed to load model '{model_name}': {str(e)}"
@@ -112,7 +112,7 @@ class ModelCache:
         with cls._lock:
             if cls._model is not None:
                 logger.info(
-                    "Clearing model cache", extra={"model_name": cls._model_name}
+                    "Clearing model cache", extra_data={"model_name": cls._model_name}
                 )
                 cls._model = None
                 cls._model_name = None

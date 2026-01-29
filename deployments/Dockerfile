@@ -53,6 +53,7 @@ WORKDIR /app
 COPY <<EOF /app/requirements.txt
 # Core dependencies
 requests>=2.31.0
+httpx>=0.27.0
 tenacity>=8.2.0
 validators>=0.20.0
 
@@ -64,6 +65,7 @@ weasyprint>=60.0
 pandas>=2.1.0
 openpyxl>=3.1.0
 numpy>=1.24.0
+matplotlib>=3.8.0
 
 # Vision/OCR
 opencv-python-headless>=4.8.0

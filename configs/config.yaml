@@ -68,17 +68,34 @@ tools:
       properties:
         file_path:
           type: string
-          description: "Path to the Excel or CSV file to analyze"
+          description: "Path to the Excel or CSV file to analyze (optional if __files__ is provided)"
         question:
           type: string
           description: "Natural language question about the data"
         output_format:
           type: string
-          enum: ["text", "json", "markdown"]
+          enum: ["text", "json", "markdown", "image", "png"]
           default: "text"
           description: "Output format for the analysis results"
+        __files__:
+          type: array
+          description: "List of attached files with URLs for content access (OpenWebUI integration)"
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                description: "File type indicator (e.g., 'file' or 'url')"
+              url:
+                type: string
+                description: "HTTP URL to access file content"
+              name:
+                type: string
+                description: "Original filename"
+              id:
+                type: string
+                description: "Unique file identifier"
       required:
-        - file_path
         - question
 
   # Vision/OCR
@@ -106,25 +123,25 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Ingest documents into the knowledge base. Supports PDF, TXT, MD, and DOCX files."
+    description: "Memorize text content directly into the knowledge base for semantic search and future retrieval."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
     input_schema:
       type: object
       properties:
-        file_path:
+        content:
           type: string
-          description: "Path to the document to ingest"
+          description: "The text content to memorize and store in the knowledge base."
         collection:
           type: string
           default: "default"
-          description: "Collection name for organizing documents"
+          description: "Collection name for organizing memorized content."
         metadata:
           type: object
-          description: "Additional metadata to associate with the document"
+          description: "Additional metadata to associate with the content (e.g., source, topic, timestamp)."
       required:
-        - file_path
+        - content
 
   # Knowledge Base - Search
   - name: "kb_search"

@@ -136,41 +136,47 @@ class LLMCache:
     def get(self, prompt: str, model: str) -> Optional[str]:
         key = self._generate_key(prompt, model)
         try:
-            cached = self.redis.get(key)
+            r = self.redis  # This may raise if Redis not available
+            cached = r.get(key)
             if not cached:
                 return None
 
             decoded = cached.decode("utf-8")
             return self._unpack_value(decoded)
 
-        except redis.RedisError as e:
-            logger.error(f"Redis error during get: {e}")
+        except RuntimeError as e:
+            # Redis not available
+            logger.warning(f"Redis not available: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error during cache get: {e}")
+            logger.error(f"Error during cache get: {e}")
             return None
 
     def set(self, prompt: str, model: str, response: str):
         key = self._generate_key(prompt, model)
         try:
+            r = self.redis  # This may raise if Redis not available
             packed = self._pack_value(response)
-            self.redis.setex(key, self.ttl, packed)
+            r.setex(key, self.ttl, packed)
             logger.debug(f"Cached LLM response for key: {key}")
 
-        except redis.RedisError as e:
-            logger.error(f"Redis error during set: {e}")
+        except RuntimeError as e:
+            # Redis not available
+            logger.warning(f"Redis not available: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error during cache set: {e}")
+            logger.error(f"Error during cache set: {e}")
 
     def invalidate(self, prompt: str, model: str):
         key = self._generate_key(prompt, model)
         try:
-            self.redis.delete(key)
+            r = self.redis  # This may raise if Redis not available
+            r.delete(key)
             logger.debug(f"Invalidated cache key: {key}")
-        except redis.RedisError as e:
-            logger.error(f"Redis error during invalidate: {e}")
+        except RuntimeError as e:
+            # Redis not available
+            logger.warning(f"Redis not available: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error during cache invalidate: {e}")
+            logger.error(f"Error during cache invalidate: {e}")
 
 
 _cache_instance = None

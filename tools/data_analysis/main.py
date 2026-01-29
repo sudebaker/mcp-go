@@ -16,7 +16,7 @@ import sys
 import re
 import traceback
 import os
-from io import StringIO
+from io import StringIO, BytesIO
 from pathlib import Path
 from typing import Any, Callable, Optional
 from contextlib import redirect_stdout, redirect_stderr
@@ -48,6 +48,14 @@ except ImportError:
     REQUESTS_AVAILABLE = False
     requests = None  # type: ignore
 
+try:
+    import httpx
+
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
+    httpx = None  # type: ignore
+
 
 # Constants
 CHUNK_PREFIX = "__CHUNK__:"
@@ -57,7 +65,7 @@ RESULT_PREFIX = "__RESULT__:"
 MAX_QUESTION_LENGTH = 2000
 MAX_FILE_SIZE_MB = 100
 MAX_PROMPT_LENGTH = 50000
-ALLOWED_OUTPUT_FORMATS = {"text", "json", "markdown"}
+ALLOWED_OUTPUT_FORMATS = {"text", "json", "markdown", "image"}
 SUPPORTED_FILE_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 _chunks_sent: list = []
@@ -91,33 +99,30 @@ def write_response(response: dict[str, Any]) -> None:
 
 
 def validate_request_input(
-    file_path: str, question: str, output_format: str
-) -> tuple[bool, Optional[str]]:
+    file_path: Optional[str],
+    question: str,
+    output_format: str,
+    files_list: Optional[list] = None,
+) -> tuple[bool, Optional[str], str]:
     """
     Validate all request inputs.
 
     Returns:
-        (is_valid, error_message) tuple
+        (is_valid, error_message, normalized_output_format) tuple
     """
-    # Validate file path
-    if not file_path or not isinstance(file_path, str):
-        return False, "file_path must be a non-empty string"
-
-    path = Path(file_path)
-    if path.suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
-        return (
-            False,
-            f"Unsupported file extension. Allowed: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
-        )
+    # Normalize output format (map 'png' to 'image')
+    if output_format and output_format.lower() == "png":
+        output_format = "image"
 
     # Validate question
     if not question or not isinstance(question, str):
-        return False, "question must be a non-empty string"
+        return False, "question must be a non-empty string", output_format
 
     if len(question) > MAX_QUESTION_LENGTH:
         return (
             False,
             f"question exceeds maximum length of {MAX_QUESTION_LENGTH} characters",
+            output_format,
         )
 
     # Validate output format
@@ -125,9 +130,97 @@ def validate_request_input(
         return (
             False,
             f"Invalid output_format. Allowed: {', '.join(ALLOWED_OUTPUT_FORMATS)}",
+            output_format,
         )
 
-    return True, None
+    # Validate file source (either file_path OR __files__ must be provided)
+    has_file_path = file_path and isinstance(file_path, str) and file_path.strip()
+    has_files_list = files_list and len(files_list) > 0
+
+    if not has_file_path and not has_files_list:
+        return False, "Either file_path or __files__ must be provided", output_format
+
+    # If file_path is provided, validate extension
+    if has_file_path:
+        path = Path(file_path)
+        if path.suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
+            return (
+                False,
+                f"Unsupported file extension. Allowed: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                output_format,
+            )
+
+    return True, None, output_format
+
+
+def download_file_from_url(file_url: str, filename: str) -> BytesIO:
+    """
+    Download file content from URL.
+
+    Args:
+        file_url: HTTP URL to download from
+        filename: Original filename for error messages
+
+    Returns:
+        BytesIO buffer containing file content
+
+    Raises:
+        Exception: If download fails
+    """
+    if not HTTPX_AVAILABLE:
+        raise ImportError("httpx is not installed. Install with: pip install httpx")
+
+    try:
+        # Use httpx to download file synchronously
+        with httpx.Client(timeout=60.0) as client:
+            response = client.get(file_url)
+            response.raise_for_status()
+            return BytesIO(response.content)
+    except Exception as e:
+        raise Exception(
+            f"Failed to download file '{filename}' from URL: {str(e)}"
+        ) from e
+
+
+def load_data_from_buffer(buffer: BytesIO, filename: str) -> "pd.DataFrame":
+    """
+    Load data from an in-memory buffer.
+
+    Args:
+        buffer: BytesIO buffer containing file content
+        filename: Original filename to determine file type
+
+    Returns:
+        pandas DataFrame with loaded data
+
+    Raises:
+        ValueError: If file format is unsupported
+    """
+    if not PANDAS_AVAILABLE:
+        raise ImportError("pandas is not installed")
+
+    # Determine file type from extension
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_FILE_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file format: {suffix}. "
+            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}"
+        )
+
+    # Reset buffer position to start
+    buffer.seek(0)
+
+    # Load using pandas
+    try:
+        if suffix == ".csv":
+            return pd.read_csv(buffer)
+        elif suffix in (".xlsx", ".xls"):
+            return pd.read_excel(buffer)
+        else:
+            # Fallback: try CSV
+            return pd.read_csv(buffer)
+    except Exception as e:
+        raise ValueError(f"Failed to parse file '{filename}': {str(e)}") from e
 
 
 def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
@@ -394,9 +487,12 @@ def main() -> None:
         question = arguments.get("question", "")
         output_format = arguments.get("output_format", "text")
         use_sandbox = arguments.get("use_sandbox", True)
+        files_list = arguments.get("__files__", [])
 
         # Validate all inputs
-        is_valid, error_msg = validate_request_input(file_path, question, output_format)
+        is_valid, error_msg, output_format = validate_request_input(
+            file_path, question, output_format, files_list
+        )
         if not is_valid:
             write_response(
                 {
@@ -438,11 +534,97 @@ def main() -> None:
             max_file_size_mb=max_size_mb,
         )
 
-        emit_chunk("status", {"message": "Loading data file", "file": file_path})
+        # Determine data source and load data
+        df = None
+        actual_filename = "data"
 
-        # Load data with safe file operations
-        df = load_data(file_path, safe_ops)
-        emit_chunk("data_loaded", {"rows": df.shape[0], "columns": df.shape[1]})
+        if files_list and len(files_list) > 0:
+            # Use __files__ parameter (OpenWebUI integration)
+            emit_chunk("status", {"message": "Downloading file from OpenWebUI"})
+
+            # Find first suitable data file
+            data_file = None
+            for file_item in files_list:
+                filename = file_item.get("name", "")
+                suffix = Path(filename).suffix.lower()
+                if suffix in SUPPORTED_FILE_EXTENSIONS:
+                    data_file = file_item
+                    actual_filename = filename
+                    break
+
+            if not data_file:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_INPUT",
+                            "message": f"No supported data file found in __files__. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                        },
+                    }
+                )
+                return
+
+            # Download file from URL
+            file_url = data_file.get("url", "")
+            if not file_url:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_INPUT",
+                            "message": "File URL not provided in __files__",
+                        },
+                    }
+                )
+                return
+
+            try:
+                buffer = download_file_from_url(file_url, actual_filename)
+                df = load_data_from_buffer(buffer, actual_filename)
+                emit_chunk(
+                    "data_loaded",
+                    {"rows": df.shape[0], "columns": df.shape[1], "source": "url"},
+                )
+            except Exception as e:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "FILE_DOWNLOAD_ERROR",
+                            "message": str(e),
+                        },
+                    }
+                )
+                return
+
+        elif file_path:
+            # Use traditional file_path (legacy support)
+            emit_chunk("status", {"message": "Loading data file", "file": file_path})
+            actual_filename = Path(file_path).name
+            df = load_data(file_path, safe_ops)
+            emit_chunk(
+                "data_loaded",
+                {"rows": df.shape[0], "columns": df.shape[1], "source": "file_path"},
+            )
+
+        else:
+            # This should not happen due to validation, but just in case
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "No data source provided",
+                    },
+                }
+            )
+            return
+
+        # Continue with existing logic...
 
         data_summary = get_data_summary(df)
 
@@ -463,11 +645,33 @@ def main() -> None:
             "5. Keep the code simple and efficient\n",
             "6. Use print() if you need to show intermediate steps\n",
             "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
-            "8. For visualizations, save to writable directory with .png extension\n",
-            "9. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
-            "10. DO NOT import any modules - use only pre-imported: pd, np, json, datetime, math, re\n\n",
-            "Python code:\n```python\n",
         ]
+
+        # Add visualization-specific instructions for image output format
+        if output_format == "image":
+            prompt_parts.extend(
+                [
+                    "8. VISUALIZATION REQUIRED: Create a chart/plot using matplotlib\n",
+                    "9. Import matplotlib: import matplotlib.pyplot as plt; import matplotlib; matplotlib.use('Agg')\n",
+                    "10. Save the plot: plt.savefig('/data/output/chart.png', dpi=150, bbox_inches='tight'); plt.close()\n",
+                    "11. Set result='Chart saved successfully' after saving\n",
+                    "12. DO NOT use plt.show() - only plt.savefig()\n",
+                ]
+            )
+        else:
+            prompt_parts.extend(
+                [
+                    "8. For visualizations, save to writable directory with .png extension\n",
+                ]
+            )
+
+        prompt_parts.extend(
+            [
+                "13. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
+                "14. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re\n\n",
+                "Python code:\n```python\n",
+            ]
+        )
 
         prompt = "".join(prompt_parts)
 

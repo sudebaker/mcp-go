@@ -40,6 +40,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
 
   # MCPO proxy: converts MCP Streamable HTTP -> OpenAPI for OpenWebUI
   mcpo:
@@ -55,6 +63,14 @@ services:
       - mcp-network
       - docker_default
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -76,6 +92,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
 networks:
   mcp-network:

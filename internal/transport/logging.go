@@ -1,9 +1,11 @@
 package transport
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/rs/zerolog/log"
 )
 
@@ -65,5 +67,43 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			Int64("bytes", wrapped.written).
 			Dur("duration_ms", duration).
 			Msg("Request completed")
+	})
+}
+
+// TracingMiddleware adds distributed tracing to HTTP requests
+func TracingMiddleware(tracer *tracing.Tracer, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Start tracing span for this HTTP request
+		span, ctx := tracer.StartSpan(r.Context(), fmt.Sprintf("http:%s:%s", r.Method, r.URL.Path))
+		defer span.End()
+
+		start := time.Now()
+
+		// Wrap response writer to capture status code
+		wrapped := newResponseWriter(w)
+
+		// Set request attributes on span
+		span.SetAttribute("http.method", r.Method)
+		span.SetAttribute("http.path", r.URL.Path)
+		span.SetAttribute("http.query", r.URL.RawQuery)
+		span.SetAttribute("http.remote_addr", r.RemoteAddr)
+		span.SetAttribute("http.user_agent", r.UserAgent())
+
+		// Create new request with traced context
+		r = r.WithContext(ctx)
+
+		// Call next handler
+		next.ServeHTTP(wrapped, r)
+
+		// Record response attributes
+		duration := time.Since(start)
+		span.SetAttribute("http.status_code", wrapped.statusCode)
+		span.SetAttribute("http.response_bytes", wrapped.written)
+		span.SetAttribute("http.duration_ms", duration.Milliseconds())
+
+		// Record errors if status indicates error
+		if wrapped.statusCode >= 400 {
+			span.RecordError(fmt.Errorf("HTTP %d %s", wrapped.statusCode, http.StatusText(wrapped.statusCode)))
+		}
 	})
 }

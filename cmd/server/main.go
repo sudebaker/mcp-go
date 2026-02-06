@@ -12,6 +12,7 @@ import (
 
 	"github.com/amphora/mcp-go/internal/config"
 	"github.com/amphora/mcp-go/internal/executor"
+	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -63,8 +64,12 @@ func main() {
 		Int("tools_count", len(cfg.Tools)).
 		Msg("Configuration loaded")
 
+	// Initialize tracing
+	tracer := tracing.NewTracer(cfg.Server.Name)
+	log.Debug().Msg("Distributed tracing initialized")
+
 	// Create executor
-	exec := executor.New(cfg)
+	exec := executor.NewWithTracer(cfg, tracer)
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -98,6 +103,7 @@ func main() {
 		Tools:             cfg.Tools,
 		RateLimitRPS:      cfg.Server.RateLimitRPS,
 		RateLimitBurst:    cfg.Server.RateLimitBurst,
+		Tracer:            tracer,
 	})
 
 	// Setup graceful shutdown

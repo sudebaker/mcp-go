@@ -125,7 +125,7 @@ Generated: Febrero 2026 | MCP-Go Orchestrator v1.0
 **Key Sections**:
 - Verify available files
 - Copy uploaded files
-- Example queries for OpenWebUI
+- Example MCP API queries
 
 #### USAGE.md
 **Purpose**: Detailed guide for each tool  

@@ -9,6 +9,7 @@ import (
 
 	"github.com/amphora/mcp-go/internal/config"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -70,6 +71,9 @@ func (s *MCPServer) Start() error {
 	// Health endpoint (no rate limiting for health checks)
 	mux.HandleFunc("/health", s.handleHealth)
 
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
 	// OpenAPI spec and Docs
 	s.setupDocsEndpoints(mux)
 
@@ -109,6 +113,12 @@ func (s *MCPServer) Start() error {
 // Shutdown gracefully shuts down the server
 func (s *MCPServer) Shutdown(ctx context.Context) error {
 	log.Info().Msg("Shutting down MCP server")
+
+	// Stop rate limiter cleanup goroutine to prevent memory leak
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
+	}
+
 	if s.httpServer != nil {
 		return s.httpServer.Shutdown(ctx)
 	}

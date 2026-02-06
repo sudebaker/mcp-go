@@ -15,6 +15,7 @@ type RateLimiter struct {
 	cleanupTicker *time.Ticker
 	cleanupStop   chan struct{}
 	maxIdleTime   time.Duration
+	stopOnce      sync.Once
 }
 
 type tokenBucket struct {
@@ -164,5 +165,7 @@ func (rl *RateLimiter) cleanup() {
 }
 
 func (rl *RateLimiter) Stop() {
-	close(rl.cleanupStop)
+	rl.stopOnce.Do(func() {
+		close(rl.cleanupStop)
+	})
 }

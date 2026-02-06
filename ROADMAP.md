@@ -440,8 +440,8 @@ TESTING:
 ☐ tests/test_excel_analysis.sh // Passing
 ☐ tests/test_logging.sh // Passing
 ☐ tests/integration_test.go // All passing
-☐ Manual test: Upload file to OpenWebUI
-☐ Manual test: Query analysis from OpenWebUI
+☐ Manual test: Tool execution with various clients
+☐ Manual test: Query MCP endpoints directly
 ☐ Manual test: Check logs are structured JSON
 ☐ Manual test: Verify metrics in /metrics endpoint
 

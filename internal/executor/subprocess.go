@@ -44,6 +44,11 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		return nil, fmt.Errorf("tool '%s' not found in configuration", toolName)
 	}
 
+	// Validate arguments against the tool's input schema
+	if err := validateInputArguments(toolCfg.InputSchema, arguments); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+
 	timeout := toolCfg.Timeout
 	if timeout == 0 {
 		timeout = e.config.Execution.DefaultTimeout
@@ -254,6 +259,132 @@ func buildEnvironment(envMap map[string]string) []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env
+}
+
+// validateInputArguments validates that the provided arguments match the tool's input schema
+func validateInputArguments(inputSchema map[string]interface{}, args map[string]interface{}) error {
+	if inputSchema == nil {
+		// No schema defined, accept anything
+		return nil
+	}
+
+	// Check for required fields
+	if required, ok := inputSchema["required"].([]interface{}); ok {
+		for _, r := range required {
+			field, ok := r.(string)
+			if !ok {
+				continue
+			}
+			if _, exists := args[field]; !exists {
+				return fmt.Errorf("required field '%s' is missing", field)
+			}
+		}
+	}
+
+	// Get properties schema if defined
+	properties, ok := inputSchema["properties"].(map[string]interface{})
+	if !ok || properties == nil {
+		// No properties defined, accept anything
+		return nil
+	}
+
+	// Validate each provided argument against its property schema
+	for argName, argValue := range args {
+		prop, exists := properties[argName]
+		if !exists {
+			// Extra fields are allowed (best effort validation)
+			continue
+		}
+
+		propSchema, ok := prop.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Validate type if specified
+		if expectedType, ok := propSchema["type"].(string); ok {
+			if !validateType(argValue, expectedType) {
+				return fmt.Errorf("argument '%s' has invalid type: expected %s, got %T", argName, expectedType, argValue)
+			}
+		}
+
+		// Validate enum if specified
+		if enumVals, ok := propSchema["enum"].([]interface{}); ok {
+			if !validateEnum(argValue, enumVals) {
+				return fmt.Errorf("argument '%s' has invalid value: not in allowed enum values", argName)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateType checks if a value matches the expected JSON schema type
+func validateType(value interface{}, schemaType string) bool {
+	switch schemaType {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "number":
+		switch value.(type) {
+		case float64, float32, int, int32, int64:
+			return true
+		}
+		return false
+	case "integer":
+		switch value.(type) {
+		case float64: // JSON unmarshals numbers as float64
+			// Check if it's actually an integer
+			f := value.(float64)
+			return f == float64(int64(f))
+		case int, int32, int64:
+			return true
+		}
+		return false
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "array":
+		_, ok := value.([]interface{})
+		return ok
+	case "object":
+		_, ok := value.(map[string]interface{})
+		return ok
+	case "null":
+		return value == nil
+	default:
+		return true // Unknown type, accept
+	}
+}
+
+// validateEnum checks if a value is in the allowed enum values
+func validateEnum(value interface{}, enumVals []interface{}) bool {
+	for _, enumVal := range enumVals {
+		if compareValues(value, enumVal) {
+			return true
+		}
+	}
+	return false
+}
+
+// compareValues compares two values for equality
+func compareValues(a, b interface{}) bool {
+	switch av := a.(type) {
+	case string:
+		bv, ok := b.(string)
+		return ok && av == bv
+	case float64:
+		switch bv := b.(type) {
+		case float64:
+			return av == bv
+		case int:
+			return av == float64(bv)
+		}
+	case bool:
+		bv, ok := b.(bool)
+		return ok && av == bv
+	}
+	return false
 }
 
 func ValidateToolConfig(toolCfg *config.ToolConfig) error {

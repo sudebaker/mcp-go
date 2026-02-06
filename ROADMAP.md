@@ -190,15 +190,241 @@ Stage 4: Runtime           ✅ Ambos binarios + Python
 
 | Aspecto | Estado | Notas | Cambio |
 |---|---|---|---|
-| **Código Quality** | ✅ 8.5/10 | Profesional, bien estructurado, validado | ↑ |
-| **Testing** | ✅ 8/10 | Unit bueno + 7 integration tests | ↑↑ |
+| **Código Quality** | ⚠️ 7.8/10 | Profesional pero con issues de concurrencia | ↓ |
+| **Testing** | ⚠️ 6.5/10 | Tests dummy, falta -race, coverage incompleto | ↓ |
 | **Documentation** | ✅ 8/10 | Completa pero sin prod guide | = |
-| **Deployment** | ✅ 8.5/10 | Docker optimizado, falta resource limits | = |
-| **Monitoring** | ✅ 7.5/10 | Logs + Prometheus /metrics endpoint | ↑↑ |
-| **Security** | ✅ 7/10 | Path protection + input validation | ↑ |
-| **Error Handling** | ✅ 8.5/10 | Muy bueno + schema validation | ↑ |
-| **Performance** | ✅ 8/10 | Rate limiting (fixed), streaming, timeouts | ↑ |
-| **OVERALL** | ✅ 8.5/10 | STAGING READY | ↑ from 8.2 |
+| **Deployment** | ⚠️ 7.5/10 | Docker resource limits insuficientes | ↓ |
+| **Monitoring** | ✅ 8/10 | Logs + Prometheus /metrics + tracing | ↑↑ |
+| **Security** | ⚠️ 6.5/10 | Path protection + input validation + no span auth | ↓ |
+| **Error Handling** | ✅ 8.5/10 | Muy bueno + schema validation | = |
+| **Performance** | ⚠️ 7.5/10 | Rate limiting OK pero reflection overhead | ↓ |
+| **OVERALL** | ⚠️ 8.0/10 | STAGING-READY pero NOT PROD-GRADE | ↓ from 8.5 |
+
+**EXPLICACIÓN DEL DOWNGRADE: De 8.5 → 8.0**
+- Fase 2 introdujo problemas que contradicen objetivos production-ready
+- Race condition en SetAttribute es CRÍTICO
+- Tests insuficientes no validan implementación
+- Resource limits mal configurados
+- Custom tracer NO es estándar OpenTelemetry
+- **Conclusión: Funcional para staging, pero requiere REFACTOR antes producción**
+
+---
+
+## IV.B CRÍTICA TÉCNICA POST-IMPLEMENTACIÓN FASE 2 (Senior Go Review)
+
+Como desarrollador senior en Go, debo ser crítico sobre la calidad del código de Fase 2. He identificado problemas significativos:
+
+### **PROBLEMAS CRÍTICOS ENCONTRADOS**
+
+#### **1. Race Condition en SetAttribute (🔴 CRÍTICO)**
+
+**Código Problemático**:
+```go
+// internal/tracing/tracer.go:49-56
+func (s *Span) SetAttribute(key string, value interface{}) {
+    if s == nil {
+        return
+    }
+    if s.attributes == nil {
+        s.attributes = make(map[string]interface{})
+    }
+    s.attributes[key] = value  // ❌ RACE CONDITION
+}
+```
+
+**Problema**: Si dos goroutines llaman SetAttribute simultáneamente:
+- Thread 1: Chequea `if s.attributes == nil`
+- Thread 2: También chequea, entra a make
+- Thread 1: Entra a make → PANIC: `concurrent map writes`
+
+**Evidencia**: Sin sincronización en map no se puede escribir concurrentemente.
+
+**Impacto Crítico**:
+- En producción con múltiples requests: CRASH por panic
+- Los middleware HTTP corren en goroutines
+- Cada request ejecuta `TracingMiddleware` en separate goroutine
+
+**Solución Requerida (Fase 3)**:
+```go
+// Opción A: sync.RWMutex
+type Span struct {
+    mu            sync.RWMutex
+    attributes    map[string]interface{}
+}
+
+// Opción B: sync.Map (mejor para alta concurrencia)
+type Span struct {
+    attributes *sync.Map
+}
+```
+
+---
+
+#### **2. No sigue Go Proverbs - "Explicit is better than implicit"**
+
+**Problema**:
+```go
+// internal/transport/logging.go:77-78
+span, ctx := tracer.StartSpan(r.Context(), ...)
+defer span.End()  // ✅ Safe (nil.End() es no-op)
+```
+
+Aunque safe, NO es idiomatic Go:
+```go
+// ❌ Go convention: si pueden retornar nil, CHECK IT
+defer span.End()
+
+// ✅ Idiomatic Go:
+if span != nil {
+    defer span.End()
+}
+```
+
+---
+
+#### **3. Reflection Overhead en Logging de Atributos**
+
+**Código**:
+```go
+// internal/tracing/tracer.go:74-75
+for k, v := range s.attributes {
+    logEvent = logEvent.Interface(k, v)  // ❌ Reflection
+}
+```
+
+**Problema**: `Interface()` usa reflection para serializar cada value.
+- **Impacto**: Con 1000 req/sec × 5 atributos = 5000 reflection ops/sec
+- **Overhead**: ~2-5% CPU extra
+
+**Solución Fase 3**:
+```go
+// Usar zerolog.Dict para typed attributes (sin reflection)
+dict := zerolog.Dict()
+for k, v := range s.attributes {
+    // Usar Type-safe methods: .Str(), .Int(), etc
+}
+logEvent.Dict("attributes", dict).Msg("Span completed")
+```
+
+---
+
+#### **4. NoOpTracer debería ser singleton**
+
+**Problema**:
+```go
+// cmd/server/main.go
+tracer := tracing.NewTracer(cfg.Server.Name)
+
+// internal/executor/subprocess.go
+func New(cfg *config.Config) *Executor {
+    return &Executor{
+        config: cfg,
+        tracer: tracing.NoOpTracer(),  // ❌ Crea nuevo NoOp cada vez
+    }
+}
+```
+
+**Impacto**: Múltiples instancias inútiles de NoOpTracer.
+- Pequeño pero no es Go idiomático
+- Debería ser global singleton: `var noop = &Tracer{enabled: false}`
+
+---
+
+#### **5. Missing Span IDs para distributed tracing real**
+
+**Problema**:
+```go
+// Span NO tiene ID propio
+type Span struct {
+    operationName string  // ✅
+    startTime     time.Time  // ✅
+    serviceName   string  // ✅
+    attributes    map[string]interface{}  // ✅
+    // ❌ MISSING: id, traceID, parentSpanID
+}
+```
+
+**Impacto Crítico**: 
+- No hay forma de correlacionar spans entre servicios
+- NOT compatible con OpenTelemetry estándar
+- Distributed tracing NO FUNCIONA
+
+---
+
+#### **6. Tests son dummy - No validan comportamiento**
+
+**Problema**:
+```go
+// tests/integration_test.go
+func TestTracingMiddleware(t *testing.T) {
+    tracer := tracing.NewTracer("test-service")
+    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("OK"))
+    })
+    tracedHandler := transport.TracingMiddleware(tracer, handler)
+    req := httptest.NewRequest("GET", "/test", nil)
+    w := httptest.NewRecorder()
+    tracedHandler.ServeHTTP(w, req)
+    
+    require.Equal(t, http.StatusOK, w.Code)  // ✅ Trivial assertion
+    // ❌ NO VALIDAR que el span se logueo
+    // ❌ NO VALIDAR que los atributos fueron seteados
+    // ❌ NO VALIDAR output JSON
+}
+```
+
+**Falta**: 
+- Validación de logs reales
+- Validación de atributos
+- Test de error cases
+- Concurrency testing con `-race`
+
+---
+
+#### **7. Context propagation NO es completa**
+
+**Problema**:
+```go
+// internal/transport/logging.go:77
+span, ctx := tracer.StartSpan(r.Context(), ...)
+// ❌ ctx nunca se usa para propagar valores
+r = r.WithContext(ctx)
+```
+
+Si necesitas pasar span ID downstream:
+```go
+ctx = context.WithValue(ctx, "span.id", span.id)  // ❌ NO EXISTE
+```
+
+---
+
+### **RESUMEN DE CRÍTICA TÉCNICA**
+
+| Problema | Tipo | Severidad | Blockeante? |
+|----------|------|-----------|------------|
+| Race condition en SetAttribute | Concurrency | 🔴 CRÍTICO | ✅ SÍ - CRASH |
+| No idiomatic nil checks | Code Style | 🟡 BAJO | ❌ NO |
+| Reflection overhead | Performance | 🟠 MEDIO | ❌ NO |
+| NoOpTracer no singleton | Design | 🟡 BAJO | ❌ NO |
+| Missing span IDs | Architecture | 🔴 CRÍTICO | ✅ SÍ - NO WORKS |
+| Dummy tests | Testing | 🔴 CRÍTICO | ✅ SÍ - NO VALIDATE |
+| Context propagation incomplete | Architecture | 🟠 MEDIO | ❌ NO (yet) |
+
+### **IMPACTO EN ROADMAP**
+
+**Cambio de puntuación**: 8.7/10 → **8.0/10** (downgrade de 0.7)
+
+**Razón**: La Fase 2 introdujo código funcional pero no production-grade:
+- ✅ Compile y rueda sin errores
+- ✅ Tests pasan (pero son inútiles)
+- ❌ Race conditions causarán crashes en producción
+- ❌ No es distributed tracing real (violeta estándares)
+- ❌ Refactor necesario antes producción
+
+**Recomendación**:
+- **Staging**: OK para hoy
+- **Producción**: REQUIERE Fase 3 para reparar problemas críticos
 
 ---
 
@@ -292,10 +518,11 @@ func validateInputArguments(inputSchema map[string]interface{}, args map[string]
 
 ---
 
-### **FASE 2: High Priority Improvements (2-3 días) 🟠 IMPORTANTES - ✅ COMPLETADA**
+### **FASE 2: High Priority Improvements (2-3 días) 🟠 IMPORTANTES - ✅ COMPLETADA (CON CRÍTICA)**
 
-#### **1. ✅ Add OpenTelemetry Tracing - COMPLETADO**
-**Implementación**: Distributed tracing con custom Tracer y Span types  
+#### **1. ✅ Add OpenTelemetry Tracing - COMPLETADO (Con Mejoras Necesarias)**
+
+**Implementación**: Custom distributed tracing (NOT OpenTelemetry estándar)
 **Archivos Modificados**: 
 - `internal/tracing/tracer.go` (NEW, 101 lines) - Core tracing package
 - `cmd/server/main.go` (+8 lines) - Tracer initialization
@@ -304,19 +531,143 @@ func validateInputArguments(inputSchema map[string]interface{}, args map[string]
 - `internal/transport/sse.go` (+14 lines) - TracingMiddleware integration
 
 **Features Implementadas**:
-- Span creation para cada tool execution con atributos: request_id, tool_name, timeout, duration, exit_code, error_code
-- HTTP request tracing middleware capturando: method, path, query, remote_addr, user_agent, status_code, response_bytes, duration_ms
-- Error recording en spans para debugging distribuido
-- NoOp tracer para cuando no está configurado
-- Structured logging integration con zerolog
+- ✅ Span creation para cada tool execution con atributos: request_id, tool_name, timeout, duration, exit_code, error_code
+- ✅ HTTP request tracing middleware capturando: method, path, query, remote_addr, user_agent, status_code, response_bytes, duration_ms
+- ✅ Error recording en spans para debugging distribuido
+- ✅ NoOp tracer para cuando no está configurado
+- ✅ Structured logging integration con zerolog
 
 **Tests**: 5 nuevos tests (TestTracingMiddleware, TestTracingMiddlewareWithError, TestExecutorWithTracing, TestNoOpTracer, TestTracingWithNilTracer)
+
+**Evaluación de Tests**: ⚠️ INSUFICIENTES
+
+```
+Problema 1: Tests NO validan span output
+  ❌ TestTracingMiddleware NO verifica que los spans se loguean correctamente
+  ❌ No hay assertions sobre los log outputs
+  ❌ No se valida que SetAttribute fue llamado
+  
+Problema 2: Falta testing de concurrencia (CRÍTICO)
+  ❌ NO hay tests con multiple goroutines
+  ❌ No hay -race detector verification en CI
+  ❌ SetAttribute race condition NOT tested
+  Recomendación:
+  go test -race ./... (debería estar en CI)
+  
+Problema 3: TestExecutorWithTracing es dummy
+  ❌ Solo verifica que executor fue creado (useless)
+  ❌ No ejecuta herramienta real
+  ❌ No valida que spans fueron creados
+  
+Problema 4: TestNoOpTracer missing assertions
+  ❌ Solo valida que no panic (no garantiza corrección)
+  ❌ Debería validar que NoOp NO loguea nada
+  
+Problema 5: Span error recording NOT tested
+  ❌ RecordError("value") nunca validado
+  ❌ No test para error attributes
+  
+Recomendación Fase 3: 
+  - Implementar mock logger para capturar outputs
+  - Agregar -race flag en go test
+  - Test concurrencia explícitamente
+  - Validar atributos en logs (buscar JSON en output)
+```
 
 **Tiempo Real**: 1.5 horas
 
 ---
 
-#### **2. ✅ Expose Health Checks vía HTTP - COMPLETADO**
+**🔴 CRÍTICA TÉCNICA SENIOR (Revisión Post-Implementación)**
+
+He identificado **5 problemas importantes** que deben ser abordados antes de Fase 3:
+
+**PROBLEMA 1: NOT OpenTelemetry - Custom implementation sin estándares**
+```
+GRAVEDAD: 🟠 ALTO
+CONTEXTO: Se implementó un custom tracer pero NO es OpenTelemetry estándar
+IMPACTO:  - No integrable con Jaeger, DataDog, New Relic, etc
+          - No sigue estándares W3C Trace Context
+          - Si luego necesitas real tracing, hay que reescribir todo
+RECOMENDACIÓN: En Fase 3, migrar a "go.opentelemetry.io/otel"
+```
+
+**PROBLEMA 2: Memory Leak en TracingMiddleware - Context injection seguro**
+```go
+// PROBLEMA: El contexto se inyecta pero no se revierte
+r = r.WithContext(ctx)  // ❌ Puede tener contexto inválido
+// RIESGO: Si StartSpan() devuelve nil en NoOpTracer, se pierde info
+
+// CORRECCIÓN FASE 3:
+span, spanCtx := tracer.StartSpan(r.Context(), opName)
+if span != nil {
+    defer span.End()
+    r = r.WithContext(spanCtx)
+}
+```
+
+**PROBLEMA 3: Race Condition - SetAttribute sin sincronización**
+```go
+// PROBLEMA: En tracer.go:49-56
+type Span struct {
+    attributes map[string]interface{}  // ❌ No thread-safe
+}
+
+func (s *Span) SetAttribute(key string, value interface{}) {
+    // ❌ Si dos goroutines escriben simultáneamente → panic
+    if s.attributes == nil {
+        s.attributes = make(map[string]interface{})
+    }
+    s.attributes[key] = value
+}
+// RIESGO: Race condition si handler ejecuta span en múltiples goroutines
+// RECOMENDACIÓN: Agregar sync.RWMutex o usar sync/atomic
+```
+
+**PROBLEMA 4: Ignored return value - StartSpan context never checked**
+```go
+// En logging.go:77
+span, ctx := tracer.StartSpan(r.Context(), fmt.Sprintf("http:%s:%s", r.Method, r.URL.Path))
+// ❌ Nunca se valida si ctx == nil o si span == nil
+defer span.End()  // Safe porque End() maneja nil, pero...
+// ✅ Es seguro pero NO es Go idiomático - mejor seria:
+
+if span != nil {
+    defer span.End()
+}
+```
+
+**PROBLEMA 5: Span attributes logging overhead - Performance impact en errores**
+```go
+// En tracer.go:74-75
+for k, v := range s.attributes {
+    logEvent = logEvent.Interface(k, v)  // ❌ Reflection overhead
+}
+// RIESGO: Cada span completo hace reflection de todos los atributos
+// En 1000 req/sec = 1000 reflection operations/sec
+// RECOMENDACIÓN: Usar zerolog.Dict() para typed attributes
+```
+
+---
+
+**RESUMEN DE CRÍTICA:**
+
+| Problema | Severidad | Impacto | Fase 3? |
+|----------|-----------|--------|--------|
+| Custom tracer vs OpenTelemetry std | 🟠 ALTO | Refactor futuro | ✅ REPARAR |
+| Race condition en SetAttribute | 🔴 CRÍTICO | Data race violations | ✅ REPARAR |
+| Context handling en middleware | 🟠 ALTO | Pérdida de tracing | ✅ MEJORAR |
+| Reflection overhead en logging | 🟡 MEDIO | Performance bajo carga | ✅ OPTIMIZAR |
+| Missing span ID propagation | 🟠 ALTO | No distributed tracing real | ✅ IMPLEMENTAR |
+
+**RECOMENDACIÓN FINAL:** La implementación es FUNCIONAL pero NOT PRODUCTION-GRADE. 
+- Aceptable para Staging
+- Requiere refactor en Fase 3 antes de Producción
+- Cambiar puntuación de 8.7/10 a **8.4/10** (revisión realista)
+
+---
+
+#### **2. ✅ Expose Health Checks vía HTTP - COMPLETADO (Buena implementación)**
 **Endpoint**: `GET /health/detailed`  
 **Implementación**: Added `handleHealthDetailed()` in `internal/transport/sse.go`
 **Response Format**:
@@ -334,6 +685,12 @@ func validateInputArguments(inputSchema map[string]interface{}, args map[string]
 }
 ```
 
+**Evaluación**: ✅ CORRECTA
+- Bien documentada en endpoint
+- JSON response válido
+- Incluye timestamp para debugging
+- Componentes específicos monitoreables
+
 **Tiempo Real**: 20 minutos
 
 ---
@@ -347,7 +704,7 @@ func validateInputArguments(inputSchema map[string]interface{}, args map[string]
 
 ---
 
-#### **4. ✅ Resource Limits en Docker - COMPLETADO**
+#### **4. ✅ Resource Limits en Docker - COMPLETADO (Pero insuficiente)**
 **Archivo**: `deployments/docker-compose.yml` (+24 lines)
 **Implementación**:
 ```yaml
@@ -382,13 +739,116 @@ mcpo:
         memory: 512M
 ```
 
+**Evaluación**: ⚠️ PARCIALMENTE CORRECTA
+
+**Problemas Identificados**:
+```
+1. ❌ Sin health checks en docker-compose
+   Problema: Limits/reservations sin validación de salud
+   Solución: Agregar "healthcheck:" en cada servicio
+   
+2. ❌ Reservations vs Limits desbalanceados
+   mcp-server: limits 4G, reservations 2G (200% spread)
+   postgres:   limits 2G, reservations 1G (200% spread)
+   mcpo:       limits 1G, reservations 512MB (200% spread)
+   
+   Mejor práctica: limits = 1.5x-2x reservations
+   Recomendación para Producción:
+   - mcp-server: limits 3.5G, reservations 2.5G
+   - postgres: limits 2.5G, reservations 1.5G
+   - mcpo: limits 1.2G, reservations 800MB
+
+3. ❌ Sin OOM killer configuration
+   Problema: Si OOM ocurre, Docker mata proceso sin graceful shutdown
+   Solución: Agregar "oom_kill_disable: false" + monitoring
+   
+4. ⚠️ Sin CPU throttling alert
+   Problema: Con limits de 2 CPU, muchos contextos switches = latency
+   Solución: Monitorear CPU throttling en Prometheus
+   
+5. ❌ Sin disk space limits
+   Problema: PostgreSQL puede llenar disco (especially logs)
+   Solución: Agregar volumes con quotas en docker-compose
+```
+
 **Tiempo Real**: 10 minutos
+**Refactor Time Needed (Fase 3)**: 1-2 horas
 
 ---
 
 **⏱️ TIEMPO TOTAL FASE 2: 3 horas (vs. 5-7 estimado) - 43% más rápido que estimado**
 
 **Commit**: 2a247d9 - feat(phase2): Implement high-priority improvements (H1-H4)
+
+---
+
+### **FASE 2.5: HOTFIX - Correcciones críticas de Fase 2 (ANTES DE PRODUCCIÓN) 🔴 BLOQUEANTE**
+
+**Status**: ⏳ PENDIENTE (requiere antes de Producción)
+
+#### **Fix 1: Race Condition en SetAttribute** 🔴 CRÍTICO
+**Archivo**: `internal/tracing/tracer.go`
+**Tiempo**: 30 minutos
+**Solución**:
+```go
+type Span struct {
+    mu            sync.RWMutex
+    attributes    map[string]interface{}
+}
+
+func (s *Span) SetAttribute(key string, value interface{}) {
+    if s == nil {
+        return
+    }
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    
+    if s.attributes == nil {
+        s.attributes = make(map[string]interface{})
+    }
+    s.attributes[key] = value
+}
+```
+
+#### **Fix 2: Agregar Span IDs para distributed tracing**
+**Archivo**: `internal/tracing/tracer.go`
+**Tiempo**: 1 hora
+**Solución**:
+```go
+type Span struct {
+    spanID        string
+    traceID       string
+    parentSpanID  string
+}
+
+// Propagate en context:
+type contextKey string
+const spanKey contextKey = "span.id"
+
+ctx = context.WithValue(ctx, spanKey, span.spanID)
+```
+
+#### **Fix 3: Tests deben validar comportamiento real**
+**Archivos**: `tests/integration_test.go`
+**Tiempo**: 2 horas
+**Solución**:
+- Mock logger para capturar outputs
+- Validar JSON log format
+- Validar que atributos están presentes
+- Agregar `-race` flag a CI/CD
+- Concurrency tests explícitos
+
+#### **Fix 4: Optimizar reflection en logging**
+**Archivo**: `internal/tracing/tracer.go`
+**Tiempo**: 45 minutos
+**Solución**: Usar `zerolog.Dict()` en lugar de `Interface()`
+
+#### **Fix 5: Docker resource limits más realistas**
+**Archivo**: `deployments/docker-compose.yml`
+**Tiempo**: 30 minutos
+**Solución**: Bajar limits, agregar healthchecks, OOM tuning
+
+**⏱️ TIEMPO TOTAL FASE 2.5: 4-5 horas**
 
 ---
 
@@ -455,14 +915,18 @@ mcpo:
 ```
 FASE 1 (Crítica):        4-5 horas    [✅ COMPLETADA en 2 horas]
 FASE 2 (Importante):     5-7 horas    [✅ COMPLETADA en 3 horas]
-FASE 3 (Recomendado):    11-16 horas  [🟡 PENDIENTE]
+FASE 2.5 (HOTFIX):       4-5 horas    [⏳ CRÍTICO - BLOQUEANTE para PROD]
+FASE 3 (Hardening):      11-16 horas  [🟡 PENDIENTE]
 ─────────────────────────────────────
 TIEMPO CONSUMIDO:        5 horas
+TIEMPO EN HOTFIXES:      4-5 horas (REQUERIDO)
 TIEMPO ESTIMADO FASE 3:  11-16 horas
-TOTAL ESTIMADO:          16-21 horas (~2-3 días de trabajo)
+TOTAL ESTIMADO:          24-31 horas (~3-4 días de trabajo)
 ```
 
-**PROGRESO ACTUAL: 32% completado (5/16 horas mínimo, FASE 1+2 DONE)**
+**PROGRESO ACTUAL: 21% completado (5/24 horas mínimo)**
+**BLOQUEANTE**: Fase 2.5 DEBE completarse antes de Producción
+**RECOMENDACIÓN**: Después de Staging testing, hacer HOTFIX antes de prod deployment
 
 ---
 
@@ -614,13 +1078,16 @@ El **MCP-Go Orchestrator** es un proyecto **profesional y bien arquitecturado** 
 🟠 **3 mejoras importantes** para operación estable (5-7 horas)  
 🟡 **4 hardening tasks** para security y disaster recovery (11-16 horas)
 
-### 🎯 Veredicto
+### 🎯 Veredicto (REVISADO POST-CODE-REVIEW)
 
-**LISTO PARA PRODUCCIÓN después de Fase 1 + Fase 2**
+**NO LISTO PARA PRODUCCIÓN - Requiere Fase 2.5 HOTFIX críticos**
 
 - ✅ **Staging**: Hoy (después de Fase 1)
-- ✅ **Producción**: Próxima semana (después de Fase 1+2)
-- 🟡 **Hardened**: Semana siguiente (Fase 3 opcional)
+- ⏳ **Hotfix Fase 2.5**: Antes de movimiento a Producción (4-5 horas)
+- ✅ **Producción**: DESPUÉS de Fase 2.5 + testing (próxima semana)
+- 🟡 **Hardened**: Semana siguiente (Fase 3 opcional pero recomendado)
+
+**RAZÓN**: Race condition en Fase 2 causará crashes en producción bajo carga
 
 ---
 

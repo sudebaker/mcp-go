@@ -12,6 +12,7 @@ import (
 
 	"github.com/amphora/mcp-go/internal/config"
 	mcptypes "github.com/amphora/mcp-go/internal/mcp"
+	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -23,10 +24,24 @@ const (
 
 type Executor struct {
 	config *config.Config
+	tracer *tracing.Tracer
 }
 
 func New(cfg *config.Config) *Executor {
-	return &Executor{config: cfg}
+	return &Executor{
+		config: cfg,
+		tracer: tracing.NoOpTracer(),
+	}
+}
+
+func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
+	if tracer == nil {
+		tracer = tracing.NoOpTracer()
+	}
+	return &Executor{
+		config: cfg,
+		tracer: tracer,
+	}
 }
 
 type ExecuteResult struct {
@@ -39,13 +54,19 @@ type ExecuteResult struct {
 }
 
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	// Start tracing span for tool execution
+	span, _ := e.tracer.StartSpan(ctx, fmt.Sprintf("execute_tool:%s", toolName))
+	defer span.End()
+
 	toolCfg := e.config.GetToolByName(toolName)
 	if toolCfg == nil {
+		span.RecordError(fmt.Errorf("tool not found"))
 		return nil, fmt.Errorf("tool '%s' not found in configuration", toolName)
 	}
 
 	// Validate arguments against the tool's input schema
 	if err := validateInputArguments(toolCfg.InputSchema, arguments); err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 
@@ -57,6 +78,9 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	defer cancel()
 
 	requestID := uuid.New().String()
+	span.SetAttribute("request_id", requestID)
+	span.SetAttribute("tool_name", toolName)
+	span.SetAttribute("timeout_seconds", timeout.Seconds())
 	subprocReq := mcptypes.SubprocessRequest{
 		RequestID: requestID,
 		ToolName:  toolName,
@@ -94,6 +118,9 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	err = cmd.Run()
 	duration := time.Since(startTime)
 
+	span.SetAttribute("duration_ms", duration.Milliseconds())
+	span.SetAttribute("exit_code", cmd.ProcessState.ExitCode())
+
 	log.Debug().
 		Str("tool", toolName).
 		Str("request_id", requestID).
@@ -111,28 +138,36 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	}
 
 	if execCtx.Err() == context.DeadlineExceeded {
+		timeoutErr := fmt.Errorf("tool '%s' execution timed out after %v", toolName, timeout)
+		span.RecordError(timeoutErr)
+		span.SetAttribute("error_code", mcptypes.ErrorCodeTimeout)
 		return &ExecuteResult{
 			Success: false,
 			Error: &mcptypes.SubprocessError{
 				Code:    mcptypes.ErrorCodeTimeout,
-				Message: fmt.Sprintf("tool '%s' execution timed out after %v", toolName, timeout),
+				Message: timeoutErr.Error(),
 			},
 			Stderr: stderrStr,
 		}, nil
 	}
 
 	if execCtx.Err() == context.Canceled {
+		cancelErr := fmt.Errorf("execution was cancelled")
+		span.RecordError(cancelErr)
+		span.SetAttribute("error_code", mcptypes.ErrorCodeExecutionFailed)
 		return &ExecuteResult{
 			Success: false,
 			Error: &mcptypes.SubprocessError{
 				Code:    mcptypes.ErrorCodeExecutionFailed,
-				Message: "execution was cancelled",
+				Message: cancelErr.Error(),
 			},
 			Stderr: stderrStr,
 		}, nil
 	}
 
 	if err != nil {
+		span.RecordError(err)
+		span.SetAttribute("error_code", mcptypes.ErrorCodeExecutionFailed)
 		return &ExecuteResult{
 			Success: false,
 			Error: &mcptypes.SubprocessError{
@@ -146,6 +181,9 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 
 	stdoutStr := strings.TrimSpace(stdout.String())
 	if stdoutStr == "" {
+		noOutputErr := fmt.Errorf("subprocess produced no output")
+		span.RecordError(noOutputErr)
+		span.SetAttribute("error_code", mcptypes.ErrorCodeExecutionFailed)
 		return &ExecuteResult{
 			Success: false,
 			Error: &mcptypes.SubprocessError{
@@ -164,6 +202,8 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		chunks, subprocResp = e.parseStreamingOutput(stdoutStr, requestID)
 	} else {
 		if err := json.Unmarshal([]byte(stdoutStr), &subprocResp); err != nil {
+			span.RecordError(err)
+			span.SetAttribute("error_code", mcptypes.ErrorCodeExecutionFailed)
 			return &ExecuteResult{
 				Success: false,
 				Error: &mcptypes.SubprocessError{
@@ -181,6 +221,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 			Str("expected", requestID).
 			Str("got", subprocResp.RequestID).
 			Msg("Request ID mismatch in subprocess response")
+		span.SetAttribute("request_id_mismatch", true)
 	}
 
 	result := &ExecuteResult{
@@ -190,6 +231,16 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 		Error:             subprocResp.Error,
 		Stderr:            stderrStr,
 		Chunks:            chunks,
+	}
+
+	// Record final result in span
+	span.SetAttribute("success", result.Success)
+	span.SetAttribute("content_count", len(result.Content))
+	span.SetAttribute("chunks_count", len(chunks))
+
+	if result.Error != nil {
+		span.RecordError(fmt.Errorf("execution error: %s", result.Error.Message))
+		span.SetAttribute("error_code", result.Error.Code)
 	}
 
 	if subprocResp.StructuredContent == nil {

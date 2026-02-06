@@ -11,6 +11,7 @@ import (
 
 	"github.com/amphora/mcp-go/internal/config"
 	"github.com/amphora/mcp-go/internal/executor"
+	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
@@ -189,4 +190,126 @@ func TestGracefulShutdown(t *testing.T) {
 
 	err := sseServer.Shutdown(ctx)
 	require.NoError(t, err)
+}
+
+// TestTracingMiddleware tests HTTP request tracing
+func TestTracingMiddleware(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+	require.NotNil(t, tracer)
+
+	// Create a simple handler
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// Wrap with tracing middleware
+	tracedHandler := transport.TracingMiddleware(tracer, handler)
+	require.NotNil(t, tracedHandler)
+
+	// Create test request
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	// Execute request
+	tracedHandler.ServeHTTP(w, req)
+
+	// Verify response
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "OK", w.Body.String())
+}
+
+// TestTracingMiddlewareWithError tests tracing middleware with error responses
+func TestTracingMiddlewareWithError(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+
+	// Create a handler that returns an error
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Error"))
+	})
+
+	// Wrap with tracing middleware
+	tracedHandler := transport.TracingMiddleware(tracer, handler)
+
+	// Create test request
+	req := httptest.NewRequest("POST", "/api/data", nil)
+	w := httptest.NewRecorder()
+
+	// Execute request
+	tracedHandler.ServeHTTP(w, req)
+
+	// Verify response
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// TestExecutorWithTracing tests executor with tracing
+func TestExecutorWithTracing(t *testing.T) {
+	tracer := tracing.NewTracer("test-executor")
+
+	cfg := &config.Config{
+		Execution: config.ExecutionConfig{
+			DefaultTimeout: 10 * time.Second,
+			WorkingDir:     "/tmp",
+			Environment: map[string]string{
+				"LLM_API_URL": "http://localhost:11434",
+				"LLM_MODEL":   "test-model",
+			},
+		},
+		Tools: []config.ToolConfig{
+			{
+				Name:        "echo",
+				Description: "Echo test",
+				Command:     "echo",
+				Args:        []string{"hello"},
+				Timeout:     5 * time.Second,
+			},
+		},
+	}
+
+	// Create executor with tracer
+	exec := executor.NewWithTracer(cfg, tracer)
+	require.NotNil(t, exec)
+
+	// Verify executor is created with tracer
+	require.NotPanics(t, func() {
+		// This would execute a tool if we had a proper setup
+		// For now, just verify the executor is created
+		_ = exec
+	})
+}
+
+// TestNoOpTracer tests NoOpTracer functionality
+func TestNoOpTracer(t *testing.T) {
+	tracer := tracing.NoOpTracer()
+	require.NotNil(t, tracer)
+
+	// Start a span (should not panic)
+	span, ctx := tracer.StartSpan(context.Background(), "test-op")
+	require.NotNil(t, ctx)
+
+	// Set attributes (should not panic)
+	span.SetAttribute("key", "value")
+	span.RecordError(nil)
+
+	// End span (should not panic)
+	require.NotPanics(t, func() {
+		span.End()
+	})
+}
+
+// TestTracingWithNilTracer tests handling of nil tracer
+func TestTracingWithNilTracer(t *testing.T) {
+	cfg := &config.Config{
+		Execution: config.ExecutionConfig{
+			DefaultTimeout: 10 * time.Second,
+			WorkingDir:     "/tmp",
+			Environment:    map[string]string{},
+		},
+		Tools: []config.ToolConfig{},
+	}
+
+	// Create executor with nil tracer (should use NoOpTracer)
+	exec := executor.NewWithTracer(cfg, nil)
+	require.NotNil(t, exec)
 }

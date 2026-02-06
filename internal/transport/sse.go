@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amphora/mcp-go/internal/config"
+	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
@@ -23,6 +24,7 @@ type MCPServer struct {
 	version      string
 	tools        []config.ToolConfig
 	rateLimiter  *RateLimiter
+	tracer       *tracing.Tracer
 }
 
 // MCPConfig holds MCP server configuration
@@ -35,6 +37,7 @@ type MCPConfig struct {
 	Tools             []config.ToolConfig
 	RateLimitRPS      float64
 	RateLimitBurst    int
+	Tracer            *tracing.Tracer
 }
 
 // NewMCPServer creates a new MCP server with Streamable HTTP transport
@@ -48,6 +51,11 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		rateLimiter = NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
 	}
 
+	tracer := cfg.Tracer
+	if tracer == nil {
+		tracer = tracing.NoOpTracer()
+	}
+
 	return &MCPServer{
 		mcpServer:    mcpServer,
 		streamServer: streamServer,
@@ -56,6 +64,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		version:      cfg.Version,
 		tools:        cfg.Tools,
 		rateLimiter:  rateLimiter,
+		tracer:       tracer,
 	}
 }
 
@@ -70,6 +79,9 @@ func (s *MCPServer) Start() error {
 
 	// Health endpoint (no rate limiting for health checks)
 	mux.HandleFunc("/health", s.handleHealth)
+
+	// Detailed health endpoint
+	mux.HandleFunc("/health/detailed", s.handleHealthDetailed)
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
@@ -95,8 +107,10 @@ func (s *MCPServer) Start() error {
 	// MCP Streamable HTTP endpoint (default: /mcp)
 	mux.Handle("/mcp", mcpHandler)
 
-	// Wrap entire mux with logging middleware
-	handler := LoggingMiddleware(mux)
+	// Wrap entire mux with tracing and logging middleware
+	var handler http.Handler = mux
+	handler = TracingMiddleware(s.tracer, handler)
+	handler = LoggingMiddleware(handler)
 
 	s.httpServer = &http.Server{
 		Addr:           s.addr,
@@ -141,10 +155,45 @@ func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"protocol":  "mcp",
 		"transport": "streamable-http",
 		"endpoints": map[string]string{
-			"mcp":    "/mcp",
-			"health": "/health",
+			"mcp":             "/mcp",
+			"health":          "/health",
+			"detailed_health": "/health/detailed",
+			"metrics":         "/metrics",
 		},
 	})
+}
+
+// handleHealthDetailed returns detailed health status of all components
+func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Basic component health status
+	components := map[string]interface{}{
+		"server": map[string]interface{}{
+			"status":  "healthy",
+			"name":    s.serverName,
+			"version": s.version,
+		},
+		"http": map[string]interface{}{
+			"status":    "operational",
+			"endpoints": []string{"/mcp", "/health", "/health/detailed", "/metrics"},
+		},
+		"rate_limiter": map[string]interface{}{
+			"status":  "operational",
+			"enabled": s.rateLimiter != nil,
+		},
+	}
+
+	response := map[string]interface{}{
+		"status":     "healthy",
+		"timestamp":  time.Now().Format(time.RFC3339),
+		"service":    s.serverName,
+		"version":    s.version,
+		"components": components,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleRoot returns server info

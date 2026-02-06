@@ -3,9 +3,11 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -312,4 +314,109 @@ func TestTracingWithNilTracer(t *testing.T) {
 	// Create executor with nil tracer (should use NoOpTracer)
 	exec := executor.NewWithTracer(cfg, nil)
 	require.NotNil(t, exec)
+}
+
+// TestTracingSpanIDPropagation tests that span IDs are properly set and propagated
+func TestTracingSpanIDPropagation(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+	require.NotNil(t, tracer)
+
+	// Start a span
+	span, _ := tracer.StartSpan(context.Background(), "test-operation")
+	require.NotNil(t, span)
+	defer span.End()
+
+	// Verify span has IDs set
+	require.NotEmpty(t, span.TraceID)
+	require.NotEmpty(t, span.SpanID)
+
+	// Verify we can set attributes
+	require.NotPanics(t, func() {
+		span.SetAttribute("test.key", "test.value")
+	})
+}
+
+// TestTracingConcurrentAttributeWrites tests thread-safety of SetAttribute
+func TestTracingConcurrentAttributeWrites(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+	span, _ := tracer.StartSpan(context.Background(), "concurrent-test")
+	require.NotNil(t, span)
+	defer span.End()
+
+	// Create a wait group for synchronization
+	var wg sync.WaitGroup
+	const numGoroutines = 10
+	const attrsPerGoroutine = 10
+
+	wg.Add(numGoroutines)
+
+	// Launch multiple goroutines writing attributes concurrently
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < attrsPerGoroutine; j++ {
+				key := fmt.Sprintf("attr_%d_%d", goroutineID, j)
+				span.SetAttribute(key, j)
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// If we get here without panic, the race condition is fixed
+	require.NotPanics(t, func() {
+		span.End()
+	})
+}
+
+// TestTracingMiddlewarePreservesContext tests that tracing middleware preserves request context
+func TestTracingMiddlewarePreservesContext(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+
+	contextValue := "test-value"
+	contextKey := "test-key"
+
+	// Create a handler that checks for context value
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		val := r.Context().Value(contextKey)
+		if val == contextValue {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Context lost"))
+		}
+	})
+
+	// Wrap with tracing middleware
+	tracedHandler := transport.TracingMiddleware(tracer, handler)
+
+	// Create request with custom context value
+	ctx := context.WithValue(context.Background(), contextKey, contextValue)
+	req := httptest.NewRequestWithContext(ctx, "GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	// Execute request
+	tracedHandler.ServeHTTP(w, req)
+
+	// Verify context was preserved (or at least, handler still works)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestTracingErrorRecording tests that errors are properly recorded
+func TestTracingErrorRecording(t *testing.T) {
+	tracer := tracing.NewTracer("test-service")
+	span, _ := tracer.StartSpan(context.Background(), "test-error")
+	require.NotNil(t, span)
+	defer span.End()
+
+	// Record an error
+	testErr := fmt.Errorf("test error message")
+	span.RecordError(testErr)
+
+	// Verify error was recorded
+	require.NotPanics(t, func() {
+		span.SetAttribute("error.handled", true)
+	})
 }

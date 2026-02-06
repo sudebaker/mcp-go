@@ -15,6 +15,9 @@ go test ./...
 # Run specific test file
 go test ./tests/server_test.go -v
 
+# Run a specific test function
+go test -run TestParseStreamingOutput ./internal/executor -v
+
 # Run tests with coverage
 go test -cover ./...
 

@@ -17,15 +17,7 @@ Esto iniciará:
 - **mcp-server** (puerto 8080): Orquestador principal
 - **mcpo** (puerto 8001): Proxy MCP para OpenWebUI
 - **postgres** (puerto 5432): Base de datos con pgvector
-- **OpenWebUI** (puerto 3000): Interfaz de usuario
 
-### 2. Configurar OpenWebUI
-
-1. Accede a http://localhost:3000
-2. Ve a **Configuración** → **Funciones** → **Agregar Función**
-3. Agrega el servidor MCP:
-   - URL: `http://mcpo-proxy:8000`
-   - Tipo: MCP Server
 
 ## 📊 Análisis de Archivos Excel/CSV
 

@@ -75,6 +75,12 @@ func TracingMiddleware(tracer *tracing.Tracer, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Start tracing span for this HTTP request
 		span, ctx := tracer.StartSpan(r.Context(), fmt.Sprintf("http:%s:%s", r.Method, r.URL.Path))
+
+		// Handle nil span (NoOpTracer case)
+		if span == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
 		defer span.End()
 
 		start := time.Now()

@@ -14,6 +14,11 @@ services:
       # Database Configuration
       DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
 
+      # RustFS / S3 Configuration (for presigned URL download)
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-openwebui}
+
       # Python settings
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -25,8 +30,6 @@ services:
       - ../templates:/app/templates:ro
       # Data directory (read-write)
       - mcp-data:/data
-      # OpenWebUI uploads (read-only) - para acceder a archivos subidos
-      - openwebui_openwebui-data:/openwebui-data:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,6 +104,35 @@ services:
           cpus: '1'
           memory: 1.5G
 
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    ports:
+      - "9000:9000"
+    environment:
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
+    volumes:
+      - rustfs-data:/data
+    networks:
+      - mcp-network
+      - docker_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
 networks:
   mcp-network:
     driver: bridge
@@ -113,5 +145,5 @@ volumes:
     driver: local
   postgres-data:
     driver: local
-  openwebui_openwebui-data:
-    external: true
+  rustfs-data:
+    driver: local

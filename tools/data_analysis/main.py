@@ -103,6 +103,7 @@ def validate_request_input(
     question: str,
     output_format: str,
     files_list: Optional[list] = None,
+    file_url: Optional[str] = None,
 ) -> tuple[bool, Optional[str], str]:
     """
     Validate all request inputs.
@@ -133,12 +134,13 @@ def validate_request_input(
             output_format,
         )
 
-    # Validate file source (either file_path OR __files__ must be provided)
+    # Validate file source (file_url, file_path, or __files__ must be provided)
     has_file_path = file_path and isinstance(file_path, str) and file_path.strip()
     has_files_list = files_list and len(files_list) > 0
+    has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
-    if not has_file_path and not has_files_list:
-        return False, "Either file_path or __files__ must be provided", output_format
+    if not has_file_path and not has_files_list and not has_file_url:
+        return False, "One of file_url, file_path, or __files__ must be provided", output_format
 
     # If file_path is provided, validate extension
     if has_file_path:
@@ -484,6 +486,8 @@ def main() -> None:
         context = request.get("context", {})
 
         file_path = arguments.get("file_path", "")
+        file_url_direct = arguments.get("file_url", "")
+        file_name_direct = arguments.get("file_name", "")
         question = arguments.get("question", "")
         output_format = arguments.get("output_format", "text")
         use_sandbox = arguments.get("use_sandbox", True)
@@ -491,7 +495,7 @@ def main() -> None:
 
         # Validate all inputs
         is_valid, error_msg, output_format = validate_request_input(
-            file_path, question, output_format, files_list
+            file_path, question, output_format, files_list, file_url_direct
         )
         if not is_valid:
             write_response(
@@ -538,7 +542,56 @@ def main() -> None:
         df = None
         actual_filename = "data"
 
-        if files_list and len(files_list) > 0:
+        if file_url_direct:
+            # Direct HTTP URL (presigned S3 or any HTTP URL) - preferred path
+            emit_chunk("status", {"message": "Downloading file from URL"})
+
+            # Determine filename for format detection
+            if file_name_direct:
+                actual_filename = file_name_direct
+            else:
+                # Extract filename from URL path (strips query string)
+                from urllib.parse import urlparse
+                url_path = urlparse(file_url_direct).path
+                actual_filename = Path(url_path).name
+                # Strip UUID prefix if present: "uuid_realname.xlsx" -> "realname.xlsx"
+                actual_filename = re.sub(
+                    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_',
+                    '',
+                    actual_filename,
+                    flags=re.IGNORECASE
+                ) or actual_filename
+
+            # Validate extension
+            if Path(actual_filename).suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": f"Unsupported file type: '{actual_filename}'. "
+                                   f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                    },
+                })
+                return
+
+            try:
+                buffer = download_file_from_url(file_url_direct, actual_filename)
+                df = load_data_from_buffer(buffer, actual_filename)
+                emit_chunk("data_loaded", {
+                    "rows": df.shape[0],
+                    "columns": df.shape[1],
+                    "source": "file_url",
+                })
+            except Exception as e:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "FILE_DOWNLOAD_ERROR", "message": str(e)},
+                })
+                return
+
+        elif files_list and len(files_list) > 0:
             # Use __files__ parameter (OpenWebUI integration)
             emit_chunk("status", {"message": "Downloading file from OpenWebUI"})
 

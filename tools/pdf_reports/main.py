@@ -41,9 +41,6 @@ except ImportError:
     S3Error = Exception
 
 
-TEMPLATES_DIR = Path("/app/templates/reports")
-DEFAULT_OUTPUT_DIR = Path("/data/reports")
-
 _template_env = None
 
 
@@ -51,11 +48,17 @@ def get_template_env() -> Environment:
     """Get or create cached Jinja2 environment."""
     global _template_env
     if _template_env is None:
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
         _template_env = Environment(
-            loader=FileSystemLoader(TEMPLATES_DIR),
+            loader=FileSystemLoader(templates_dir),
             autoescape=select_autoescape(["html", "xml"]),
         )
     return _template_env
+
+
+def get_default_output_dir() -> Path:
+    """Get default output directory."""
+    return Path(os.environ.get("OUTPUT_DIR", "/data/reports"))
 
 
 def read_request() -> dict[str, Any]:
@@ -372,10 +375,10 @@ def main() -> None:
 
         if not output_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = DEFAULT_OUTPUT_DIR / f"{report_type}_{timestamp}.pdf"
+            output_path = get_default_output_dir() / f"{report_type}_{timestamp}.pdf"
         else:
             output_path_str = output_path
-            validate_output_path(output_path_str, str(DEFAULT_OUTPUT_DIR))
+            validate_output_path(output_path_str, str(get_default_output_dir()))
             output_path = Path(output_path_str)
 
         env = get_template_env()
@@ -405,7 +408,8 @@ def main() -> None:
 
         html_content = renderers[report_type](data, env)
 
-        styles_css_path = TEMPLATES_DIR / "styles.css"
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
+        styles_css_path = templates_dir / "styles.css"
 
         generate_pdf(
             html_content,

@@ -36,7 +36,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Generate PDF reports from structured data using Jinja2 templates. Supports incident reports, meeting minutes, and audit reports."
+    description: "Generate professional PDF reports with company branding. Use this tool when user asks to: create report, generate PDF, make a report, export to PDF, create document, generate, write report invoice, make summary. Supports: incident reports, meeting minutes, audits, executive summaries, formal documents, corporate emails, and AI-generated content (pass markdown text). Returns PDF as base64 for display + download URL."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"
@@ -45,14 +45,14 @@ tools:
       properties:
         report_type:
           type: string
-          enum: ["incident", "meeting", "audit"]
-          description: "Type of report to generate"
+          enum: ["incident", "meeting", "audit", "executive_summary", "formal_report", "corporate_email", "llm_response"]
+          description: "Type of report. Use 'llm_response' for AI-generated markdown content, 'executive_summary' for business summaries, 'formal_report' for formal documents."
         data:
           type: object
-          description: "Report data to fill in the template"
+          description: "Report data object. For llm_response: {title, content (markdown), author, logo_url}. For others: see tool documentation."
         output_path:
           type: string
-          description: "Path where to save the generated PDF"
+          description: "Optional output path for the PDF file"
       required:
         - report_type
         - data

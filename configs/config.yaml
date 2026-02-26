@@ -68,7 +68,13 @@ tools:
       properties:
         file_path:
           type: string
-          description: "Path to the Excel or CSV file to analyze (optional if __files__ is provided)"
+          description: "Path to the Excel or CSV file (legacy, use file_url instead)"
+        file_url:
+          type: string
+          description: "HTTP URL to download the data file (presigned S3 URL or any HTTP URL)"
+        file_name:
+          type: string
+          description: "Original filename with extension (e.g., sales.xlsx) - needed to determine file format"
         question:
           type: string
           description: "Natural language question about the data"
@@ -79,22 +85,18 @@ tools:
           description: "Output format for the analysis results"
         __files__:
           type: array
-          description: "List of attached files with URLs for content access (OpenWebUI integration)"
+          description: "List of attached files with URLs (legacy fallback)"
           items:
             type: object
             properties:
               type:
                 type: string
-                description: "File type indicator (e.g., 'file' or 'url')"
               url:
                 type: string
-                description: "HTTP URL to access file content"
               name:
                 type: string
-                description: "Original filename"
               id:
                 type: string
-                description: "Unique file identifier"
       required:
         - question
 

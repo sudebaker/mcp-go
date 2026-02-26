@@ -1,3 +1,4 @@
 jinja2>=3.1.2
 markdown>=3.5
+minio>=7.2.0
 weasyprint>=60.0

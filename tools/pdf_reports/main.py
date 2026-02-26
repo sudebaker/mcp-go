@@ -17,7 +17,7 @@ import os
 import sys
 import traceback
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,10 +32,13 @@ try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from weasyprint import HTML, CSS
     import markdown
+    from minio import Minio
+    from minio.error import S3Error
 
     DEPENDENCIES_AVAILABLE = True
 except ImportError:
     DEPENDENCIES_AVAILABLE = False
+    S3Error = Exception
 
 
 TEMPLATES_DIR = Path("/app/templates/reports")
@@ -89,6 +92,68 @@ def generate_pdf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     html.write_pdf(str(output_path), stylesheets=stylesheets)
+
+
+def get_rustfs_client() -> Minio | None:
+    """Get MinIO client configured for RustFS."""
+    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+    access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID", "rustfsadmin")
+    secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY", "rustfsadmin")
+    use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
+
+    if not endpoint:
+        return None
+
+    try:
+        client = Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=use_ssl,
+        )
+        return client
+    except Exception:
+        return None
+
+
+def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
+    """Upload PDF to RustFS and return presigned URL and file info."""
+    client = get_rustfs_client()
+    if not client:
+        logger.warning("RustFS client not available, skipping upload")
+        return None
+
+    try:
+        # Ensure bucket exists
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+
+        # Generate unique object name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        object_name = f"reports/{timestamp}_{file_path.name}"
+
+        # Upload file
+        client.fput_object(
+            bucket,
+            object_name,
+            str(file_path),
+            content_type="application/pdf",
+        )
+
+        # Generate presigned URL (expires in 1 hour)
+        presigned_url = client.presigned_get_object(bucket, object_name, expires=timedelta(hours=1))
+
+        return {
+            "bucket": bucket,
+            "object_name": object_name,
+            "presigned_url": presigned_url,
+        }
+    except S3Error as e:
+        logger.error(f"Failed to upload to RustFS: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error uploading to RustFS: {e}")
+        return None
 
 
 def render_incident_report(data: dict[str, Any], env: Environment) -> str:
@@ -353,34 +418,53 @@ def main() -> None:
             pdf_content = pdf_file.read()
             pdf_base64 = base64.b64encode(pdf_content).decode("utf-8")
 
-        write_response(
+        # Upload to RustFS
+        rustfs_info = upload_to_rustfs(output_path)
+
+        # Build response
+        response_content = [
             {
-                "success": True,
-                "request_id": request_id,
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Report generated successfully: {output_path}",
-                    },
-                    {
-                        "type": "resource",
-                        "resource": {
-                            "uri": f"file://{output_path}",
-                            "mimeType": "application/pdf",
-                            "text": pdf_base64,
-                        },
-                    },
-                ],
-                "structured_content": {
-                    "report_type": report_type,
-                    "output_path": str(output_path),
-                    "file_size": output_path.stat().st_size
-                    if output_path.exists()
-                    else 0,
-                    "pdf_base64": pdf_base64,
+                "type": "text",
+                "text": f"Report generated successfully: {output_path}",
+            },
+            {
+                "type": "resource",
+                "resource": {
+                    "uri": f"file://{output_path}",
+                    "mimeType": "application/pdf",
+                    "text": pdf_base64,
                 },
-            }
-        )
+            },
+        ]
+
+        if rustfs_info:
+            response_content.append({
+                "type": "text",
+                "text": f"Report uploaded to storage: {rustfs_info['presigned_url']}",
+            })
+
+        structured_content = {
+            "report_type": report_type,
+            "output_path": str(output_path),
+            "file_size": output_path.stat().st_size if output_path.exists() else 0,
+            "pdf_base64": pdf_base64,
+        }
+
+        if rustfs_info:
+            structured_content.update({
+                "storage": {
+                    "bucket": rustfs_info["bucket"],
+                    "object_name": rustfs_info["object_name"],
+                    "presigned_url": rustfs_info["presigned_url"],
+                }
+            })
+
+        write_response({
+            "success": True,
+            "request_id": request_id,
+            "content": response_content,
+            "structured_content": structured_content,
+        })
 
     except ValueError as e:
         write_response(

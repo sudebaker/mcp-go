@@ -31,6 +31,7 @@ logger = get_logger(__name__, "pdf_reports")
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from weasyprint import HTML, CSS
+    import markdown
 
     DEPENDENCIES_AVAILABLE = True
 except ImportError:
@@ -247,6 +248,27 @@ def render_corporate_email(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
+def render_llm_response(data: dict[str, Any], env: Environment) -> str:
+    """Render LLM response as PDF report with corporate styling."""
+    template = env.get_template("llm_response.html")
+
+    content_markdown = data.get("content", "")
+    content_html = markdown.markdown(
+        content_markdown,
+        extensions=["tables", "fenced_code", "nl2br"]
+    )
+
+    context = build_base_context(data, "llm_response")
+    context.update({
+        "content_html": content_html,
+        "author": data.get("author", "AI Assistant"),
+        "logo_url": data.get("logo_url"),
+        "confidentiality": data.get("confidentiality", "Internal Document"),
+    })
+
+    return template.render(**context)
+
+
 def main() -> None:
     if not DEPENDENCIES_AVAILABLE:
         write_response(
@@ -300,6 +322,7 @@ def main() -> None:
             "executive_summary": render_executive_summary_report,
             "formal_report": render_formal_report,
             "corporate_email": render_corporate_email,
+            "llm_response": render_llm_response,
         }
 
         if report_type not in renderers:

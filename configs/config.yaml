@@ -21,7 +21,7 @@ execution:
 tools:
   # Echo tool for testing
   - name: "echo"
-    description: "Echo back the provided text. Useful for testing the MCP server."
+    description: "Simply repeats the exact text provided. Exclusively for debugging or explicit text repetition, NOT for memorizing or storing information."
     command: "python3"
     args: ["/app/tools/echo/main.py"]
     timeout: "10s"
@@ -123,7 +123,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Memorize text content directly into the knowledge base for semantic search and future retrieval."
+    description: "Stores and memorizes text content for future retrieval and semantic search. Use this when the user wants to 'memorize', 'save', 'remember', 'learn', 'store knowledge', or 'keep track of' information. Examples: 'Memoriza esto:', 'Guarda esta información:', 'Recuerda que:', 'Aprende sobre'."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -145,7 +145,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Search the knowledge base using semantic and keyword search. Returns relevant document chunks."
+    description: "Retrieves and searches previously memorized information from the knowledge base using semantic and keyword search. Use this when the user wants to 'recall', 'retrieve', 'search for', 'find', or asks 'what do you know about', 'what did I tell you about', or 'do you remember'. Examples: '¿Qué sabes sobre...?', '¿Recuerdas...?', 'Busca información sobre...', 'What did I tell you about...'."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"

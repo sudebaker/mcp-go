@@ -76,9 +76,14 @@ pytesseract>=0.3.10
 psycopg2-binary>=2.9.0
 sentence-transformers>=2.2.0
 
-# Document parsing (for knowledge base)
+# Document parsing
 pypdf>=3.0.0
 python-docx>=1.0.0
+
+# Config Auditor & PDF Reports
+pyyaml>=6.0
+markdown>=3.5
+minio>=7.2.0
 EOF
 
 # Install Python dependencies

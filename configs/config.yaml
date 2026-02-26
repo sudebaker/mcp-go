@@ -169,3 +169,134 @@ tools:
           description: "Type of search to perform"
       required:
         - query
+
+  # Batch Summarize - Summarize multiple documents
+  - name: "batch_summarize"
+    description: "(EN): Summarize multiple documents at once, create batch summaries, generate master summary of multiple files, extract key points from documents. (ES): Resumir múltiples documentos a la vez, crear resúmenes por lotes, generar resumen maestro de varios archivos, extraer puntos clave de documentos. Input: __files__ (array), summary_type (individual/master/both), focus (optional), max_length (default 500 chars). Output: summaries array + optional master summary."
+    command: "python3"
+    args: ["/app/tools/batch_summarize/main.py"]
+    timeout: "300s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Files to summarize"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        summary_type:
+          type: string
+          enum: ["individual", "master", "both"]
+          default: "both"
+          description: "Type of summary to generate"
+        focus:
+          type: string
+          description: "Optional focus area for summaries"
+        max_length:
+          type: integer
+          default: 500
+          description: "Maximum length of summary in characters"
+      required:
+        - __files__
+
+  # Regulation Diff - Compare two versions of documents
+  - name: "regulation_diff"
+    description: "(EN): Compare two versions of a document or regulation, show differences between old and new version, track changes in legal documents, analyze document revisions. (ES): Comparar dos versiones de un documento o regulación, mostrar diferencias entre versión antigua y nueva, rastrear cambios en documentos legales, analizar revisiones de documentos. Input: __files__ (exactly 2: [0]=old, [1]=new), focus (optional), output_format (markdown/structured). Output: unified diff + LLM analysis + change counts."
+    command: "python3"
+    args: ["/app/tools/regulation_diff/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          minItems: 2
+          maxItems: 2
+          description: "Two files: index 0 = old version, index 1 = new version"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        focus:
+          type: string
+          description: "Optional focus area for analysis"
+        output_format:
+          type: string
+          enum: ["markdown", "structured"]
+          default: "markdown"
+          description: "Output format for analysis"
+      required:
+        - __files__
+
+  # Config Auditor - Audit configuration files for security issues
+  - name: "config_auditor"
+    description: "(EN): Audit configuration files for security issues, detect hardcoded secrets, find dangerous port configurations, check for debug mode, find empty required fields. (ES): Auditar archivos de configuración en busca de problemas de seguridad, detectar secretos hardcodeados, encontrar configuraciones de puertos peligrosos, verificar modo debug, buscar campos vacíos requeridos. Supports: YAML, JSON, TOML, INI, ENV. Rules: secrets, empty_required, dangerous_ports, debug_mode, hardcoded_ips. Output: findings array + security score (0-100)."
+    command: "python3"
+    args: ["/app/tools/config_auditor/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Configuration files to audit"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        rules:
+          type: array
+          items:
+            type: string
+            enum: ["secrets", "empty_required", "dangerous_ports", "debug_mode", "hardcoded_ips"]
+          description: "Rules to apply (default: all)"
+        severity_filter:
+          type: string
+          enum: ["all", "critical", "high", "medium"]
+          default: "all"
+          description: "Filter findings by severity"
+      required:
+        - __files__
+
+  # Document Classifier - Classify documents into categories
+  - name: "document_classifier"
+    description: "(EN): Classify documents into categories, identify document type, detect if document is contract/invoice/report/regulation/email/etc. (ES): Clasificar documentos en categorías, identificar tipo de documento, detectar si el documento es contrato/factura/informe/regulación/correquisitos/etc. Default categories: contract, invoice, report, regulation, technical_manual, meeting_minutes, email, form, other. Supports custom categories. Input: __files__, categories (optional), language (auto/es/en). Output: classification with confidence, justification, keywords, detected language."
+    command: "python3"
+    args: ["/app/tools/document_classifier/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Documents to classify"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        categories:
+          type: array
+          items:
+            type: string
+          description: "Custom categories (default: predefined list)"
+        language:
+          type: string
+          enum: ["auto", "es", "en"]
+          default: "auto"
+          description: "Document language detection"
+      required:
+        - __files__

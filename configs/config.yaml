@@ -36,7 +36,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Generate professional PDF reports with company branding. Use this tool when user asks to: create report, generate PDF, make a report, export to PDF, create document, generate, write report invoice, make summary. Supports: incident reports, meeting minutes, audits, executive summaries, formal documents, corporate emails, and AI-generated content (pass markdown text). Returns PDF as base64 for display + download URL."
+    description: "Generate professional PDF reports with company branding. Use when user asks (EN): create report, generate PDF, make a report, export to PDF, create document, make summary, write invoice. (ES): crear informe, generar PDF, hacer reporte, exportar a PDF, crear documento, redactar acta, hacer resumen. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response (markdown). Returns PDF base64 + download URL."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"
@@ -59,7 +59,7 @@ tools:
 
   # Data Analysis
   - name: "analyze_data"
-    description: "Analyze Excel/CSV data files with Python and Pandas. Use when user asks: analyze this file, process spreadsheet, calculate totals, generate charts, show trends, what are the numbers, sales data, financial data, make statistics, create visualization from data. Can also answer questions about the data like totals, averages, groupings. Returns analysis text, JSON, markdown tables, or chart images (PNG)."
+    description: "Analyze Excel/CSV data files with Python/Pandas. Use when user asks (EN): analyze file, process spreadsheet, calculate totals, generate charts, show trends, sales data, financial data, statistics. (ES): analizar archivo Excel, procesar hoja de cálculo, calcular totales, generar gráficos, mostrar tendencias, datos de ventas, estadísticas, crear visualización. Returns: text, JSON, markdown tables, or PNG chart images."
     command: "python3"
     args: ["/app/tools/data_analysis/main.py"]
     timeout: "180s"
@@ -99,7 +99,7 @@ tools:
 
   # Vision/OCR
   - name: "analyze_image"
-    description: "Analyze images: extract text (OCR), describe what you see, detect objects/people/text, or answer questions about image content. Use when user asks: read this image, extract text from screenshot, what's in this photo, describe this picture, scan document, extract invoice data, recognize license plate. Supports screenshots, photos, scanned documents, diagrams."
+    description: "Analyze images: extract text (OCR), describe what you see, detect objects/people/text. Use when user asks (EN): read image, extract text, what's in photo, describe picture, scan document, extract invoice. (ES): leer imagen, extraer texto, qué hay en esta foto, describir imagen, escanear documento, extraer datos de factura, reconocer matrícula. Supports: screenshots, photos, documents, diagrams."
     command: "python3"
     args: ["/app/tools/vision_ocr/main.py"]
     timeout: "120s"
@@ -122,7 +122,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Stores and memorizes text content for future retrieval and semantic search. Use this when the user wants to 'memorize', 'save', 'remember', 'learn', 'store knowledge', or 'keep track of' information. Examples: 'Memoriza esto:', 'Guarda esta información:', 'Recuerda que:', 'Aprende sobre'."
+    description: "Store and memorize text content for future retrieval. Use when user says (EN): memorize, save, remember, learn, store knowledge, keep track. (ES): memoriza esto, guarda esta información, recuerda que, aprende sobre, guardar conocimiento, no olvides que. Stores content semantically for search."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -144,7 +144,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Retrieves and searches previously memorized information from the knowledge base using semantic and keyword search. Use this when the user wants to 'recall', 'retrieve', 'search for', 'find', or asks 'what do you know about', 'what did I tell you about', or 'do you remember'. Examples: '¿Qué sabes sobre...?', '¿Recuerdas...?', 'Busca información sobre...', 'What did I tell you about...'."
+    description: "Search previously memorized information. Use when user asks (EN): recall, retrieve, search, find, what do you know, what did I tell you, do you remember. (ES): qué sabes sobre, qué me dijiste, recuerdas, busca información, busca lo que te dije, qué tienes registrado. Searches with semantic similarity."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"

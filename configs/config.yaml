@@ -59,33 +59,30 @@ tools:
 
   # Data Analysis
   - name: "analyze_data"
-    description: "Execute Python/Pandas analysis on Excel or CSV files. Generates code via LLM and executes it safely."
+    description: "Analyze Excel/CSV data files with Python and Pandas. Use when user asks: analyze this file, process spreadsheet, calculate totals, generate charts, show trends, what are the numbers, sales data, financial data, make statistics, create visualization from data. Can also answer questions about the data like totals, averages, groupings. Returns analysis text, JSON, markdown tables, or chart images (PNG)."
     command: "python3"
     args: ["/app/tools/data_analysis/main.py"]
     timeout: "180s"
     input_schema:
       type: object
       properties:
-        file_path:
-          type: string
-          description: "Path to the Excel or CSV file (legacy, use file_url instead)"
         file_url:
           type: string
-          description: "HTTP URL to download the data file (presigned S3 URL or any HTTP URL)"
+          description: "HTTP URL to the data file (presigned S3 URL or direct download link). Supports .xlsx, .xls, .csv"
         file_name:
           type: string
-          description: "Original filename with extension (e.g., sales.xlsx) - needed to determine file format"
+          description: "Original filename with extension (e.g., sales.xlsx) - required to determine file format"
         question:
           type: string
-          description: "Natural language question about the data"
+          description: "What to do with the data: 'calculate total sales', 'average price by category', 'show top 10 products', 'create bar chart of monthly revenue'"
         output_format:
           type: string
-          enum: ["text", "json", "markdown", "image", "png"]
+          enum: ["text", "json", "markdown", "png"]
           default: "text"
-          description: "Output format for the analysis results"
+          description: "How to return results: 'text' (plain), 'json' (structured), 'markdown' (tables), 'png' (chart image)"
         __files__:
           type: array
-          description: "List of attached files with URLs (legacy fallback)"
+          description: "Alternative: attach files directly in OpenWebUI. The tool will download them automatically."
           items:
             type: object
             properties:
@@ -102,7 +99,7 @@ tools:
 
   # Vision/OCR
   - name: "analyze_image"
-    description: "Analyze images using OCR and vision models. Extracts text, detects objects, and answers questions about image content."
+    description: "Analyze images: extract text (OCR), describe what you see, detect objects/people/text, or answer questions about image content. Use when user asks: read this image, extract text from screenshot, what's in this photo, describe this picture, scan document, extract invoice data, recognize license plate. Supports screenshots, photos, scanned documents, diagrams."
     command: "python3"
     args: ["/app/tools/vision_ocr/main.py"]
     timeout: "120s"
@@ -111,14 +108,14 @@ tools:
       properties:
         image_path:
           type: string
-          description: "Path to the image file"
+          description: "URL or path to the image file. Supports JPEG, PNG, WebP, PDF pages"
         task:
           type: string
           enum: ["ocr", "describe", "extract_entities", "answer"]
-          description: "Type of analysis to perform"
+          description: "Task type: 'ocr' (extract all text), 'describe' (natural language description), 'extract_entities' (detect specific items like names, dates, amounts), 'answer' (answer a specific question about the image)"
         question:
           type: string
-          description: "Question to answer about the image (required for 'answer' task)"
+          description: "Specific question for 'answer' task, or what to extract for 'extract_entities'. Example: 'What product is shown?' or 'Extract all dates and amounts'"
       required:
         - image_path
         - task

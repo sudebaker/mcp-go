@@ -15,6 +15,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
 
       # RustFS / S3 Configuration (for presigned URL download)
+      RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-openwebui}

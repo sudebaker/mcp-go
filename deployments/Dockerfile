@@ -87,6 +87,8 @@ minio>=7.2.0
 EOF
 
 # Install Python dependencies
+# Force CPU-only torch to avoid pulling NVIDIA/CUDA transitive dependencies
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download sentence-transformers model

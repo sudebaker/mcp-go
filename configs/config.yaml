@@ -300,3 +300,22 @@ tools:
           description: "Document language detection"
       required:
         - __files__
+
+  # Weather Forecast - AEMET
+  - name: "weather_forecast"
+    description: "(EN): Get comparative weather forecast from AEMET for Spanish locations. Shows temperature, sky state, precipitation probability, wind and UV index. (ES): Obtener prevision meteorologica comparativa de AEMET para localidades españolas. Muestra temperatura, estado del cielo, probabilidad de precipitacion, viento y indice UV. Input: urls (optional array of AEMET XML URLs, defaults to configured locations), max_days (optional, 1-7, default 3). Output: comparative forecast by day."
+    command: "python3"
+    args: ["/app/tools/weather/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+          description: "AEMET XML URLs (e.g., https://www.aemet.es/xml/municipios/localidad_28079.xml). If omitted, uses default locations."
+        max_days:
+          type: integer
+          default: 3
+          description: "Number of forecast days (1-7, default 3)"

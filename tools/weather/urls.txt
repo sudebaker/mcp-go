@@ -1,0 +1,7 @@
+# Default AEMET XML URLs for weather forecast
+# Lines starting with # are comments
+# Format: <URL> [# optional comment]
+
+https://www.aemet.es/xml/municipios/localidad_09409.xml
+https://www.aemet.es/xml/municipios/localidad_28902.xml
+https://www.aemet.es/xml/municipios/localidad_28079.xml

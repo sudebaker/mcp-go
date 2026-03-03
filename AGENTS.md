@@ -170,8 +170,35 @@ mcp-go/
 - `github.com/prometheus/client_golang` - Metrics
 - `github.com/redis/go-redis/v9` - Redis client
 
+## Security
+
+### Critical Vulnerabilities Mitigated
+- **SSRF**: URL validation prevents cloud metadata/internal network access
+- **SSTI**: SandboxedEnvironment blocks template injection attacks
+- **ReDoS**: Pre-compiled regex patterns prevent DoS attacks
+- **YAML**: Safe deserialization via typed unmarshaling
+
+### Testing Security
+```bash
+# Run all security tests (22 tests)
+python -m pytest tests/test_security_mitigations.py -v
+
+# Test specific vulnerability
+python -m pytest tests/test_security_mitigations.py::TestSSRFMitigation -v
+python -m pytest tests/test_security_mitigations.py::TestReDoSMitigation -v
+python -m pytest tests/test_security_mitigations.py::TestSSTIMitigation -v
+```
+
+### Security Documentation
+See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for:
+- Implementation details of each mitigation
+- Attack vectors and protection mechanisms
+- Test coverage and verification
+- Production recommendations
+
 ## Related Docs
 
 - [API Reference](docs/API.md) - Complete API docs
 - [Development Guide](docs/DEVELOPMENT.md) - Dev instructions
 - [Logging](docs/LOGGING.md) - HTTP logging details
+- [Security Hardening](SECURITY_HARDENING.md) - Security mitigations

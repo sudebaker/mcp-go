@@ -18,9 +18,11 @@ import io
 import json
 import yaml
 import configparser
+import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 try:
     from langchain_community.document_loaders import PyPDFLoader
@@ -62,6 +64,82 @@ class ExtractionResult:
     metadata: dict = field(default_factory=dict)
 
 
+def validate_url_for_download(url: str) -> tuple[bool, str]:
+    """
+    Validate URL to prevent SSRF attacks.
+    
+    Security: Blocks private/reserved IP ranges and dangerous protocols.
+    
+    Args:
+        url: URL to validate
+        
+    Returns:
+        Tuple of (is_valid, reason_if_invalid)
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Only allow HTTP and HTTPS
+        if parsed.scheme not in ('http', 'https'):
+            return False, f"Protocol '{parsed.scheme}' not allowed. Only HTTP and HTTPS permitted."
+        
+        # Extract hostname
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "URL must have a valid hostname"
+        
+        # Validate hostname is not a known cloud metadata service
+        metadata_services = [
+            'metadata.google.internal',
+            '169.254.169.254',
+            'metadata',
+            'localhost',
+            '127.0.0.1',
+            '::1',
+        ]
+        if hostname in metadata_services:
+            return False, f"Access to '{hostname}' is not permitted"
+        
+        # Try to parse as IP address
+        try:
+            ip = ipaddress.ip_address(hostname)
+            # Block private/reserved ranges
+            if ip.is_private:
+                return False, f"Private IP range blocked: {hostname}"
+            if ip.is_loopback:
+                return False, f"Loopback IP blocked: {hostname}"
+            if ip.is_link_local:
+                return False, f"Link-local IP blocked: {hostname}"
+            if ip.is_multicast:
+                return False, f"Multicast IP blocked: {hostname}"
+            if ip.is_reserved:
+                return False, f"Reserved IP blocked: {hostname}"
+        except ValueError:
+            # Not an IP, so it's a domain name - allow if it resolves
+            pass
+        
+        # Validate port is reasonable
+        if parsed.port:
+            if parsed.port < 1 or parsed.port > 65535:
+                return False, f"Invalid port: {parsed.port}"
+            # Block common internal service ports
+            internal_ports = [
+                22,    # SSH
+                3306,  # MySQL
+                5432,  # PostgreSQL
+                6379,  # Redis
+                27017, # MongoDB
+                9200,  # Elasticsearch
+            ]
+            if parsed.port in internal_ports:
+                return False, f"Port {parsed.port} is blocked for security"
+        
+        return True, ""
+        
+    except Exception as e:
+        return False, f"URL validation error: {str(e)}"
+
+
 def download_file(url: str) -> io.BytesIO:
     """
     Download a file from URL and return as BytesIO buffer.
@@ -74,10 +152,16 @@ def download_file(url: str) -> io.BytesIO:
 
     Raises:
         ImportError: If httpx is not available
+        ValueError: If URL fails SSRF validation
         Exception: If download fails
     """
     if httpx is None:
         raise ImportError("httpx is not installed. Install with: pip install httpx")
+
+    # SECURITY: Validate URL to prevent SSRF attacks
+    is_valid, error_reason = validate_url_for_download(url)
+    if not is_valid:
+        raise ValueError(f"URL validation failed: {error_reason}")
 
     try:
         with httpx.Client(timeout=60.0) as client:

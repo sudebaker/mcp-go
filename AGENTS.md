@@ -12,14 +12,17 @@ go build -o bin/mcp-server ./cmd/server
 # Run all tests
 go test ./...
 
-# Run a single test
+# Run a single test with verbose output
 go test -run TestSpecificName ./path/to/package -v
 
-# Run tests with coverage
+# Run tests with coverage report
 go test -cover ./...
 
-# Format and vet
+# Format, vet, and run tests
 go fmt ./... && go vet ./... && go test ./...
+
+# Test a specific test function in a package
+go test -run TestLoadConfig ./internal/config -v
 ```
 
 ### Docker Commands
@@ -39,6 +42,9 @@ docker-compose restart mcp-server
 ./tests/test_excel_analysis.sh
 ./tests/test_quick.sh
 ./tests/test_logging.sh
+./tests/test_image_format_validation.sh
+./tests/test_kb_memory.sh
+./tests/test_suite_complete.sh
 ```
 
 ## Code Style
@@ -48,26 +54,36 @@ docker-compose restart mcp-server
 import (
     "context"
     "os"
+    "time"
 
+    "github.com/google/uuid"
     "github.com/rs/zerolog/log"
     "gopkg.in/yaml.v3"
 
     "github.com/amphora/mcp-go/internal/config"
+    mcptypes "github.com/amphora/mcp-go/internal/mcp"
 )
 ```
 
-### Go Naming
-- Packages: lowercase (e.g., `config`)
-- Exported: PascalCase (e.g., `NewExecutor`)
-- Private: camelCase (e.g., `buildInputSchema`)
-- Interfaces: `-er` suffix (e.g., `Executor`)
-- Errors: `Err` prefix (e.g., `ErrConfigNotFound`)
+**Groups:** stdlib → external → internal
+
+### Go Naming Conventions
+- **Packages**: lowercase, short, singular (e.g., `config`, `executor`, `mcp`)
+- **Exported**: PascalCase (e.g., `NewExecutor`, `LoadConfig`)
+- **Private**: camelCase (e.g., `buildInputSchema`, `expandEnvVars`)
+- **Interfaces**: `-er` suffix (e.g., `Executor`, `Tracer`)
+- **Constants/Errors**: UPPERCASE (e.g., `ErrorCodeTimeout`)
+- **Variables**: camelCase (e.g., `requestID`, `toolName`)
 
 ### Go Structs
 ```go
 type ToolConfig struct {
-    Name    string `yaml:"name"`
-    Command string `yaml:"command"`
+    Name        string        `yaml:"name"`
+    Description string        `yaml:"description"`
+    Command     string        `yaml:"command"`
+    Args        []string      `yaml:"args"`
+    Timeout     time.Duration `yaml:"timeout"`
+    InputSchema map[string]interface{} `yaml:"input_schema"`
 }
 ```
 
@@ -99,21 +115,6 @@ def write_response(response: dict) -> None:
 {"success": False, "error": {"code": "ERROR_CODE", "message": str(e)}}
 ```
 
-## Available Tools
-
-| Tool | Description | Timeout |
-|------|-------------|---------|
-| `echo` | Text echo for testing | 10s |
-| `generate_report` | PDF reports (incident, meeting, audit, etc.) | 120s |
-| `analyze_data` | Excel/CSV analysis with Pandas | 180s |
-| `analyze_image` | OCR and vision analysis | 120s |
-| `kb_ingest` | Store content in knowledge base | 300s |
-| `kb_search` | Search knowledge base | 60s |
-| `batch_summarize` | Summarize multiple documents | 300s |
-| `regulation_diff` | Compare document versions | 180s |
-| `config_auditor` | Audit config files for security | 120s |
-| `document_classifier` | Classify documents | 180s |
-
 ## Project Structure
 ```
 mcp-go/
@@ -122,9 +123,13 @@ mcp-go/
 │   ├── config/          # Configuration
 │   ├── executor/        # Subprocess execution
 │   ├── mcp/            # MCP types
-│   └── transport/      # HTTP/SSE transport
+│   ├── metrics/        # Prometheus metrics
+│   ├── health/         # Health check endpoints
+│   ├── transport/      # HTTP/SSE transport
+│   └── tracing/        # Distributed tracing
 ├── tools/              # Python tools (10 tools)
 ├── configs/            # YAML configs
+├── tests/              # Integration tests
 └── deployments/        # Docker Compose
 ```
 
@@ -154,14 +159,16 @@ mcp-go/
 2. Track request IDs for debugging
 3. Respect configured timeouts
 4. Handle context cancellation gracefully
-5. Use structured error codes in JSON responses
 
 ## Dependencies
 
-- Go 1.21+
+- Go 1.23+
 - `github.com/mark3labs/mcp-go` - MCP protocol
 - `github.com/rs/zerolog` - Logging
 - `gopkg.in/yaml.v3` - YAML parsing
+- `github.com/google/uuid` - UUID generation
+- `github.com/prometheus/client_golang` - Metrics
+- `github.com/redis/go-redis/v9` - Redis client
 
 ## Related Docs
 

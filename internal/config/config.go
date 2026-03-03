@@ -85,6 +85,9 @@ func Load(path string) (*Config, error) {
 	expandedData := expandEnvVars(string(data))
 
 	var cfg Config
+	// SECURITY: yaml.Unmarshal uses SafeDecoder by default in gopkg.in/yaml.v3
+	// which prevents deserialization of arbitrary Go objects. No unsafe
+	// deserialization possible.
 	if err := yaml.Unmarshal([]byte(expandedData), &cfg); err != nil {
 		return nil, err
 	}

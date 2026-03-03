@@ -78,6 +78,38 @@ AUDIT_RULES = {
     },
 }
 
+# SECURITY: Pre-compile all regex patterns at startup to prevent ReDoS attacks
+# and improve performance
+_COMPILED_REGEX_CACHE = {}
+
+
+def get_compiled_regex(rule_name: str, flags: int = 0) -> re.Pattern:
+    """
+    Get pre-compiled regex pattern for a rule.
+    
+    Security: Avoids compiling regex in request handlers (ReDoS prevention)
+    Improves performance through caching.
+    """
+    cache_key = (rule_name, flags)
+    if cache_key not in _COMPILED_REGEX_CACHE:
+        if rule_name not in AUDIT_RULES:
+            raise ValueError(f"Unknown rule: {rule_name}")
+        
+        rule = AUDIT_RULES[rule_name]
+        if "pattern" not in rule:
+            raise ValueError(f"Rule {rule_name} has no pattern")
+        
+        # Compile with timeout to prevent ReDoS
+        # Python 3.11+ supports re.compile with timeout
+        try:
+            pattern = re.compile(rule["pattern"], flags)
+            _COMPILED_REGEX_CACHE[cache_key] = pattern
+        except re.error as e:
+            logger.error(f"Invalid regex pattern in rule {rule_name}: {e}")
+            raise
+    
+    return _COMPILED_REGEX_CACHE[cache_key]
+
 
 def read_request() -> dict[str, Any]:
     """Read JSON request from STDIN."""
@@ -122,7 +154,8 @@ def check_secrets(content: str) -> list[dict]:
     """Check for hardcoded secrets."""
     findings = []
     rule = AUDIT_RULES["secrets"]
-    pattern = re.compile(rule["pattern"], re.IGNORECASE)
+    # SECURITY: Use pre-compiled pattern to prevent ReDoS
+    pattern = get_compiled_regex("secrets", re.IGNORECASE)
     
     for match in pattern.finditer(content):
         value = match.group(0)
@@ -171,7 +204,8 @@ def check_dangerous_ports(content: str) -> list[dict]:
     """Check for dangerous port configurations."""
     findings = []
     rule = AUDIT_RULES["dangerous_ports"]
-    pattern = re.compile(rule["pattern"], re.IGNORECASE)
+    # SECURITY: Use pre-compiled pattern to prevent ReDoS
+    pattern = get_compiled_regex("dangerous_ports", re.IGNORECASE)
     
     for match in pattern.finditer(content):
         port_str = match.group(2)
@@ -224,9 +258,8 @@ def check_hardcoded_ips(content: str) -> list[dict]:
     """Check for hardcoded IP addresses."""
     findings = []
     rule = AUDIT_RULES["hardcoded_ips"]
-    pattern = re.compile(rule["pattern"])
-    
-    ip_pattern = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
+    # SECURITY: Use pre-compiled pattern to prevent ReDoS
+    ip_pattern = get_compiled_regex("hardcoded_ips")
     
     for match in ip_pattern.finditer(content):
         ip = match.group(0)

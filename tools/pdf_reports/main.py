@@ -30,6 +30,7 @@ logger = get_logger(__name__, "pdf_reports")
 
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
+    from jinja2.sandbox import SandboxedEnvironment
     from weasyprint import HTML, CSS
     import markdown
     from minio import Minio
@@ -39,20 +40,34 @@ try:
 except ImportError:
     DEPENDENCIES_AVAILABLE = False
     S3Error = Exception
+    SandboxedEnvironment = None
 
 
 _template_env = None
 
 
 def get_template_env() -> Environment:
-    """Get or create cached Jinja2 environment."""
+    """Get or create cached Jinja2 environment with sandbox security.
+    
+    SECURITY: Uses SandboxedEnvironment to prevent template injection attacks
+    while allowing safe template operations.
+    """
     global _template_env
     if _template_env is None:
         templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
-        _template_env = Environment(
-            loader=FileSystemLoader(templates_dir),
-            autoescape=select_autoescape(["html", "xml"]),
-        )
+        
+        # Use SandboxedEnvironment for security (prevents SSTI)
+        if SandboxedEnvironment is not None:
+            _template_env = SandboxedEnvironment(
+                loader=FileSystemLoader(templates_dir),
+                autoescape=select_autoescape(["html", "xml"]),
+            )
+        else:
+            # Fallback if sandbox not available (shouldn't happen in normal setup)
+            _template_env = Environment(
+                loader=FileSystemLoader(templates_dir),
+                autoescape=select_autoescape(["html", "xml"]),
+            )
     return _template_env
 
 

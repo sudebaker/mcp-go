@@ -381,9 +381,9 @@ tools:
           description: "Text description or DSL of the diagram to create. E.g., 'Usuario -> Verificar Email -> Login -> Dashboard'"
         layout:
           type: string
-          enum: ["horizontal", "vertical", "radial"]
-          default: "horizontal"
-          description: "Layout direction: horizontal, vertical, or radial"
+          enum: ["horizontal", "vertical", "radial", "auto"]
+          default: "auto"
+          description: "Layout direction: horizontal, vertical, radial, or auto (automatic selection)"
         save_path:
           type: string
           description: "Optional custom path to save the .canvas file"

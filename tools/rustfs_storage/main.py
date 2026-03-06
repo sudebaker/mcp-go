@@ -100,6 +100,17 @@ def validate_object_key(key: str) -> tuple[bool, Optional[str]]:
     return True, None
 
 
+def ensure_bucket_exists(client: Minio, bucket: str) -> tuple[bool, Optional[str]]:
+    try:
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        return True, None
+    except S3Error as e:
+        return False, f"Failed to create bucket: {str(e)}"
+    except Exception as e:
+        return False, str(e)
+
+
 def sanitize_prefix(prefix: str) -> str:
     prefix = prefix.replace("..", "")
     prefix = prefix.lstrip("/")
@@ -168,8 +179,9 @@ def operation_download(client: Minio, bucket: str, key: str, expiry: int = 3600)
         if not is_valid:
             return {"success": False, "error": err}
         
-        if not client.bucket_exists(bucket):
-            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        is_valid, err = ensure_bucket_exists(client, bucket)
+        if not is_valid:
+            return {"success": False, "error": err}
         
         stat = client.stat_object(bucket, key)
         
@@ -197,11 +209,12 @@ def operation_list(client: Minio, bucket: str, prefix: str = "", max_keys: int =
         if not is_valid:
             return {"success": False, "error": err}
         
-        if not client.bucket_exists(bucket):
-            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        is_valid, err = ensure_bucket_exists(client, bucket)
+        if not is_valid:
+            return {"success": False, "error": err}
         
         sanitized_prefix = sanitize_prefix(prefix)
-        objects = client.list_objects(bucket, prefix=sanitized_prefix, recursive=False, max_keys=max_keys)
+        objects = client.list_objects(bucket, prefix=sanitized_prefix, recursive=False)
         
         files = []
         for obj in objects:
@@ -241,8 +254,9 @@ def operation_delete(client: Minio, bucket: str, key: str) -> dict:
         if not is_valid:
             return {"success": False, "error": err}
         
-        if not client.bucket_exists(bucket):
-            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        is_valid, err = ensure_bucket_exists(client, bucket)
+        if not is_valid:
+            return {"success": False, "error": err}
         
         client.remove_object(bucket, key)
         
@@ -265,8 +279,9 @@ def operation_stat(client: Minio, bucket: str, key: str) -> dict:
         if not is_valid:
             return {"success": False, "error": err}
         
-        if not client.bucket_exists(bucket):
-            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        is_valid, err = ensure_bucket_exists(client, bucket)
+        if not is_valid:
+            return {"success": False, "error": err}
         
         stat = client.stat_object(bucket, key)
         

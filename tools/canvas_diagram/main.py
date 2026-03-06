@@ -40,6 +40,23 @@ CANVAS_COLORS = {
 }
 
 LAYOUTS = ["horizontal", "vertical", "radial"]
+ALLOWED_OUTPUT_DIR = "/data/output"
+
+
+def validate_save_path(path: str) -> tuple[bool, Optional[str]]:
+    if not path:
+        return False, "Save path is required"
+    
+    abs_path = os.path.abspath(path)
+    abs_allowed = os.path.abspath(ALLOWED_OUTPUT_DIR)
+    
+    if not abs_path.startswith(abs_allowed):
+        return False, f"Path must be within {ALLOWED_OUTPUT_DIR}"
+    
+    if ".." in path:
+        return False, "Path traversal not allowed"
+    
+    return True, None
 
 
 def read_request() -> dict[str, Any]:
@@ -343,18 +360,20 @@ def main() -> None:
 
         saved_path = None
         if save_path:
-            try:
-                save_dir = os.path.dirname(save_path)
-                if save_dir:
-                    os.makedirs(save_dir, exist_ok=True)
-                with open(save_path, "w") as f:
-                    json.dump(canvas_json, f, indent=2)
-                saved_path = save_path
-            except Exception:
-                pass
+            is_valid, err = validate_save_path(save_path)
+            if is_valid:
+                try:
+                    save_dir = os.path.dirname(save_path)
+                    if save_dir:
+                        os.makedirs(save_dir, exist_ok=True)
+                    with open(save_path, "w") as f:
+                        json.dump(canvas_json, f, indent=2)
+                    saved_path = save_path
+                except Exception:
+                    pass
         
         if not saved_path:
-            output_dir = "/data/output"
+            output_dir = ALLOWED_OUTPUT_DIR
             try:
                 os.makedirs(output_dir, exist_ok=True)
                 filename = f"canvas_{uuid.uuid4().hex[:8]}.canvas"

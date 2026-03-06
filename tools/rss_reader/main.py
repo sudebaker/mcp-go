@@ -49,6 +49,46 @@ FEEDS_FILE = os.path.join(os.path.dirname(__file__), "feeds.json")
 
 _last_request_time: dict[str, float] = {}
 
+INTERNAL_IP_PATTERNS = [
+    r"^127\.",
+    r"^10\.",
+    r"^172\.(1[6-9]|2\d|3[01])\.",
+    r"^192\.168\.",
+    r"^169\.254\.",
+    r"^0\.",
+    r"^localhost$",
+    r"^::1$",
+]
+
+BLOCKED_HOSTS = [
+    "169.254.169.254",
+    "metadata.google.internal",
+    "metadata.googleusercontent.com",
+    "instance-data",
+]
+
+compiled_ip_patterns = [re.compile(p) for p in INTERNAL_IP_PATTERNS]
+
+
+def is_internal_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        
+        if host.lower() in BLOCKED_HOSTS:
+            return True
+
+        if host.lower() == "localhost" or host == "::1":
+            return True
+
+        for pattern in compiled_ip_patterns:
+            if pattern.match(host):
+                return True
+
+        return False
+    except Exception:
+        return True
+
 
 def _load_rate_limit_state() -> dict[str, float]:
     try:
@@ -109,6 +149,9 @@ def fetch_feed(feed_url: str, feed_name: str) -> tuple[Optional[list], Optional[
     try:
         parsed_url = urlparse(feed_url)
         host = parsed_url.hostname or ""
+        
+        if is_internal_url(feed_url):
+            return None, "Access to internal URLs is not allowed"
         
         _apply_rate_limit(host)
 

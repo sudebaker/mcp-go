@@ -1,0 +1,519 @@
+#!/usr/bin/env python3
+"""
+RustFS/S3 Storage Tool for MCP Orchestrator.
+Provides upload, download, list, search, delete, and stat operations for S3-compatible storage.
+"""
+
+import json
+import sys
+import os
+import re
+import base64
+import traceback
+from datetime import timedelta
+from typing import Any, Optional
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+try:
+    from minio import Minio
+    from minio.error import S3Error
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+    S3Error = Exception
+
+
+MAX_UPLOAD_SIZE_MB = 100
+ALLOWED_OPERATIONS = ["upload", "download", "list", "search", "delete", "stat"]
+DEFAULT_BUCKET = "openwebui"
+
+
+def read_request() -> dict[str, Any]:
+    input_data = sys.stdin.read()
+    return json.loads(input_data)
+
+
+def write_response(response: dict[str, Any]) -> None:
+    print(json.dumps(response, default=str))
+
+
+def get_rustfs_client() -> Optional[Minio]:
+    if not MINIO_AVAILABLE:
+        return None
+    
+    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+    access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID", "rustfsadmin")
+    secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY", "rustfsadmin")
+    use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
+
+    if not endpoint:
+        return None
+
+    try:
+        client = Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=use_ssl,
+        )
+        return client
+    except Exception:
+        return None
+
+
+def validate_bucket_name(bucket: str) -> tuple[bool, Optional[str]]:
+    if not bucket:
+        return False, "Bucket name is required"
+    
+    if len(bucket) < 3 or len(bucket) > 63:
+        return False, "Bucket name must be between 3 and 63 characters"
+    
+    if not re.match(r'^[a-z0-9][a-z0-9.-]*[a-z0-9]$', bucket):
+        return False, "Bucket name must contain only lowercase letters, numbers, dots, and hyphens"
+    
+    if ".." in bucket:
+        return False, "Bucket name cannot contain consecutive dots"
+    
+    if bucket.startswith("xn--") or bucket.endswith("-s3alias"):
+        return False, "Bucket name cannot start with 'xn--' or end with '-s3alias'"
+    
+    return True, None
+
+
+def validate_object_key(key: str) -> tuple[bool, Optional[str]]:
+    if not key:
+        return False, "Object key is required"
+    
+    if len(key) > 1024:
+        return False, "Object key too long (max 1024 characters)"
+    
+    if key.startswith("/") or key.startswith("\\"):
+        return False, "Object key cannot start with slash"
+    
+    path_parts = key.split("/")
+    for part in path_parts:
+        if part in (".", ".."):
+            return False, f"Invalid path component: {part}"
+    
+    return True, None
+
+
+def sanitize_prefix(prefix: str) -> str:
+    prefix = prefix.replace("..", "")
+    prefix = prefix.lstrip("/")
+    return prefix[:200] if prefix else ""
+
+
+def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict:
+    try:
+        content_bytes = base64.b64decode(content)
+    except Exception as e:
+        return {"success": False, "error": f"Invalid base64 content: {str(e)}"}
+    
+    size_mb = len(content_bytes) / (1024 * 1024)
+    if size_mb > MAX_UPLOAD_SIZE_MB:
+        return {"success": False, "error": f"File too large: {size_mb:.1f}MB (max {MAX_UPLOAD_SIZE_MB}MB)"}
+    
+    try:
+        import io
+        data = io.BytesIO(content_bytes)
+        
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        
+        content_type = "application/octet-stream"
+        if key.lower().endswith(".pdf"):
+            content_type = "application/pdf"
+        elif key.lower().endswith((".jpg", ".jpeg")):
+            content_type = "image/jpeg"
+        elif key.lower().endswith(".png"):
+            content_type = "image/png"
+        elif key.lower().endswith(".txt"):
+            content_type = "text/plain"
+        elif key.lower().endswith((".json", ".json")):
+            content_type = "application/json"
+        elif key.lower().endswith(".csv"):
+            content_type = "text/csv"
+        
+        client.put_object(
+            bucket,
+            key,
+            data,
+            length=len(content_bytes),
+            content_type=content_type,
+        )
+        
+        stat = client.stat_object(bucket, key)
+        
+        return {
+            "success": True,
+            "bucket": bucket,
+            "key": key,
+            "size": stat.size,
+            "content_type": stat.content_type,
+            "etag": stat.etag,
+        }
+    
+    except S3Error as e:
+        return {"success": False, "error": f"S3 error: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def operation_download(client: Minio, bucket: str, key: str, expiry: int = 3600) -> dict:
+    try:
+        is_valid, err = validate_object_key(key)
+        if not is_valid:
+            return {"success": False, "error": err}
+        
+        if not client.bucket_exists(bucket):
+            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        
+        stat = client.stat_object(bucket, key)
+        
+        presigned_url = client.presigned_get_object(bucket, key, expires=timedelta(seconds=expiry))
+        
+        return {
+            "success": True,
+            "bucket": bucket,
+            "key": key,
+            "presigned_url": presigned_url,
+            "expires": expiry,
+            "size": stat.size,
+            "content_type": stat.content_type,
+        }
+    
+    except S3Error as e:
+        return {"success": False, "error": f"S3 error: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def operation_list(client: Minio, bucket: str, prefix: str = "", max_keys: int = 100) -> dict:
+    try:
+        is_valid, err = validate_bucket_name(bucket)
+        if not is_valid:
+            return {"success": False, "error": err}
+        
+        if not client.bucket_exists(bucket):
+            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        
+        sanitized_prefix = sanitize_prefix(prefix)
+        objects = client.list_objects(bucket, prefix=sanitized_prefix, recursive=False, max_keys=max_keys)
+        
+        files = []
+        for obj in objects:
+            files.append({
+                "key": obj.object_name,
+                "size": obj.size,
+                "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
+                "etag": obj.etag,
+                "is_dir": obj.is_dir,
+            })
+        
+        return {
+            "success": True,
+            "bucket": bucket,
+            "prefix": sanitized_prefix,
+            "files": files,
+            "count": len(files),
+        }
+    
+    except S3Error as e:
+        return {"success": False, "error": f"S3 error: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def operation_search(client: Minio, bucket: str, search_term: str, max_keys: int = 100) -> dict:
+    prefix = search_term.strip()
+    if not prefix:
+        prefix = ""
+    
+    return operation_list(client, bucket, prefix, max_keys)
+
+
+def operation_delete(client: Minio, bucket: str, key: str) -> dict:
+    try:
+        is_valid, err = validate_object_key(key)
+        if not is_valid:
+            return {"success": False, "error": err}
+        
+        if not client.bucket_exists(bucket):
+            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        
+        client.remove_object(bucket, key)
+        
+        return {
+            "success": True,
+            "bucket": bucket,
+            "key": key,
+            "deleted": True,
+        }
+    
+    except S3Error as e:
+        return {"success": False, "error": f"S3 error: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def operation_stat(client: Minio, bucket: str, key: str) -> dict:
+    try:
+        is_valid, err = validate_object_key(key)
+        if not is_valid:
+            return {"success": False, "error": err}
+        
+        if not client.bucket_exists(bucket):
+            return {"success": False, "error": f"Bucket does not exist: {bucket}"}
+        
+        stat = client.stat_object(bucket, key)
+        
+        return {
+            "success": True,
+            "bucket": bucket,
+            "key": key,
+            "size": stat.size,
+            "content_type": stat.content_type,
+            "etag": stat.etag,
+            "last_modified": stat.last_modified.isoformat() if stat.last_modified else None,
+        }
+    
+    except S3Error as e:
+        return {"success": False, "error": f"S3 error: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def main() -> None:
+    request = {}
+    try:
+        request = read_request()
+        request_id = request.get("request_id", "")
+        arguments = request.get("arguments", {})
+        context = request.get("context", {})
+
+        operation = arguments.get("operation", "").lower()
+        bucket = arguments.get("bucket", DEFAULT_BUCKET)
+        key = arguments.get("key", "")
+        content = arguments.get("content", "")
+        prefix = arguments.get("prefix", "")
+        max_keys = arguments.get("max_keys", 100)
+        expiry = arguments.get("expiry", 3600)
+
+        if not MINIO_AVAILABLE:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "MISSING_DEPENDENCY",
+                    "message": "minio library not installed. Install with: pip install minio"
+                }
+            })
+            return
+
+        if operation not in ALLOWED_OPERATIONS:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "INVALID_OPERATION",
+                    "message": f"Invalid operation. Allowed: {', '.join(ALLOWED_OPERATIONS)}"
+                }
+            })
+            return
+
+        is_valid, err = validate_bucket_name(bucket)
+        if not is_valid:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "INVALID_BUCKET",
+                    "message": err
+                }
+            })
+            return
+
+        client = get_rustfs_client()
+        if not client:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "CLIENT_ERROR",
+                    "message": "Could not connect to RustFS. Check configuration."
+                }
+            })
+            return
+
+        result = None
+
+        if operation == "upload":
+            if not key:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "key is required for upload"
+                    }
+                })
+                return
+            if not content:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "content (base64) is required for upload"
+                    }
+                })
+                return
+            result = operation_upload(client, bucket, key, content)
+
+        elif operation == "download":
+            if not key:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "key is required for download"
+                    }
+                })
+                return
+            result = operation_download(client, bucket, key, expiry)
+
+        elif operation == "list":
+            result = operation_list(client, bucket, prefix, max_keys)
+
+        elif operation == "search":
+            if not prefix:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "prefix is required for search"
+                    }
+                })
+                return
+            result = operation_search(client, bucket, prefix, max_keys)
+
+        elif operation == "delete":
+            if not key:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "key is required for delete"
+                    }
+                })
+                return
+            result = operation_delete(client, bucket, key)
+
+        elif operation == "stat":
+            if not key:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": "key is required for stat"
+                    }
+                })
+                return
+            result = operation_stat(client, bucket, key)
+
+        if not result:
+            result = {"success": False, "error": "Unknown operation"}
+
+        if not result.get("success"):
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "OPERATION_FAILED",
+                    "message": result.get("error", "Unknown error")
+                }
+            })
+            return
+
+        response_text = f"**RustFS Operation: {operation}**\n\n"
+        
+        if operation == "upload":
+            response_text += f"✅ File uploaded successfully\n"
+            response_text += f"**Bucket:** {result.get('bucket')}\n"
+            response_text += f"**Key:** {result.get('key')}\n"
+            response_text += f"**Size:** {result.get('size')} bytes\n"
+        
+        elif operation == "download":
+            response_text += f"✅ Download URL generated\n"
+            response_text += f"**Bucket:** {result.get('bucket')}\n"
+            response_text += f"**Key:** {result.get('key')}\n"
+            response_text += f"**Expires in:** {result.get('expires')} seconds\n"
+            response_text += f"**URL:** {result.get('presigned_url')[:80]}...\n"
+        
+        elif operation in ["list", "search"]:
+            files = result.get("files", [])
+            response_text += f"**Bucket:** {result.get('bucket')}\n"
+            response_text += f"**Files found:** {result.get('count')}\n\n"
+            if files:
+                response_text += "**Files:**\n"
+                for f in files[:10]:
+                    size_str = f"{f['size']:,}" if f.get('size') else "N/A"
+                    response_text += f"- {f['key']} ({size_str} bytes)\n"
+                if len(files) > 10:
+                    response_text += f"\n... and {len(files) - 10} more\n"
+        
+        elif operation == "delete":
+            response_text += f"✅ File deleted successfully\n"
+            response_text += f"**Bucket:** {result.get('bucket')}\n"
+            response_text += f"**Key:** {result.get('key')}\n"
+        
+        elif operation == "stat":
+            response_text += f"**Bucket:** {result.get('bucket')}\n"
+            response_text += f"**Key:** {result.get('key')}\n"
+            response_text += f"**Size:** {result.get('size')} bytes\n"
+            response_text += f"**Content-Type:** {result.get('content_type')}\n"
+            response_text += f"**ETag:** {result.get('etag')}\n"
+            response_text += f"**Last-Modified:** {result.get('last_modified')}\n"
+
+        write_response({
+            "success": True,
+            "request_id": request_id,
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ],
+            "structured_content": result
+        })
+
+    except json.JSONDecodeError as e:
+        write_response({
+            "success": False,
+            "request_id": request.get("request_id", ""),
+            "error": {
+                "code": "INVALID_INPUT",
+                "message": f"Failed to parse JSON input: {str(e)}"
+            }
+        })
+    except Exception as e:
+        write_response({
+            "success": False,
+            "request_id": request.get("request_id", "") if request else "",
+            "error": {
+                "code": "EXECUTION_FAILED",
+                "message": str(e),
+                "details": traceback.format_exc()
+            }
+        })
+
+
+if __name__ == "__main__":
+    main()

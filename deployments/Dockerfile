@@ -60,6 +60,9 @@ validators>=0.20.0
 # RSS Reader
 feedparser>=6.0.0
 
+# Web Scraper
+beautifulsoup4>=4.12.0
+
 # PDF Reports
 jinja2>=3.1.2
 weasyprint>=60.0

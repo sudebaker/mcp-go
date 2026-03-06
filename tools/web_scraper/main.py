@@ -140,6 +140,16 @@ def is_internal_url(url: str) -> bool:
         return True
 
 
+def validate_redirect_url(initial_url: str, final_url: str) -> tuple[bool, Optional[str]]:
+    initial_parsed = urlparse(initial_url)
+    final_parsed = urlparse(final_url)
+    
+    if initial_parsed.hostname != final_parsed.hostname:
+        return False, f"Redirect to different host not allowed: {final_parsed.hostname}"
+    
+    return True, None
+
+
 def validate_url(url: str) -> tuple[bool, Optional[str]]:
     if not url:
         return False, "URL is required"
@@ -195,7 +205,17 @@ def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT) -> tuple[Optional[str], 
             "Upgrade-Insecure-Requests": "1",
         }
         
-        response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+        session = requests.Session()
+        response = session.get(url, headers=headers, timeout=timeout, allow_redirects=False)
+        
+        if response.status_code in (301, 302, 303, 307, 308):
+            redirect_url = response.headers.get("Location")
+            if redirect_url:
+                is_valid, err = validate_redirect_url(url, redirect_url)
+                if not is_valid:
+                    return None, err
+                
+                response = session.get(redirect_url, headers=headers, timeout=timeout, allow_redirects=False)
         
         if response.status_code != 200:
             return None, f"HTTP {response.status_code}: {response.reason}"

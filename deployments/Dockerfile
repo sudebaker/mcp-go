@@ -57,6 +57,9 @@ httpx>=0.27.0
 tenacity>=8.2.0
 validators>=0.20.0
 
+# RSS Reader
+feedparser>=6.0.0
+
 # PDF Reports
 jinja2>=3.1.2
 weasyprint>=60.0

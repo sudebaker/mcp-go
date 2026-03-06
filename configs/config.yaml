@@ -319,3 +319,76 @@ tools:
           type: integer
           default: 3
           description: "Number of forecast days (1-7, default 3)"
+
+  # Web Scraper - Extract content from web pages
+  - name: "web_scraper"
+    description: "(EN): Extract content from web pages, scrape websites, get page text, find links and images, analyze web content. Use when user asks: scrape this page, get content from URL, extract text from website, find all links on page. (ES): Extraer contenido de páginas web, hacer scraping, obtener texto de página, encontrar enlaces e imágenes, analizar contenido web."
+    command: "python3"
+    args: ["/app/tools/web_scraper/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "URL to scrape (must start with http:// or https://)"
+        selector:
+          type: string
+          description: "Optional CSS selector to extract specific content"
+        extract_type:
+          type: string
+          enum: ["text", "html", "links", "images"]
+          default: "text"
+          description: "What to extract: text (default), html, links, images"
+      required:
+        - url
+
+  # RSS Reader - Read news feeds
+  - name: "rss_reader"
+    description: "(EN): Read RSS news feeds, get latest headlines from multiple sources. Returns news items with title, link, date and source. Use when user asks: latest news, what's happening, news feed, headlines. (ES): Leer feeds RSS de noticias, obtener últimos titulares de múltiples fuentes."
+    command: "python3"
+    args: ["/app/tools/rss_reader/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          default: 10
+          description: "Maximum number of items to return per feed"
+        feeds:
+          type: array
+          items:
+            type: string
+          description: "Optional: filter by feed names (e.g. ['TechCrunch', 'BBC News']). If omitted, fetches all feeds."
+        extract:
+          type: string
+          enum: ["titles", "content", "full"]
+          default: "titles"
+          description: "What to extract: titles (default), content (summaries), full (full content if available)"
+
+  # Canvas Diagram Generator - Create Obsidian Canvas diagrams
+  - name: "canvas_diagram"
+    description: "(EN): Create visual diagrams using Obsidian Canvas JSON format from text descriptions. Generates flowcharts, mind maps, process diagrams. Uses LLM if available. Output: .canvas file for Obsidian. (ES): Crear diagramas visuales usando formato JSON de Obsidian Canvas a partir de descripciones de texto."
+    command: "python3"
+    args: ["/app/tools/canvas_diagram/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        description:
+          type: string
+          description: "Text description or DSL of the diagram to create. E.g., 'Usuario -> Verificar Email -> Login -> Dashboard'"
+        layout:
+          type: string
+          enum: ["horizontal", "vertical", "radial"]
+          default: "horizontal"
+          description: "Layout direction: horizontal, vertical, or radial"
+        save_path:
+          type: string
+          description: "Optional custom path to save the .canvas file"
+      required:
+        - description
+
+
+

@@ -1,0 +1,79 @@
+{
+  "feeds": [
+    {
+      "name": "20 Minutos",
+      "url": "https://www.20minutos.es/rss/",
+      "category": "news"
+    },
+    {
+      "name": "El País",
+      "url": "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada",
+      "category": "news"
+    },
+    {
+      "name": "BBC News",
+      "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+      "category": "news"
+    },
+    {
+      "name": "Reuters World News",
+      "url": "https://www.reutersagency.com/feed/?best-topics=tech",
+      "category": "news"
+    },
+    {
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "category": "tech"
+    },
+    {
+      "name": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "category": "tech"
+    },
+    {
+      "name": "The Verge",
+      "url": "https://www.theverge.com/rss/index.xml",
+      "category": "tech"
+    },
+    {
+      "name": "OpenAI Blog",
+      "url": "https://openai.com/blog/rss.xml",
+      "category": "ai"
+    },
+    {
+      "name": "VentureBeat AI",
+      "url": "https://venturebeat.com/category/ai/feed/",
+      "category": "ai"
+    },
+    {
+      "name": "MIT Technology Review",
+      "url": "https://www.technologyreview.com/feed/",
+      "category": "ai"
+    },
+    {
+      "name": "Linux Weekly News",
+      "url": "https://lwn.net/headlines/rss",
+      "category": "linux"
+    },
+    {
+      "name": "OMG! Ubuntu!",
+      "url": "https://feeds.feedburner.com/omgubuntu/CLsH",
+      "category": "linux"
+    },
+    {
+      "name": "It's FOSS",
+      "url": "https://itsfoss.com/feed/",
+      "category": "linux"
+    },
+    {
+      "name": "Wired",
+      "url": "https://www.wired.com/feed/rss",
+      "category": "tech"
+    },
+    {
+      "name": "Hacker News",
+      "url": "https://hnrss.org/frontpage",
+      "category": "tech"
+    }
+  ]
+}

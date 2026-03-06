@@ -390,5 +390,43 @@ tools:
       required:
         - description
 
+  # RustFS/S3 Storage - File operations with S3-compatible storage
+  - name: "rustfs_storage"
+    description: "(EN): Interact with RustFS/S3 storage. Upload, download, list, search, delete files and get object metadata. (ES): Interactuar con almacenamiento RustFS/S3. Subir, descargar, listar, buscar y eliminar archivos."
+    command: "python3"
+    args: ["/app/tools/rustfs_storage/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        operation:
+          type: string
+          enum: [upload, download, list, search, delete, stat]
+          description: "Operation to perform"
+        bucket:
+          type: string
+          default: "openwebui"
+          description: "S3 bucket name"
+        key:
+          type: string
+          description: "Object key (path) in the bucket"
+        content:
+          type: string
+          description: "Base64-encoded content for upload operation"
+        prefix:
+          type: string
+          description: "Prefix for list/search operations"
+        max_keys:
+          type: integer
+          default: 100
+          description: "Maximum number of items to return"
+        expiry:
+          type: integer
+          default: 3600
+          description: "URL expiry time in seconds for download"
+      required:
+        - operation
+
+
 
 

@@ -29,11 +29,7 @@ go test -run TestLoadConfig ./internal/config -v
 ```bash
 # Start all services
 cd deployments && docker-compose up -d
-
-# View logs
 docker logs -f mcp-orchestrator
-
-# Restart after changes
 docker-compose restart mcp-server
 ```
 
@@ -45,6 +41,9 @@ docker-compose restart mcp-server
 ./tests/test_image_format_validation.sh
 ./tests/test_kb_memory.sh
 ./tests/test_suite_complete.sh
+
+# Security tests
+python -m pytest tests/test_security_mitigations.py -v
 ```
 
 ## Code Style
@@ -64,7 +63,6 @@ import (
     mcptypes "github.com/amphora/mcp-go/internal/mcp"
 )
 ```
-
 **Groups:** stdlib → external → internal
 
 ### Go Naming Conventions
@@ -78,11 +76,11 @@ import (
 ### Go Structs
 ```go
 type ToolConfig struct {
-    Name        string        `yaml:"name"`
-    Description string        `yaml:"description"`
-    Command     string        `yaml:"command"`
-    Args        []string      `yaml:"args"`
-    Timeout     time.Duration `yaml:"timeout"`
+    Name        string                 `yaml:"name"`
+    Description string                 `yaml:"description"`
+    Command     string                 `yaml:"command"`
+    Args        []string               `yaml:"args"`
+    Timeout     time.Duration          `yaml:"timeout"`
     InputSchema map[string]interface{} `yaml:"input_schema"`
 }
 ```
@@ -101,43 +99,42 @@ log.Info().Str("tool", name).Msg("Executing")
 log.Error().Err(err).Str("file", path).Msg("Failed")
 ```
 
-### Python Tools
+## Project Structure
+```
+mcp-go/
+├── cmd/server/          # Main entry point
+├── internal/
+│   ├── config/          # Configuration loading
+│   ├── executor/        # Subprocess execution
+│   ├── mcp/             # MCP types
+│   ├── metrics/         # Prometheus metrics
+│   ├── health/          # Health check endpoints
+│   ├── transport/       # HTTP/SSE transport
+│   └── tracing/         # Distributed tracing
+├── tools/               # Python tools (JSON stdin/stdout)
+├── configs/             # YAML configs
+└── deployments/         # Docker Compose
+```
 
-**Protocol:** JSON over stdin/stdout
+## Python Tools Protocol
+Tools communicate via JSON over stdin/stdout:
 ```python
+import json, sys
+
 def read_request() -> dict:
     return json.loads(sys.stdin.read())
 
 def write_response(response: dict) -> None:
     print(json.dumps(response, default=str))
 
-# Error response
+# Error response format
 {"success": False, "error": {"code": "ERROR_CODE", "message": str(e)}}
-```
-
-## Project Structure
-```
-mcp-go/
-├── cmd/server/          # Main entry point
-├── internal/
-│   ├── config/          # Configuration
-│   ├── executor/        # Subprocess execution
-│   ├── mcp/            # MCP types
-│   ├── metrics/        # Prometheus metrics
-│   ├── health/         # Health check endpoints
-│   ├── transport/      # HTTP/SSE transport
-│   └── tracing/        # Distributed tracing
-├── tools/              # Python tools (10 tools)
-├── configs/            # YAML configs
-├── tests/              # Integration tests
-└── deployments/        # Docker Compose
 ```
 
 ## Adding New Tools
 
-1. Create `tools/new_tool/main.py`
-2. Follow JSON stdin/stdout protocol
-3. Add config to `configs/config.yaml`:
+1. Create `tools/new_tool/main.py` following JSON protocol
+2. Add config to `configs/config.yaml`:
    ```yaml
    tools:
      - name: "new_tool"
@@ -151,7 +148,7 @@ mcp-go/
            param:
              type: string
    ```
-4. Restart: `docker-compose restart mcp-server`
+3. Restart: `docker-compose restart mcp-server`
 
 ## Key Patterns
 
@@ -162,43 +159,20 @@ mcp-go/
 
 ## Dependencies
 
-- Go 1.23+
-- `github.com/mark3labs/mcp-go` - MCP protocol
-- `github.com/rs/zerolog` - Logging
-- `gopkg.in/yaml.v3` - YAML parsing
-- `github.com/google/uuid` - UUID generation
-- `github.com/prometheus/client_golang` - Metrics
-- `github.com/redis/go-redis/v9` - Redis client
+- Go 1.23+ | `github.com/mark3labs/mcp-go` | `github.com/rs/zerolog` | `gopkg.in/yaml.v3` | `github.com/google/uuid` | `github.com/prometheus/client_golang` | `github.com/redis/go-redis/v9`
 
-## Security
+## Security Mitigations
 
-### Critical Vulnerabilities Mitigated
 - **SSRF**: URL validation prevents cloud metadata/internal network access
-- **SSTI**: SandboxedEnvironment blocks template injection attacks
+- **SSTI**: SandboxedEnvironment blocks template injection
 - **ReDoS**: Pre-compiled regex patterns prevent DoS attacks
 - **YAML**: Safe deserialization via typed unmarshaling
 
-### Testing Security
-```bash
-# Run all security tests (22 tests)
-python -m pytest tests/test_security_mitigations.py -v
-
-# Test specific vulnerability
-python -m pytest tests/test_security_mitigations.py::TestSSRFMitigation -v
-python -m pytest tests/test_security_mitigations.py::TestReDoSMitigation -v
-python -m pytest tests/test_security_mitigations.py::TestSSTIMitigation -v
-```
-
-### Security Documentation
-See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for:
-- Implementation details of each mitigation
-- Attack vectors and protection mechanisms
-- Test coverage and verification
-- Production recommendations
+See [SECURITY_HARDENING.md](SECURITY_HARDENING.md) for details.
 
 ## Related Docs
 
-- [API Reference](docs/API.md) - Complete API docs
-- [Development Guide](docs/DEVELOPMENT.md) - Dev instructions
-- [Logging](docs/LOGGING.md) - HTTP logging details
-- [Security Hardening](SECURITY_HARDENING.md) - Security mitigations
+- [API Reference](docs/API.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Logging](docs/LOGGING.md)
+- [Security Hardening](SECURITY_HARDENING.md)

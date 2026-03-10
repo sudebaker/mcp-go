@@ -70,7 +70,7 @@ weasyprint>=60.0
 # Data Analysis
 pandas>=2.1.0
 openpyxl>=3.1.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0
 matplotlib>=3.8.0
 
 # Vision/OCR
@@ -81,6 +81,8 @@ pytesseract>=0.3.10
 # Knowledge Base
 psycopg2-binary>=2.9.0
 sentence-transformers>=2.2.0
+transformers>=4.38.0,<5.0.0
+accelerate>=0.26.0
 
 # Document parsing
 pypdf>=3.0.0
@@ -94,7 +96,7 @@ EOF
 
 # Install Python dependencies
 # Force CPU-only torch to avoid pulling NVIDIA/CUDA transitive dependencies
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.5.1+cpu torchvision==0.20.1+cpu torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download sentence-transformers model

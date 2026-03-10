@@ -74,6 +74,36 @@
       "name": "Hacker News",
       "url": "https://hnrss.org/frontpage",
       "category": "tech"
+    },
+    {
+      "name": "Motorpasión Moto",
+      "url": "https://www.motorpasionmoto.com/feed",
+      "category": "moto"
+    },
+    {
+      "name": "SoyMotero",
+      "url": "https://www.soymotero.net/feed/",
+      "category": "moto"
+    },
+    {
+      "name": "Krebs on Security",
+      "url": "https://krebsonsecurity.com/feed/",
+      "category": "security"
+    },
+    {
+      "name": "Schneier on Security",
+      "url": "https://www.schneier.com/feed/atom/",
+      "category": "security"
+    },
+    {
+      "name": "Europol News",
+      "url": "https://www.europol.europa.eu/rss/news",
+      "category": "lea"
+    },
+    {
+      "name": "ArXiv AI",
+      "url": "http://export.arxiv.org/rss/cs.AI",
+      "category": "ai_research"
     }
   ]
 }

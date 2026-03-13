@@ -16,15 +16,16 @@ import (
 
 // MCPServer wraps the mcp-go Streamable HTTP server with additional functionality
 type MCPServer struct {
-	mcpServer    *server.MCPServer
-	streamServer *server.StreamableHTTPServer
-	httpServer   *http.Server
-	addr         string
-	serverName   string
-	version      string
-	tools        []config.ToolConfig
-	rateLimiter  *RateLimiter
-	tracer       *tracing.Tracer
+	mcpServer      *server.MCPServer
+	streamServer   *server.StreamableHTTPServer
+	httpServer     *http.Server
+	addr           string
+	serverName     string
+	version        string
+	tools          []config.ToolConfig
+	rateLimiter    *RateLimiter
+	tracer         *tracing.Tracer
+	allowedOrigins []string
 }
 
 // MCPConfig holds MCP server configuration
@@ -37,6 +38,7 @@ type MCPConfig struct {
 	Tools             []config.ToolConfig
 	RateLimitRPS      float64
 	RateLimitBurst    int
+	AllowedOrigins    []string
 	Tracer            *tracing.Tracer
 }
 
@@ -57,14 +59,15 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	}
 
 	return &MCPServer{
-		mcpServer:    mcpServer,
-		streamServer: streamServer,
-		addr:         addr,
-		serverName:   cfg.ServerName,
-		version:      cfg.Version,
-		tools:        cfg.Tools,
-		rateLimiter:  rateLimiter,
-		tracer:       tracer,
+		mcpServer:      mcpServer,
+		streamServer:   streamServer,
+		addr:           addr,
+		serverName:     cfg.ServerName,
+		version:        cfg.Version,
+		tools:          cfg.Tools,
+		rateLimiter:    rateLimiter,
+		tracer:         tracer,
+		allowedOrigins: cfg.AllowedOrigins,
 	}
 }
 
@@ -93,15 +96,23 @@ func (s *MCPServer) Start() error {
 	mux.HandleFunc("/", s.handleRoot)
 
 	// Apply rate limiter middleware to MCP endpoint if configured
-	var mcpHandler http.Handler
+	var mcpHandler http.Handler = s.streamServer
 	if s.rateLimiter != nil {
-		mcpHandler = s.rateLimiter.Middleware(s.streamServer)
+		mcpHandler = s.rateLimiter.Middleware(mcpHandler)
 		log.Info().
 			Float64("rps", s.rateLimiter.rps).
 			Int("burst", s.rateLimiter.burst).
 			Msg("Rate limiting enabled")
+	}
+
+	// Apply CORS middleware to MCP endpoint
+	mcpHandler = CORSMiddleware(s.allowedOrigins)(mcpHandler)
+	if len(s.allowedOrigins) == 0 {
+		log.Info().Msg("CORS configured in permissive mode (allow all origins)")
 	} else {
-		mcpHandler = s.streamServer
+		log.Info().
+			Strs("allowed_origins", s.allowedOrigins).
+			Msg("CORS configured with restricted origin list")
 	}
 
 	// MCP Streamable HTTP endpoint (default: /mcp)

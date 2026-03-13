@@ -4,6 +4,13 @@ server:
   name: "mcp-orchestrator"
   rate_limit_rps: 10
   rate_limit_burst: 20
+  # allowed_origins: CORS origins allowed to access the MCP endpoint (/mcp).
+  # If omitted or empty, allows all origins (*).
+  # Use a list of specific origins for production to prevent DNS rebinding attacks:
+  # allowed_origins:
+  #   - "http://localhost:3000"
+  #   - "https://lobe-chat.mycompany.com"
+  #   - "https://another-client.example.com"
 
 execution:
   default_timeout: "60s"

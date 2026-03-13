@@ -23,6 +23,7 @@ type ServerConfig struct {
 	RateLimitRPS    float64       `yaml:"rate_limit_rps"`
 	RateLimitBurst  int           `yaml:"rate_limit_burst"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+	AllowedOrigins  []string      `yaml:"allowed_origins"`
 }
 
 // ExecutionConfig holds execution-related settings

@@ -103,6 +103,7 @@ func main() {
 		Tools:             cfg.Tools,
 		RateLimitRPS:      cfg.Server.RateLimitRPS,
 		RateLimitBurst:    cfg.Server.RateLimitBurst,
+		AllowedOrigins:    cfg.Server.AllowedOrigins,
 		Tracer:            tracer,
 	})
 

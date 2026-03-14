@@ -97,6 +97,7 @@ func main() {
 	sseServer := transport.NewSSEServer(mcpServer, transport.SSEConfig{
 		Host:              cfg.Server.Host,
 		Port:              cfg.Server.Port,
+		BaseURL:           cfg.Server.BaseURL,
 		KeepAliveInterval: 30 * time.Second,
 		ServerName:        cfg.Server.Name,
 		Version:           Version,

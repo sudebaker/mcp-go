@@ -2,9 +2,17 @@ server:
   host: "0.0.0.0"
   port: 8080
   name: "mcp-orchestrator"
+  # base_url: Public-facing URL for SSE clients to send messages (e.g., http://localhost:8080).
+  # Required for SSE transport (/sse, /message endpoints).
+  # In Docker, override via environment: BASE_URL=http://mcp-orchestrator:8080
+  # Examples:
+  #   Local dev:  http://localhost:8080
+  #   Docker:     http://mcp-orchestrator:8080
+  #   Production: https://mcp.example.com
+  base_url: "${BASE_URL:-http://localhost:8080}"
   rate_limit_rps: 10
   rate_limit_burst: 20
-  # allowed_origins: CORS origins allowed to access the MCP endpoint (/mcp).
+  # allowed_origins: CORS origins allowed to access MCP endpoints (/mcp, /sse, /message).
   # If omitted or empty, allows all origins (*).
   # Use a list of specific origins for production to prevent DNS rebinding attacks:
   # allowed_origins:

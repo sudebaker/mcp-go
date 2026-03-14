@@ -20,6 +20,7 @@ type ServerConfig struct {
 	Host            string        `yaml:"host"`
 	Port            int           `yaml:"port"`
 	Name            string        `yaml:"name"`
+	BaseURL         string        `yaml:"base_url"`
 	RateLimitRPS    float64       `yaml:"rate_limit_rps"`
 	RateLimitBurst  int           `yaml:"rate_limit_burst"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`

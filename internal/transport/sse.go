@@ -175,7 +175,7 @@ func (s *MCPServer) Start() error {
 		Addr:           s.addr,
 		Handler:        handler,
 		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
+		WriteTimeout:   0, // No write timeout for SSE long-lived connections
 		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
@@ -192,10 +192,12 @@ func (s *MCPServer) Shutdown(ctx context.Context) error {
 		s.rateLimiter.Stop()
 	}
 
-	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+	// httpServer is always initialized in Start()
+	if s.httpServer == nil {
+		log.Warn().Msg("HTTP server not initialized")
+		return nil
 	}
-	return s.streamServer.Shutdown(ctx)
+	return s.httpServer.Shutdown(ctx)
 }
 
 // Handler returns the HTTP handler for the MCP server
@@ -237,7 +239,7 @@ func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request)
 		},
 		"http": map[string]interface{}{
 			"status":    "operational",
-			"endpoints": []string{"/mcp", "/health", "/health/detailed", "/metrics"},
+			"endpoints": []string{"/mcp", "/sse", "/message", "/health", "/health/detailed", "/metrics"},
 		},
 		"rate_limiter": map[string]interface{}{
 			"status":  "operational",

@@ -7,26 +7,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// responseWriterWrapper wraps http.ResponseWriter for CORS header management.
-type responseWriterWrapper struct {
-	http.ResponseWriter
-	protectedHeaders map[string]bool
-}
-
-// protectCORSHeaders marks headers as protected to prevent overwrites.
-func (w *responseWriterWrapper) protectCORSHeaders(keys ...string) {
-	for _, key := range keys {
-		w.protectedHeaders[http.CanonicalHeaderKey(key)] = true
-	}
-}
-
 // CORSMiddleware returns a middleware that handles CORS preflight requests and adds
 // CORS headers to responses. If an Origin header is present but not in the allowed
 // list, it responds with HTTP 403 Forbidden as required by the MCP spec.
 // If allowed origins is empty, it allows all origins (*).
 //
-// For SSE endpoints where the inner handler may set its own CORS headers, this
-// middleware sets them first and they take precedence.
+// In restricted mode (non-empty allowed list), disallowed origins are rejected with 403
+// before the inner handler runs, so there is no risk of the handler overwriting CORS
+// headers. In permissive mode (empty list), the handler may set conflicting CORS headers,
+// but this is functionally acceptable since all origins are already allowed.
 func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 	// Pre-compile the set of allowed origins for O(1) lookup
 	allowedSet := make(map[string]struct{}, len(allowedOrigins))

@@ -51,11 +51,15 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	streamServer := server.NewStreamableHTTPServer(mcpServer)
 
 	// Create SSE server for legacy MCP 2024 spec
+	// Note: WithUseFullURLForMessageEndpoint(false) allows clients to interpret
+	// the message endpoint relative to their connection origin. This supports
+	// clients connecting from different networks (e.g., localhost vs host.docker.internal).
 	sseServer := server.NewSSEServer(
 		mcpServer,
 		server.WithBaseURL(cfg.BaseURL),
 		server.WithKeepAlive(true),
 		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
+		server.WithUseFullURLForMessageEndpoint(false),
 	)
 
 	var rateLimiter *RateLimiter

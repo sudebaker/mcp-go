@@ -1,7 +1,9 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +18,6 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	// Arrange
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Host: "localhost",
@@ -38,21 +39,21 @@ func TestServer(t *testing.T) {
 		Port: cfg.Server.Port,
 	})
 
-	// Do not call Start() (which binds to a port). Use the handler directly
-	// to avoid port conflicts in test environments.
-
-	// Create a test client
-	req := httptest.NewRequest("GET", "http://localhost:8080/healthz", nil)
+	pingReq := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "ping",
+	}
+	body, _ := json.Marshal(pingReq)
+	req := httptest.NewRequest("POST", "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	// Act - use the handler directly
 	sseServer.Handler().ServeHTTP(w, req)
 
-	// Assert: handler should not return 500. Accept 200 or 404 depending on routes.
 	assert.NotEqual(t, http.StatusInternalServerError, w.Code)
 	t.Log("Server responded with status code:", w.Code)
 
-	// Clean up
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(cancelCtx, 10*time.Second)

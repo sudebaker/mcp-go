@@ -51,12 +51,11 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	streamServer := server.NewStreamableHTTPServer(mcpServer)
 
 	// Create SSE server for legacy MCP 2024 spec
-	// Note: WithUseFullURLForMessageEndpoint(false) allows clients to interpret
-	// the message endpoint relative to their connection origin. This supports
-	// clients connecting from different networks (e.g., localhost vs host.docker.internal).
+	// WithUseFullURLForMessageEndpoint(false) makes clients interpret the message
+	// endpoint relative to their connection origin. This supports multi-network deployments
+	// (e.g., localhost vs host.docker.internal). BaseURL is not needed with this mode.
 	sseServer := server.NewSSEServer(
 		mcpServer,
-		server.WithBaseURL(cfg.BaseURL),
 		server.WithKeepAlive(true),
 		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
 		server.WithUseFullURLForMessageEndpoint(false),
@@ -118,12 +117,12 @@ func (s *MCPServer) Start() error {
 	streamHandler = CORSMiddleware(s.allowedOrigins)(streamHandler)
 
 	// Prepare SSE handlers with same middleware chain
+	// Cache handlers to avoid allocating new function values per request
+	sseServerHandler := s.sseServer.SSEHandler()
+	messageServerHandler := s.sseServer.MessageHandler()
+
 	sseHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		s.sseServer.SSEHandler().ServeHTTP(w, r)
+		sseServerHandler.ServeHTTP(w, r)
 	}))
 	if s.rateLimiter != nil {
 		sseHandler = s.rateLimiter.Middleware(sseHandler)
@@ -131,11 +130,7 @@ func (s *MCPServer) Start() error {
 	sseHandler = CORSMiddleware(s.allowedOrigins)(sseHandler)
 
 	messageHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		s.sseServer.MessageHandler().ServeHTTP(w, r)
+		messageServerHandler.ServeHTTP(w, r)
 	}))
 	if s.rateLimiter != nil {
 		messageHandler = s.rateLimiter.Middleware(messageHandler)

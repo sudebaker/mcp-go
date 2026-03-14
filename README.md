@@ -41,9 +41,22 @@ docker-compose ps
 ### Acceso a Servicios
 
 - **OpenWebUI**: http://localhost:3000
-- **MCP Server**: http://localhost:8080
+- **MCP Server** (Streamable HTTP): http://localhost:8080/mcp
+- **MCP SSE** (Legacy): http://localhost:8080/sse
 - **MCPO Proxy**: http://localhost:8001
 - **PostgreSQL**: localhost:5432
+
+### Endpoints MCP
+
+El servidor soporta dos transportes:
+
+| Endpoint | Protocolo | Descripción |
+|----------|-----------|-------------|
+| `/mcp` | Streamable HTTP (2025) | Endpoint principal recomendado |
+| `/sse` | SSE (2024) | Endpoint legacy para compatibilidad |
+| `/message` | SSE Message | Endpoint POST para mensajes |
+
+ Métodos soportados: `initialize`, `ping`, `tools/list`, `tools/call`
 
 ## 📖 Documentación
 
@@ -51,9 +64,22 @@ docker-compose ps
 - **[Plan de Arquitectura](Plan.md)** - Diseño y decisiones técnicas
 - **[Configuración](configs/config.yaml)** - Herramientas disponibles
 
-## 🧪 Pruebas Rápidas
+## 🧪 Pruebas
 
-### Probar Análisis de Excel
+### Tests Unitarios y de Integración
+
+```bash
+# Todos los tests
+go test ./...
+
+# Solo tests del endpoint MCP
+go test -v -run TestMCP ./tests/
+
+# Benchmarks
+go test -run=^$ -bench=BenchmarkMCP ./tests/ -benchtime=1s
+```
+
+### Tests de Integración
 
 ```bash
 ./tests/test_excel_analysis.sh
@@ -80,6 +106,25 @@ docker-compose ps
 | `echo` | Herramienta de prueba | Debugging y validación |
 
 ## 📊 Ejemplo de Uso
+
+### Usando el endpoint /mcp (Streamable HTTP)
+
+```bash
+# Initialize
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+
+# Ping
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"ping"}'
+
+# List tools
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
+```
 
 ### Análisis de Datos
 
@@ -133,6 +178,11 @@ DATABASE_URL=postgresql://mcp:mcp@postgres:5432/knowledge
 mcp-go/
 ├── cmd/              # Aplicación principal Go
 ├── internal/         # Lógica interna
+│   ├── config/       # Configuración
+│   ├── executor/     # Ejecución de herramientas
+│   ├── transport/    # HTTP/SSE transport
+│   ├── metrics/      # Prometheus metrics
+│   └── health/       # Health checks
 ├── configs/          # Configuraciones YAML
 ├── tools/            # Herramientas Python
 │   ├── data_analysis/
@@ -140,7 +190,10 @@ mcp-go/
 │   ├── pdf_reports/
 │   └── knowledge_base/
 ├── templates/        # Plantillas Jinja2
-├── tests/           # Scripts de prueba
+├── tests/            # Tests Go + scripts de prueba
+│   ├── mcp_endpoint_test.go   # 24 tests para endpoint /mcp
+│   ├── integration_test.go
+│   └── server_test.go
 └── deployments/     # Docker Compose
 ```
 

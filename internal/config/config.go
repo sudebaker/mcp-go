@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"time"
@@ -103,6 +104,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Server.Name == "" {
 		cfg.Server.Name = "mcp-orchestrator"
+	}
+	if cfg.Server.BaseURL == "" {
+		cfg.Server.BaseURL = fmt.Sprintf("http://%s:%d", cfg.Server.Host, cfg.Server.Port)
 	}
 	if cfg.Server.ShutdownTimeout == 0 {
 		cfg.Server.ShutdownTimeout = 10 * time.Second

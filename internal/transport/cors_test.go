@@ -3,6 +3,7 @@ package transport
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -33,8 +34,8 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 	if w.Header().Get("Access-Control-Allow-Methods") != "GET, POST, DELETE, OPTIONS" {
 		t.Errorf("Expected Allow-Methods header, got %s", w.Header().Get("Access-Control-Allow-Methods"))
 	}
-	if w.Header().Get("Access-Control-Allow-Headers") == "" {
-		t.Errorf("Expected Allow-Headers header, got empty")
+	if w.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID" {
+		t.Errorf("Expected Allow-Headers header with all fields, got %s", w.Header().Get("Access-Control-Allow-Headers"))
 	}
 }
 
@@ -222,17 +223,7 @@ func TestCORSMiddleware_LastEventIDHeader(t *testing.T) {
 	}
 
 	// Check that Last-Event-ID is in the allowed headers
-	if !containsHeader(allowHeaders, "Last-Event-ID") {
+	if !strings.Contains(allowHeaders, "Last-Event-ID") {
 		t.Errorf("Expected Last-Event-ID in Allow-Headers for SSE support, got %s", allowHeaders)
 	}
-}
-
-func containsHeader(s, substr string) bool {
-	// Check if substring exists in comma-separated header values
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

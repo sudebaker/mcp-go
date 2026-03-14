@@ -3,12 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 )
 
 var (
 	ErrInvalidPort         = errors.New("invalid port number (must be 1-65535)")
+	ErrInvalidBaseURL      = errors.New("invalid or empty base URL")
 	ErrInvalidToolName     = errors.New("tool name cannot be empty")
 	ErrInvalidToolCommand  = errors.New("tool command cannot be empty")
 	ErrInvalidTimeout      = errors.New("timeout must be positive")
@@ -21,6 +23,12 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Server.Name == "" {
 		return errors.New("server name cannot be empty")
+	}
+	if cfg.Server.BaseURL == "" {
+		return ErrInvalidBaseURL
+	}
+	if _, err := url.ParseRequestURI(cfg.Server.BaseURL); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidBaseURL, err)
 	}
 	if cfg.Execution.DefaultTimeout <= 0 {
 		return fmt.Errorf("%w: %v", ErrInvalidTimeout, cfg.Execution.DefaultTimeout)

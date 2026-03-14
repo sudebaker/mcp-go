@@ -196,3 +196,43 @@ func TestCORSMiddleware_OriginWithWhitespace(t *testing.T) {
 		t.Errorf("Expected trimmed origin, got %s", w.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
+
+func TestCORSMiddleware_LastEventIDHeader(t *testing.T) {
+	// Test that Last-Event-ID is included in Access-Control-Allow-Headers (for SSE support)
+	allowedOrigins := []string{"http://localhost:3000"}
+	middleware := CORSMiddleware(allowedOrigins)
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("OPTIONS", "/sse", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected 204, got %d", w.Code)
+	}
+
+	allowHeaders := w.Header().Get("Access-Control-Allow-Headers")
+	if allowHeaders == "" {
+		t.Errorf("Expected Access-Control-Allow-Headers, got empty")
+	}
+
+	// Check that Last-Event-ID is in the allowed headers
+	if !containsHeader(allowHeaders, "Last-Event-ID") {
+		t.Errorf("Expected Last-Event-ID in Allow-Headers for SSE support, got %s", allowHeaders)
+	}
+}
+
+func containsHeader(s, substr string) bool {
+	// Check if substring exists in comma-separated header values
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

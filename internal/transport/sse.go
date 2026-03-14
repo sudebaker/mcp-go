@@ -18,6 +18,7 @@ import (
 type MCPServer struct {
 	mcpServer      *server.MCPServer
 	streamServer   *server.StreamableHTTPServer
+	sseServer      *server.SSEServer
 	httpServer     *http.Server
 	addr           string
 	serverName     string
@@ -32,6 +33,7 @@ type MCPServer struct {
 type MCPConfig struct {
 	Host              string
 	Port              int
+	BaseURL           string
 	KeepAliveInterval time.Duration
 	ServerName        string
 	Version           string
@@ -48,6 +50,14 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 
 	streamServer := server.NewStreamableHTTPServer(mcpServer)
 
+	// Create SSE server for legacy MCP 2024 spec
+	sseServer := server.NewSSEServer(
+		mcpServer,
+		server.WithBaseURL(cfg.BaseURL),
+		server.WithKeepAlive(true),
+		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
+	)
+
 	var rateLimiter *RateLimiter
 	if cfg.RateLimitRPS > 0 {
 		rateLimiter = NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
@@ -61,6 +71,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	return &MCPServer{
 		mcpServer:      mcpServer,
 		streamServer:   streamServer,
+		sseServer:      sseServer,
 		addr:           addr,
 		serverName:     cfg.ServerName,
 		version:        cfg.Version,
@@ -75,7 +86,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 func (s *MCPServer) Start() error {
 	log.Info().
 		Str("addr", s.addr).
-		Msg("Starting MCP server (Streamable HTTP)")
+		Msg("Starting MCP server (Streamable HTTP + SSE)")
 
 	// Create custom mux with additional endpoints
 	mux := http.NewServeMux()
@@ -95,18 +106,55 @@ func (s *MCPServer) Start() error {
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
 
-	// Apply rate limiter middleware to MCP endpoint if configured
-	var mcpHandler http.Handler = s.streamServer
+	// Prepare middleware chain: CORS -> Rate Limiter -> Handler
+	var streamHandler http.Handler = s.streamServer
 	if s.rateLimiter != nil {
-		mcpHandler = s.rateLimiter.Middleware(mcpHandler)
+		streamHandler = s.rateLimiter.Middleware(streamHandler)
+	}
+	streamHandler = CORSMiddleware(s.allowedOrigins)(streamHandler)
+
+	// Prepare SSE handlers with same middleware chain
+	sseHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.sseServer.SSEHandler().ServeHTTP(w, r)
+	}))
+	if s.rateLimiter != nil {
+		sseHandler = s.rateLimiter.Middleware(sseHandler)
+	}
+	sseHandler = CORSMiddleware(s.allowedOrigins)(sseHandler)
+
+	messageHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.sseServer.MessageHandler().ServeHTTP(w, r)
+	}))
+	if s.rateLimiter != nil {
+		messageHandler = s.rateLimiter.Middleware(messageHandler)
+	}
+	messageHandler = CORSMiddleware(s.allowedOrigins)(messageHandler)
+
+	// Register handlers
+	// MCP Streamable HTTP endpoint (2025 spec)
+	mux.Handle("/mcp", streamHandler)
+
+	// SSE endpoints (legacy 2024 spec)
+	mux.Handle("/sse", sseHandler)
+	mux.Handle("/message", messageHandler)
+
+	// Log rate limiting status
+	if s.rateLimiter != nil {
 		log.Info().
 			Float64("rps", s.rateLimiter.rps).
 			Int("burst", s.rateLimiter.burst).
-			Msg("Rate limiting enabled")
+			Msg("Rate limiting enabled for /mcp, /sse, /message")
 	}
 
-	// Apply CORS middleware to MCP endpoint
-	mcpHandler = CORSMiddleware(s.allowedOrigins)(mcpHandler)
+	// Log CORS status
 	if len(s.allowedOrigins) == 0 {
 		log.Info().Msg("CORS configured in permissive mode (allow all origins)")
 	} else {
@@ -115,8 +163,8 @@ func (s *MCPServer) Start() error {
 			Msg("CORS configured with restricted origin list")
 	}
 
-	// MCP Streamable HTTP endpoint (default: /mcp)
-	mux.Handle("/mcp", mcpHandler)
+	// Log transport activation
+	log.Info().Msg("SSE transport active on /sse (GET) and /message (POST)")
 
 	// Wrap entire mux with tracing and logging middleware
 	var handler http.Handler = mux
@@ -164,9 +212,11 @@ func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"service":   s.serverName,
 		"version":   s.version,
 		"protocol":  "mcp",
-		"transport": "streamable-http",
+		"transport": "streamable-http + sse",
 		"endpoints": map[string]string{
 			"mcp":             "/mcp",
+			"sse":             "/sse",
+			"message":         "/message",
 			"health":          "/health",
 			"detailed_health": "/health/detailed",
 			"metrics":         "/metrics",
@@ -219,12 +269,14 @@ func (s *MCPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"name":        s.serverName,
 		"version":     s.version,
 		"protocol":    "MCP (Model Context Protocol)",
-		"transport":   "Streamable HTTP",
+		"transport":   "Streamable HTTP (2025) + SSE (2024)",
 		"description": "MCP server that orchestrates Python tools via subprocess execution",
 		"endpoints": map[string]string{
 			"GET /":             "This info page",
 			"GET /health":       "Health check endpoint",
-			"POST /mcp":         "MCP Streamable HTTP endpoint",
+			"POST /mcp":         "MCP Streamable HTTP endpoint (2025 spec)",
+			"GET /sse":          "MCP SSE endpoint (2024 spec)",
+			"POST /message":     "MCP SSE message endpoint (2024 spec)",
 			"GET /openapi.json": "API documentation",
 		},
 		"mcp_methods": []string{

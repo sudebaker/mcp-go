@@ -5,8 +5,11 @@ services:
       dockerfile: deployments/Dockerfile
     container_name: mcp-orchestrator
     ports:
-      - "9090:9090"
+      - "8080:8080"
     environment:
+      # MCP Configuration
+      BASE_URL: ${BASE_URL:-http://mcp-orchestrator:8080}
+
       # LLM Configuration - can be overridden via .env or CLI
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
@@ -52,29 +55,6 @@ services:
         reservations:
           cpus: '1'
           memory: 2.5G
-
-  # MCPO proxy: converts MCP Streamable HTTP -> OpenAPI for OpenWebUI
-  mcpo:
-    image: ghcr.io/open-webui/mcpo:main
-    container_name: mcpo-proxy
-    ports:
-      - "8001:8000"
-    command: ["--port", "8000", "--server-type", "streamable-http", "--", "http://mcp-orchestrator:8080/mcp"]
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-    networks:
-      - mcp-network
-      - docker_default
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1.2G
-        reservations:
-          cpus: '0.5'
-          memory: 800M
 
   postgres:
     image: pgvector/pgvector:pg16

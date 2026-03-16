@@ -149,7 +149,7 @@ Stage 4: Runtime           ✅ Ambos binarios + Python
 | README.md | 173 | Excelente | Reciente |
 | QUICKSTART.md | 186 | Muy bueno | Reciente |
 | USAGE.md | 270+ | Muy completo | Reciente |
-| Plan.md | 230+ | Arquitectura clara | Reciente |
+| docs/DEVELOPMENT.md | 230+ | Arquitectura clara | Reciente |
 | AGENTS.md | 338 | Guía para agentes | Actualizado |
 | docs/ | 856 | Logging, KB, Integration | Bueno |
 
@@ -1047,7 +1047,7 @@ Production Release:
 - **README.md** - Descripción general y características
 - **QUICKSTART.md** - Inicio rápido con ejemplos
 - **USAGE.md** - Guía detallada de cada herramienta
-- **Plan.md** - Arquitectura y decisiones técnicas
+- **docs/DEVELOPMENT.md** - Arquitectura y decisiones técnicas
 - **AGENTS.md** - Guía para agentes de IA
 - **TESTING.md** - Plan de pruebas
 - **TODO.md** - Items pendientes

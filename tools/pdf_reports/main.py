@@ -48,14 +48,14 @@ _template_env = None
 
 def get_template_env() -> Environment:
     """Get or create cached Jinja2 environment with sandbox security.
-    
+
     SECURITY: Uses SandboxedEnvironment to prevent template injection attacks
     while allowing safe template operations.
     """
     global _template_env
     if _template_env is None:
         templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
-        
+
         # Use SandboxedEnvironment for security (prevents SSTI)
         if SandboxedEnvironment is not None:
             _template_env = SandboxedEnvironment(
@@ -159,7 +159,9 @@ def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
         )
 
         # Generate presigned URL (expires in 1 hour)
-        presigned_url = client.presigned_get_object(bucket, object_name, expires=timedelta(hours=1))
+        presigned_url = client.presigned_get_object(
+            bucket, object_name, expires=timedelta(hours=1)
+        )
 
         return {
             "bucket": bucket,
@@ -337,17 +339,18 @@ def render_llm_response(data: dict[str, Any], env: Environment) -> str:
 
     content_markdown = data.get("content", "")
     content_html = markdown.markdown(
-        content_markdown,
-        extensions=["tables", "fenced_code", "nl2br"]
+        content_markdown, extensions=["tables", "fenced_code", "nl2br"]
     )
 
     context = build_base_context(data, "llm_response")
-    context.update({
-        "content_html": content_html,
-        "author": data.get("author", "AI Assistant"),
-        "logo_url": data.get("logo_url"),
-        "confidentiality": data.get("confidentiality", "Internal Document"),
-    })
+    context.update(
+        {
+            "content_html": content_html,
+            "author": data.get("author", "AI Assistant"),
+            "logo_url": data.get("logo_url"),
+            "confidentiality": data.get("confidentiality", "Internal Document"),
+        }
+    )
 
     return template.render(**context)
 
@@ -457,10 +460,12 @@ def main() -> None:
         ]
 
         if rustfs_info:
-            response_content.append({
-                "type": "text",
-                "text": f"Report uploaded to storage: {rustfs_info['presigned_url']}",
-            })
+            response_content.append(
+                {
+                    "type": "text",
+                    "text": f"Report uploaded to storage: {rustfs_info['presigned_url']}",
+                }
+            )
 
         structured_content = {
             "report_type": report_type,
@@ -470,20 +475,24 @@ def main() -> None:
         }
 
         if rustfs_info:
-            structured_content.update({
-                "storage": {
-                    "bucket": rustfs_info["bucket"],
-                    "object_name": rustfs_info["object_name"],
-                    "presigned_url": rustfs_info["presigned_url"],
+            structured_content.update(
+                {
+                    "storage": {
+                        "bucket": rustfs_info["bucket"],
+                        "object_name": rustfs_info["object_name"],
+                        "presigned_url": rustfs_info["presigned_url"],
+                    }
                 }
-            })
+            )
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": response_content,
-            "structured_content": structured_content,
-        })
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": response_content,
+                "structured_content": structured_content,
+            }
+        )
 
     except ValueError as e:
         write_response(
@@ -506,6 +515,10 @@ def main() -> None:
             }
         )
     except Exception as e:
+        logger.error(
+            "Unhandled exception in pdf_reports",
+            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+        )
         write_response(
             {
                 "success": False,
@@ -515,7 +528,6 @@ def main() -> None:
                 "error": {
                     "code": "EXECUTION_FAILED",
                     "message": str(e),
-                    "details": traceback.format_exc(),
                 },
             }
         )

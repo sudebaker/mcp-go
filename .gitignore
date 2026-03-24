@@ -41,3 +41,7 @@ bin/
 # Git worktrees
 .worktrees/
 worktrees/
+
+# Browser session files
+cookies.txt
+

@@ -20,14 +20,18 @@ from io import StringIO, BytesIO
 from pathlib import Path
 from typing import Any, Callable, Optional
 from contextlib import redirect_stdout, redirect_stderr
+from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.retry import call_llm_with_retry
-from common.validators import validate_read_path
+from common.validators import validate_read_path, is_internal_url
 from common.llm_cache import call_llm_with_cache
 from common.sandbox import execute_in_sandbox, SandboxConfig
 from common.safe_file_ops import SafeFileOperations
+from common.structured_logging import get_logger
+
+logger = get_logger(__name__, "data_analysis")
 
 
 try:
@@ -140,7 +144,11 @@ def validate_request_input(
     has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
     if not has_file_path and not has_files_list and not has_file_url:
-        return False, "One of file_url, file_path, or __files__ must be provided", output_format
+        return (
+            False,
+            "One of file_url, file_path, or __files__ must be provided",
+            output_format,
+        )
 
     # If file_path is provided, validate extension
     if has_file_path:
@@ -171,6 +179,9 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
     """
     if not HTTPX_AVAILABLE:
         raise ImportError("httpx is not installed. Install with: pip install httpx")
+
+    if is_internal_url(file_url):
+        raise ValueError(f"Access to internal URLs is not allowed: {file_url}")
 
     try:
         # Use httpx to download file synchronously
@@ -385,10 +396,6 @@ def execute_code_safely(
 
     Returns dict with keys: success, result, stdout, stderr
     """
-    from common.structured_logging import get_logger
-
-    logger = get_logger(__name__, "data_analysis")
-
     SAFE_BUILTINS = {
         "abs": abs,
         "all": all,
@@ -551,44 +558,53 @@ def main() -> None:
                 actual_filename = file_name_direct
             else:
                 # Extract filename from URL path (strips query string)
-                from urllib.parse import urlparse
                 url_path = urlparse(file_url_direct).path
                 actual_filename = Path(url_path).name
                 # Strip UUID prefix if present: "uuid_realname.xlsx" -> "realname.xlsx"
-                actual_filename = re.sub(
-                    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_',
-                    '',
-                    actual_filename,
-                    flags=re.IGNORECASE
-                ) or actual_filename
+                actual_filename = (
+                    re.sub(
+                        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_",
+                        "",
+                        actual_filename,
+                        flags=re.IGNORECASE,
+                    )
+                    or actual_filename
+                )
 
             # Validate extension
             if Path(actual_filename).suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "INVALID_INPUT",
-                        "message": f"Unsupported file type: '{actual_filename}'. "
-                                   f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
-                    },
-                })
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_INPUT",
+                            "message": f"Unsupported file type: '{actual_filename}'. "
+                            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                        },
+                    }
+                )
                 return
 
             try:
                 buffer = download_file_from_url(file_url_direct, actual_filename)
                 df = load_data_from_buffer(buffer, actual_filename)
-                emit_chunk("data_loaded", {
-                    "rows": df.shape[0],
-                    "columns": df.shape[1],
-                    "source": "file_url",
-                })
+                emit_chunk(
+                    "data_loaded",
+                    {
+                        "rows": df.shape[0],
+                        "columns": df.shape[1],
+                        "source": "file_url",
+                    },
+                )
             except Exception as e:
-                write_response({
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {"code": "FILE_DOWNLOAD_ERROR", "message": str(e)},
-                })
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "FILE_DOWNLOAD_ERROR", "message": str(e)},
+                    }
+                )
                 return
 
         elif files_list and len(files_list) > 0:
@@ -849,6 +865,10 @@ def main() -> None:
                 error_code = "LLM_ERROR"
                 error_message = f"Failed to call LLM: {str(e)}"
 
+        logger.error(
+            "Unhandled exception in data_analysis",
+            extra_data={"error": error_message, "traceback": traceback.format_exc()},
+        )
         write_response(
             {
                 "success": False,
@@ -856,7 +876,6 @@ def main() -> None:
                 "error": {
                     "code": error_code,
                     "message": error_message,
-                    "details": traceback.format_exc(),
                 },
             }
         )

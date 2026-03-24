@@ -47,33 +47,35 @@ def write_response(response: dict[str, Any]) -> None:
 def calculate_diff(old_text: str, new_text: str) -> tuple[str, int, int, int]:
     """
     Calculate unified diff between two texts.
-    
+
     Returns:
         tuple of (diff_text, sections_changed, additions, deletions)
     """
     old_lines = old_text.splitlines()
     new_lines = new_text.splitlines()
-    
-    diff = list(difflib.unified_diff(
-        old_lines,
-        new_lines,
-        fromfile="old",
-        tofile="new",
-        lineterm=""
-    ))
-    
+
+    diff = list(
+        difflib.unified_diff(
+            old_lines, new_lines, fromfile="old", tofile="new", lineterm=""
+        )
+    )
+
     diff_text = "\n".join(diff)
-    
-    additions = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
-    deletions = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
-    
+
+    additions = sum(
+        1 for line in diff if line.startswith("+") and not line.startswith("+++")
+    )
+    deletions = sum(
+        1 for line in diff if line.startswith("-") and not line.startswith("---")
+    )
+
     changed_sections = set()
     for line in diff:
         if line.startswith("@@"):
             changed_sections.add(line)
-    
+
     sections_changed = len(changed_sections)
-    
+
     return diff_text, sections_changed, additions, deletions
 
 
@@ -90,20 +92,20 @@ def analyze_changes(
     output_format: str,
 ) -> str:
     """Generate LLM analysis of the changes."""
-    
+
     truncated_old = old_text[:5000] if old_text else ""
     truncated_new = new_text[:5000] if new_text else ""
-    
+
     focus_instruction = ""
     if focus:
         focus_instruction = f"\nFocus on: {focus}"
-    
+
     format_instruction = ""
     if output_format == "markdown":
         format_instruction = "Use markdown formatting for the analysis."
     else:
         format_instruction = "Use structured JSON format for the analysis."
-    
+
     prompt = f"""Analyze the following regulatory changes and provide a semantic interpretation.
 
 Diff Summary:
@@ -144,61 +146,69 @@ def main() -> None:
         llm_model = context.get("llm_model") or os.environ.get("LLM_MODEL", "llama3")
 
         if not llm_api_url:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "LLM_NOT_CONFIGURED",
-                    "message": "LLM API URL not configured",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "LLM_NOT_CONFIGURED",
+                        "message": "LLM API URL not configured",
+                    },
+                }
+            )
             return
 
         files_list = arguments.get("__files__", [])
-        
+
         if len(files_list) != 2:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_FILES",
-                    "message": f"Exactly 2 files required (old and new version), got {len(files_list)}",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_FILES",
+                        "message": f"Exactly 2 files required (old and new version), got {len(files_list)}",
+                    },
+                }
+            )
             return
 
         output_format = arguments.get("output_format", "markdown")
         valid_formats = ["markdown", "structured"]
         if output_format not in valid_formats:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_FORMAT",
-                    "message": f"output_format must be one of {valid_formats}",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_FORMAT",
+                        "message": f"output_format must be one of {valid_formats}",
+                    },
+                }
+            )
             return
 
         focus = arguments.get("focus", "")
 
         old_file = files_list[0]
         new_file = files_list[1]
-        
+
         old_url = old_file.get("url", "")
         new_url = new_file.get("url", "")
         old_filename = old_file.get("name", "old_version")
         new_filename = new_file.get("name", "new_version")
 
         if not old_url or not new_url:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "MISSING_URL",
-                    "message": "Both files must have url and name",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "MISSING_URL",
+                        "message": "Both files must have url and name",
+                    },
+                }
+            )
             return
 
         logger.info(f"Comparing {old_filename} -> {new_filename}")
@@ -207,8 +217,7 @@ def main() -> None:
         new_extraction = download_and_extract(new_url, new_filename)
 
         diff_text, sections_changed, additions, deletions = calculate_diff(
-            old_extraction.text,
-            new_extraction.text
+            old_extraction.text, new_extraction.text
         )
 
         analysis = analyze_changes(
@@ -236,32 +245,43 @@ def main() -> None:
 
         response_text = f"Compared {old_filename} vs {new_filename}: {sections_changed} sections changed ({additions} additions, {deletions} deletions)"
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
-            "structured_content": structured_content,
-        })
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": response_text}],
+                "structured_content": structured_content,
+            }
+        )
 
     except json.JSONDecodeError as e:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "INVALID_JSON",
-                "message": f"Invalid JSON in request: {str(e)}",
-            },
-        })
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "INVALID_JSON",
+                    "message": f"Invalid JSON in request: {str(e)}",
+                },
+            }
+        )
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": traceback.format_exc(),
-            },
-        })
+        logger.error(
+            "Unhandled exception in regulation_diff",
+            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+        )
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                },
+            }
+        )
 
 
 if __name__ == "__main__":

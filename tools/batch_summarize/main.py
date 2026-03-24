@@ -95,8 +95,7 @@ def generate_master_summary(
         focus_instruction = f"\n\nFocus on: {focus}"
 
     summaries_text = "\n\n".join(
-        f"Document: {s['filename']}\nSummary: {s['summary']}"
-        for s in summaries
+        f"Document: {s['filename']}\nSummary: {s['summary']}" for s in summaries
     )
 
     prompt = f"""Create a master summary combining the following document summaries.
@@ -125,50 +124,58 @@ def main() -> None:
         llm_model = context.get("llm_model") or os.environ.get("LLM_MODEL", "llama3")
 
         if not llm_api_url:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "LLM_NOT_CONFIGURED",
-                    "message": "LLM API URL not configured",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "LLM_NOT_CONFIGURED",
+                        "message": "LLM API URL not configured",
+                    },
+                }
+            )
             return
 
         files_list = arguments.get("__files__", [])
         if not files_list:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "NO_FILES",
-                    "message": "No files provided in __files__",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "NO_FILES",
+                        "message": "No files provided in __files__",
+                    },
+                }
+            )
             return
 
         if len(files_list) > MAX_FILES:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "TOO_MANY_FILES",
-                    "message": f"Maximum {MAX_FILES} files allowed, got {len(files_list)}",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "TOO_MANY_FILES",
+                        "message": f"Maximum {MAX_FILES} files allowed, got {len(files_list)}",
+                    },
+                }
+            )
             return
 
         summary_type = arguments.get("summary_type", "both")
         valid_types = ["individual", "master", "both"]
         if summary_type not in valid_types:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_SUMMARY_TYPE",
-                    "message": f"summary_type must be one of {valid_types}",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_SUMMARY_TYPE",
+                        "message": f"summary_type must be one of {valid_types}",
+                    },
+                }
+            )
             return
 
         focus = arguments.get("focus", "")
@@ -185,10 +192,12 @@ def main() -> None:
             filename = file_info.get("name", "")
 
             if not url or not filename:
-                errors.append({
-                    "filename": filename or "unknown",
-                    "error": "Missing url or name",
-                })
+                errors.append(
+                    {
+                        "filename": filename or "unknown",
+                        "error": "Missing url or name",
+                    }
+                )
                 continue
 
             try:
@@ -204,21 +213,25 @@ def main() -> None:
                     max_length,
                 )
 
-                summaries.append({
-                    "filename": filename,
-                    "summary": summary,
-                    "page_count": extraction.page_count,
-                    "file_type": extraction.file_type,
-                    "char_count": len(extraction.text),
-                })
+                summaries.append(
+                    {
+                        "filename": filename,
+                        "summary": summary,
+                        "page_count": extraction.page_count,
+                        "file_type": extraction.file_type,
+                        "char_count": len(extraction.text),
+                    }
+                )
                 processed_files += 1
 
             except Exception as e:
                 logger.error(f"Error processing {filename}: {e}")
-                errors.append({
-                    "filename": filename,
-                    "error": str(e),
-                })
+                errors.append(
+                    {
+                        "filename": filename,
+                        "error": str(e),
+                    }
+                )
 
         master_summary = None
         if summary_type in ["master", "both"] and summaries:
@@ -232,10 +245,12 @@ def main() -> None:
                 )
             except Exception as e:
                 logger.error(f"Error generating master summary: {e}")
-                errors.append({
-                    "filename": "master_summary",
-                    "error": str(e),
-                })
+                errors.append(
+                    {
+                        "filename": "master_summary",
+                        "error": str(e),
+                    }
+                )
 
         structured_content = {
             "summaries": summaries if summary_type in ["individual", "both"] else [],
@@ -249,32 +264,43 @@ def main() -> None:
         if master_summary:
             response_text += f" (with master summary)"
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
-            "structured_content": structured_content,
-        })
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": response_text}],
+                "structured_content": structured_content,
+            }
+        )
 
     except json.JSONDecodeError as e:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "INVALID_JSON",
-                "message": f"Invalid JSON in request: {str(e)}",
-            },
-        })
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "INVALID_JSON",
+                    "message": f"Invalid JSON in request: {str(e)}",
+                },
+            }
+        )
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": traceback.format_exc(),
-            },
-        })
+        logger.error(
+            "Unhandled exception in batch_summarize",
+            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+        )
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                },
+            }
+        )
 
 
 if __name__ == "__main__":

@@ -52,9 +52,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-_STATE_DIR = os.environ.get(
-    "STATE_DIR", os.path.join(os.path.dirname(__file__), ".state")
-)
+_STATE_DIR = os.environ.get("STATE_DIR", "/tmp")
 RATE_LIMIT_FILE = os.path.join(_STATE_DIR, "mcp_web_scraper_rate_limit.json")
 
 _last_request_time: dict[str, float] = {}

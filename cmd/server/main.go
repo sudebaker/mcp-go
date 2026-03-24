@@ -53,7 +53,7 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
-	// Validar config
+	// Validate config
 	if err := config.Validate(cfg); err != nil {
 		log.Fatal().Err(err).Msg("Configuration validation failed")
 	}

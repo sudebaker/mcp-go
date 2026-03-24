@@ -60,7 +60,7 @@ def write_response(response: dict[str, Any]) -> None:
 def parse_llm_response(response: str) -> dict:
     """Parse LLM response into classification result."""
     try:
-        match = re.search(r'\{[^}]+\}', response, re.DOTALL)
+        match = re.search(r"\{[^}]+\}", response, re.DOTALL)
         if match:
             return json.loads(match.group(0))
     except json.JSONDecodeError:
@@ -71,17 +71,17 @@ def parse_llm_response(response: str) -> dict:
         "confidence": 0.5,
         "justification": "Could not parse LLM response",
         "keywords": [],
-        "language": "unknown"
+        "language": "unknown",
     }
 
     response_lower = response.lower()
-    
+
     for cat in DEFAULT_CATEGORIES:
         if cat in response_lower:
             result["category"] = cat
             break
 
-    conf_match = re.search(r'confidence[:\s]*([0-9.]+)', response, re.IGNORECASE)
+    conf_match = re.search(r"confidence[:\s]*([0-9.]+)", response, re.IGNORECASE)
     if conf_match:
         try:
             result["confidence"] = float(conf_match.group(1))
@@ -95,7 +95,9 @@ def parse_llm_response(response: str) -> dict:
     keywords_match = re.search(r'"keywords"\s*:\s*\[([^\]]+)\]', response)
     if keywords_match:
         keywords_str = keywords_match.group(1)
-        result["keywords"] = [k.strip().strip('"').strip("'") for k in keywords_str.split(",")]
+        result["keywords"] = [
+            k.strip().strip('"').strip("'") for k in keywords_str.split(",")
+        ]
 
     just_match = re.search(r'"justification"\s*:\s*"([^"]+)"', response)
     if just_match:
@@ -138,12 +140,12 @@ JSON:"""
     try:
         llm_response = call_llm_with_cache(llm_api_url, llm_model, prompt)
         result = parse_llm_response(llm_response)
-        
+
         result["filename"] = filename
-        
+
         if language != "auto" and result.get("language") == "unknown":
             result["language"] = language
-        
+
         return result
 
     except Exception as e:
@@ -169,46 +171,54 @@ def main() -> None:
         llm_model = context.get("llm_model") or os.environ.get("LLM_MODEL", "llama3")
 
         if not llm_api_url:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "LLM_NOT_CONFIGURED",
-                    "message": "LLM API URL not configured",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "LLM_NOT_CONFIGURED",
+                        "message": "LLM API URL not configured",
+                    },
+                }
+            )
             return
 
         files_list = arguments.get("__files__", [])
         if not files_list:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "NO_FILES",
-                    "message": "No files provided in __files__",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "NO_FILES",
+                        "message": "No files provided in __files__",
+                    },
+                }
+            )
             return
 
         language = arguments.get("language", "auto")
         valid_languages = ["auto", "es", "en"]
         if language not in valid_languages:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "INVALID_LANGUAGE",
-                    "message": f"language must be one of {valid_languages}",
-                },
-            })
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_LANGUAGE",
+                        "message": f"language must be one of {valid_languages}",
+                    },
+                }
+            )
             return
 
         categories = arguments.get("categories")
         if not categories:
             categories = DEFAULT_CATEGORIES
 
-        logger.info(f"Classifying {len(files_list)} files into {len(categories)} categories")
+        logger.info(
+            f"Classifying {len(files_list)} files into {len(categories)} categories"
+        )
 
         classifications = []
         errors = []
@@ -218,10 +228,12 @@ def main() -> None:
             filename = file_info.get("name", "")
 
             if not url or not filename:
-                errors.append({
-                    "filename": filename or "unknown",
-                    "error": "Missing url or name",
-                })
+                errors.append(
+                    {
+                        "filename": filename or "unknown",
+                        "error": "Missing url or name",
+                    }
+                )
                 continue
 
             try:
@@ -241,10 +253,12 @@ def main() -> None:
 
             except Exception as e:
                 logger.error(f"Error processing {filename}: {e}")
-                errors.append({
-                    "filename": filename,
-                    "error": str(e),
-                })
+                errors.append(
+                    {
+                        "filename": filename,
+                        "error": str(e),
+                    }
+                )
 
         category_counts = {}
         for c in classifications:
@@ -262,32 +276,43 @@ def main() -> None:
         if errors:
             structured_content["errors"] = errors
 
-        write_response({
-            "success": True,
-            "request_id": request_id,
-            "content": [{"type": "text", "text": summary}],
-            "structured_content": structured_content,
-        })
+        write_response(
+            {
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": summary}],
+                "structured_content": structured_content,
+            }
+        )
 
     except json.JSONDecodeError as e:
-        write_response({
-            "success": False,
-            "request_id": "",
-            "error": {
-                "code": "INVALID_JSON",
-                "message": f"Invalid JSON in request: {str(e)}",
-            },
-        })
+        write_response(
+            {
+                "success": False,
+                "request_id": "",
+                "error": {
+                    "code": "INVALID_JSON",
+                    "message": f"Invalid JSON in request: {str(e)}",
+                },
+            }
+        )
     except Exception as e:
-        write_response({
-            "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
-            "error": {
-                "code": "EXECUTION_FAILED",
-                "message": str(e),
-                "details": traceback.format_exc(),
-            },
-        })
+        logger.error(
+            "Unhandled exception in document_classifier",
+            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+        )
+        write_response(
+            {
+                "success": False,
+                "request_id": request.get("request_id", "")
+                if "request" in dir()
+                else "",
+                "error": {
+                    "code": "EXECUTION_FAILED",
+                    "message": str(e),
+                },
+            }
+        )
 
 
 if __name__ == "__main__":

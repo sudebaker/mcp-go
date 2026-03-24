@@ -6,6 +6,7 @@ Analyzes images using OCR (Tesseract) and vision models (LLaVA via Ollama).
 
 import json
 import os
+import re
 import sys
 import base64
 import traceback
@@ -17,6 +18,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.validators import validate_file_path
 from common.retry import call_llm_with_retry
+from common.structured_logging import get_logger
+
+logger = get_logger(__name__, "vision_ocr")
 
 try:
     import cv2
@@ -168,8 +172,6 @@ Extract all entities:"""
     entities = []
     try:
         # Find JSON array in response
-        import re
-
         json_match = re.search(r"\[[\s\S]*\]", response)
         if json_match:
             entities = json.loads(json_match.group())
@@ -441,6 +443,10 @@ def main() -> None:
             }
         )
     except Exception as e:
+        logger.error(
+            "Unhandled exception in vision_ocr",
+            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+        )
         write_response(
             {
                 "success": False,
@@ -450,7 +456,6 @@ def main() -> None:
                 "error": {
                     "code": "EXECUTION_FAILED",
                     "message": str(e),
-                    "details": traceback.format_exc(),
                 },
             }
         )

@@ -21,6 +21,25 @@ from dataclasses import dataclass
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Third-party optional dependencies — guarded imports
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    psycopg2 = None  # type: ignore[assignment]
+    execute_values = None  # type: ignore[assignment]
+    PSYCOPG2_AVAILABLE = False
+
+try:
+    from sentence_transformers import SentenceTransformer
+
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SentenceTransformer = None  # type: ignore[assignment,misc]
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+
 from common.structured_logging import get_logger
 
 # Import local modules with fallback for direct execution
@@ -34,21 +53,6 @@ except ImportError:
 
 # Initialize logger
 logger = get_logger(__name__, "knowledge_base")
-
-import psycopg2
-from psycopg2.extras import execute_values
-
-try:
-    PSYCOPG2_AVAILABLE = True
-except ImportError:
-    PSYCOPG2_AVAILABLE = False
-
-from sentence_transformers import SentenceTransformer
-
-try:
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 
 # Configuration

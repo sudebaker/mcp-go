@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 import os
 from typing import Optional
@@ -9,20 +10,113 @@ class PathValidationError(ValueError):
     pass
 
 
+# --- SSRF / Internal URL Protection ---
+
+INTERNAL_IP_PATTERNS = [
+    r"^127\.",
+    r"^10\.",
+    r"^172\.(1[6-9]|2\d|3[01])\.",
+    r"^192\.168\.",
+    r"^169\.254\.",
+    r"^0\.",
+    r"^localhost$",
+    r"^::1$",
+    r"^fe80:",
+    r"^fc00:",
+    r"^fd00:",
+]
+
+BLOCKED_HOSTS = [
+    "169.254.169.254",  # AWS / Azure metadata
+    "metadata.google.internal",  # GCP metadata
+    "metadata.googleusercontent.com",
+    "instance-data",  # OpenStack metadata
+]
+
+INTERNAL_DOMAIN_PATTERNS = [
+    r".*\.local$",
+    r".*\.localhost$",
+    r".*\.internal$",
+]
+
+_compiled_ip_patterns = [re.compile(p) for p in INTERNAL_IP_PATTERNS]
+_compiled_domain_patterns = [
+    re.compile(p, re.IGNORECASE) for p in INTERNAL_DOMAIN_PATTERNS
+]
+
+
+def is_internal_url(url: str) -> bool:
+    """
+    Return True if the URL resolves to an internal / private network address.
+
+    Blocks:
+    - Loopback (127.x, ::1, localhost)
+    - RFC-1918 private ranges (10.x, 172.16-31.x, 192.168.x)
+    - Link-local (169.254.x, fe80:, fc00:, fd00:)
+    - Cloud metadata endpoints (169.254.169.254, metadata.google.internal, …)
+    - .local / .localhost / .internal domains
+    - Multicast / reserved first octets (0.x, 224+)
+
+    Always returns True on parse errors so callers can safely treat failures
+    as blocked.
+    """
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+
+        if not host:
+            return True
+
+        if host in BLOCKED_HOSTS:
+            return True
+
+        if host == "localhost" or host == "::1":
+            return True
+
+        for pattern in _compiled_ip_patterns:
+            if pattern.match(host):
+                return True
+
+        for pattern in _compiled_domain_patterns:
+            if pattern.match(host):
+                return True
+
+        # Numeric IPv4 with reserved first octet (multicast 224+ or 0.x)
+        if host.replace(".", "").isdigit():
+            parts = host.split(".")
+            if len(parts) == 4:
+                try:
+                    first_octet = int(parts[0])
+                    if first_octet == 0 or first_octet >= 224:
+                        return True
+                except ValueError:
+                    pass
+
+        return False
+    except Exception:
+        return True
+
+
+# --- Path validation helpers ---
+
+
 def validate_file_path(file_path: str, allowed_dir: str = "/data") -> Path:
     """
-    Valida que el archivo esté dentro del directorio permitido de forma segura.
+    Validate that a file path is safely inside the allowed directory.
 
     Args:
-        file_path: Ruta del archivo a validar
-        allowed_dir: Directorio base permitido
+        file_path: Path of the file to validate.
+        allowed_dir: Base directory that must contain the resolved path.
 
     Returns:
-        Path: Ruta validada y resuelta
+        Resolved Path object.
 
     Raises:
-        PathValidationError: Si se detecta path traversal
-        FileNotFoundError: Si el archivo no existe
+        PathValidationError: On path traversal or invalid directory.
+        FileNotFoundError: If the file does not exist.
+        PermissionError: If the file is not readable.
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -49,20 +143,20 @@ def validate_output_path(
     output_path: str, allowed_dir: str = "/data", check_writable: bool = True
 ) -> Path:
     """
-    Valida que la ruta de salida esté dentro del directorio permitido.
-    Crea directorios padres si no existen.
+    Validate that an output path is safely inside the allowed directory.
+    Creates parent directories if they do not exist.
 
     Args:
-        output_path: Ruta de salida a validar
-        allowed_dir: Directorio base permitido
-        check_writable: Si debe verificar permisos de escritura
+        output_path: Output path to validate.
+        allowed_dir: Base directory that must contain the resolved path.
+        check_writable: Whether to verify write permissions.
 
     Returns:
-        Path: Ruta validada
+        Resolved Path object.
 
     Raises:
-        PathValidationError: Si se detecta path traversal
-        PermissionError: Si no hay permisos de escritura
+        PathValidationError: On path traversal or invalid directory.
+        PermissionError: If write permissions are missing.
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -91,20 +185,18 @@ def validate_output_path(
 
 def sanitize_filename(filename: str, max_length: int = 255) -> str:
     """
-    Sanitiza un nombre de archivo removiendo caracteres peligrosos.
+    Sanitize a filename by removing dangerous characters.
 
     Args:
-        filename: Nombre de archivo a sanitizar
-        max_length: Longitud máxima permitida
+        filename: Filename to sanitize.
+        max_length: Maximum allowed length after sanitization.
 
     Returns:
-        str: Nombre de archivo sanitizado
+        Sanitized filename string.
 
     Raises:
-        ValueError: Si el nombre está vacío después de sanitizar
+        ValueError: If the filename is empty after sanitization.
     """
-    import re
-
     sanitized = re.sub(r"[^\w\s.-]", "", filename)
     sanitized = sanitized.replace("..", "").strip()
 
@@ -120,19 +212,19 @@ def sanitize_filename(filename: str, max_length: int = 255) -> str:
 
 def validate_read_path(file_path: str, readonly_dir: str = "/data/input") -> Path:
     """
-    Valida un path para operaciones de LECTURA únicamente.
+    Validate a path for READ-ONLY operations.
 
     Args:
-        file_path: Ruta del archivo a leer
-        readonly_dir: Directorio base de solo lectura
+        file_path: Path of the file to read.
+        readonly_dir: Base read-only directory.
 
     Returns:
-        Path: Ruta validada y resuelta
+        Resolved Path object.
 
     Raises:
-        PathValidationError: Si se detecta path traversal
-        FileNotFoundError: Si el archivo no existe
-        PermissionError: Si el archivo no es legible
+        PathValidationError: On path traversal or invalid directory.
+        FileNotFoundError: If the file does not exist.
+        PermissionError: If the file is not readable.
     """
     try:
         allowed = Path(readonly_dir).resolve(strict=True)
@@ -165,21 +257,21 @@ def validate_write_path(
     max_size_mb: Optional[int] = None,
 ) -> Path:
     """
-    Valida un path para operaciones de ESCRITURA.
+    Validate a path for WRITE operations.
 
     Args:
-        file_path: Ruta del archivo a escribir
-        writable_dir: Directorio base de escritura
-        create_parents: Si crear directorios padres
-        max_size_mb: Tamaño máximo permitido en MB
+        file_path: Path of the file to write.
+        writable_dir: Base writable directory.
+        create_parents: Whether to create parent directories.
+        max_size_mb: Maximum allowed file size in MB (checked if file already exists).
 
     Returns:
-        Path: Ruta validada
+        Resolved Path object.
 
     Raises:
-        PathValidationError: Si se detecta path traversal
-        PermissionError: Si no hay permisos de escritura
-        ValueError: Si el archivo excede tamaño máximo
+        PathValidationError: On path traversal or invalid directory.
+        PermissionError: If write permissions are missing.
+        ValueError: If the existing file exceeds the maximum size.
     """
     try:
         allowed = Path(writable_dir).resolve(strict=True)
@@ -220,18 +312,18 @@ def list_files(
     directory: str, readonly_dir: str = "/data/input", pattern: str = "*"
 ) -> list[Path]:
     """
-    Lista archivos en un directorio de forma segura.
+    Safely list files inside a directory.
 
     Args:
-        directory: Directorio a listar (relativo a readonly_dir)
-        readonly_dir: Directorio base de solo lectura
-        pattern: Patrón glob para filtrar archivos
+        directory: Directory to list (relative to readonly_dir).
+        readonly_dir: Base read-only directory.
+        pattern: Glob pattern to filter files.
 
     Returns:
-        list[Path]: Lista de rutas de archivos
+        Sorted list of Path objects matching the pattern.
 
     Raises:
-        PathValidationError: Si el directorio está fuera del allowed
+        PathValidationError: If the resolved directory is outside the allowed area.
     """
     try:
         allowed = Path(readonly_dir).resolve(strict=True)

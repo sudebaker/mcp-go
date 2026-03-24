@@ -65,9 +65,25 @@ def get_rustfs_client() -> Optional[Minio]:
         return None
 
     endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
-    access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID", "rustfsadmin")
-    secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY", "rustfsadmin")
+    access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID")
+    secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY")
     use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
+
+    if not access_key or not secret_key:
+        logger.error(
+            "Missing RustFS credentials",
+            extra={
+                "missing": [
+                    k
+                    for k, v in {
+                        "RUSTFS_ACCESS_KEY_ID": access_key,
+                        "RUSTFS_SECRET_ACCESS_KEY": secret_key,
+                    }.items()
+                    if not v
+                ]
+            },
+        )
+        return None
 
     try:
         client = Minio(

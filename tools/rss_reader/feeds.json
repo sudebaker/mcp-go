@@ -86,6 +86,21 @@
       "category": "moto"
     },
     {
+      "name": "Motociclismo",
+      "url": "https://www.motociclismo.es/rss",
+      "category": "moto"
+    },
+    {
+      "name": "lerepairedesmotards.com",
+      "url": "https://www.lerepairedesmotards.com/rss/actu.xml",
+      "category": "moto"
+    },
+    {
+      "name": "ScienceDaily",
+      "url": "https://www.sciencedaily.com/rss/all.xml",
+      "category": "science"
+    },
+    {
       "name": "Krebs on Security",
       "url": "https://krebsonsecurity.com/feed/",
       "category": "security"

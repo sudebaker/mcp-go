@@ -1,280 +1,174 @@
-# Guía de Uso: MCP Server con OpenWebUI
+# Guia de Uso - MCP-Go
 
-## 📋 Descripción General
+## Descripcion general
 
-Este servidor MCP (Model Context Protocol) proporciona herramientas avanzadas para análisis de datos, procesamiento de imágenes, generación de reportes y gestión de base de conocimiento, todo integrado con OpenWebUI.
+`mcp-go` expone un servidor MCP en Go que orquesta herramientas externas definidas en `configs/config.yaml`.
 
-## 🚀 Inicio Rápido
+Transporte disponible:
 
-### 1. Levantar los servicios
+- Principal: `POST /mcp` (streamable HTTP)
+- Legacy: `/sse` y `/message`
+
+## Levantar el entorno
 
 ```bash
 cd deployments
-docker-compose up -d
+docker compose up -d
+
+# alternativa
+# docker-compose up -d
 ```
 
-Esto iniciará:
-- **mcp-server** (puerto 8080): Orquestador principal
-- **mcpo** (puerto 8001): Proxy MCP para OpenWebUI
-- **postgres** (puerto 5432): Base de datos con pgvector
-
-
-## 📊 Análisis de Archivos Excel/CSV
-
-### Uso desde OpenWebUI
-
-#### Opción 1: Archivos subidos a OpenWebUI
-
-Cuando subes un archivo a OpenWebUI, se guarda automáticamente en `/openwebui-data/uploads/`. Puedes referenciar estos archivos directamente:
-
-```
-Analiza el archivo /openwebui-data/uploads/mi_archivo.xlsx y dime cuál es el promedio de ventas
-```
-
-#### Opción 2: Archivos en el directorio de datos
-
-Para archivos que el MCP debe procesar, colócalos en el directorio `/data`:
+Verificacion minima:
 
 ```bash
-# Copiar archivo al contenedor
-docker cp mi_archivo.xlsx mcp-orchestrator:/data/
+docker compose ps
+curl -s http://localhost:8080/health
 ```
 
-Luego en OpenWebUI:
+## Servicios del compose local
 
-```
-Analiza el archivo /data/mi_archivo.xlsx y responde: ¿Cuántos productos hay por categoría?
-```
+- `mcp-server` (contenedor `mcp-orchestrator`): `http://localhost:8080`
+- `postgres` (`mcp-postgres`): `localhost:5432`
+- `rustfs` (`rustfs`): `http://localhost:9000`
 
-### Ejemplos de Preguntas
+Nota: OpenWebUI y Ollama pueden estar en un stack externo y compartir red Docker.
 
-#### Preguntas Simples
-```
-¿Cuál es el precio promedio de los productos?
-¿Cuántos registros hay en total?
-¿Cuál es el valor máximo de la columna Ventas?
-```
+## Uso por capacidades
 
-#### Preguntas Complejas
-```
-¿Cuántos productos hay por categoría y cuál es el valor total del inventario?
-Muestra los 5 productos más caros
-Calcula el total de ventas por mes
-Encuentra todos los productos con precio superior a 100
-```
+### 1. Analisis de datos
 
-### Formatos de Salida
+Herramienta: `analyze_data`
 
-Puedes especificar el formato de salida:
+Casos tipicos:
 
-- **text** (por defecto): Tabla formateada en texto
-- **json**: Datos en formato JSON
-- **markdown**: Tabla en formato Markdown
+- Analizar Excel/CSV
+- Calcular agregados
+- Responder preguntas sobre tablas
+- Generar salida `text`, `json`, `markdown` o `png`
 
-## 🖼️ Análisis de Imágenes
+Ejemplo de prompt en OpenWebUI:
 
-### Uso desde OpenWebUI
-
-```
-Analiza la imagen /openwebui-data/uploads/mi_imagen.png y extrae el texto
+```text
+Analiza /data/ventas.xlsx y responde:
+- Total de ventas
+- Top 5 productos por importe
+- Promedio por categoria
 ```
 
-### Tipos de Análisis Disponibles
+### 2. Vision y OCR
 
-1. **OCR**: Extrae texto de imágenes
-   ```
-   Extrae el texto de /data/documento.png
-   ```
+Herramienta: `analyze_image`
 
-2. **Descripción**: Describe el contenido de la imagen
-   ```
-   Describe qué hay en la imagen /data/foto.jpg
-   ```
+Tareas soportadas:
 
-3. **Extracción de Entidades**: Extrae información estructurada
-   ```
-   Extrae las entidades (nombres, fechas, importes) de /data/factura.png
-   ```
+- `ocr`
+- `describe`
+- `extract_entities`
+- `answer`
 
-4. **Responder Preguntas**: Responde preguntas sobre la imagen
-   ```
-   En la imagen /data/grafico.png, ¿cuál es el valor más alto?
-   ```
+Ejemplo:
 
-## 📄 Generación de Reportes PDF
-
-### Uso desde OpenWebUI
-
-```
-Genera un reporte de incidente con los siguientes datos:
-- Título: Fallo en servidor
-- Fecha: 2026-01-19
-- Descripción: El servidor web dejó de responder
-- Impacto: Alto
+```text
+Analiza /data/factura.png con task=extract_entities y extrae fechas e importes.
 ```
 
-### Tipos de Reportes
+### 3. Generacion de reportes
 
-1. **Incidente** (`incident`)
-2. **Acta de Reunión** (`meeting`)
-3. **Auditoría** (`audit`)
+Herramienta: `generate_report`
 
-Los PDFs se generan en `/data/` y se pueden descargar.
+Tipos relevantes de `report_type`:
 
-## 🧠 Base de Conocimiento
+- `incident`, `meeting`, `audit`, `executive_summary`, `formal_report`, `corporate_email`, `llm_response`
 
-### Ingerir Documentos
+Salida esperada:
 
-```
-Ingesta el documento /data/manual.pdf en la colección "manuales"
-```
+- PDF en base64
+- ruta de salida/descarga (segun implementacion de la herramienta)
 
-### Buscar en la Base de Conocimiento
+### 4. Knowledge base
 
-```
-Busca en la base de conocimiento información sobre "configuración de red"
-```
+Herramientas:
 
-### Tipos de Búsqueda
+- `kb_ingest` para almacenar contenido
+- `kb_search` para recuperar informacion (`semantic`, `keyword`, `hybrid`)
 
-- **semantic**: Búsqueda por similitud semántica (por defecto)
-- **keyword**: Búsqueda por palabras clave
-- **hybrid**: Combinación de ambas
+### 5. Herramientas adicionales
 
-## 🔧 Rutas de Archivos
+- `batch_summarize`
+- `regulation_diff`
+- `config_auditor`
+- `document_classifier`
+- `weather_forecast`
+- `web_scraper`
+- `rss_reader`
+- `canvas_diagram`
+- `rustfs_storage`
 
-### Estructura de Directorios
+## Flujo de archivos
 
-```
-/app/                       # Aplicación principal
-├── configs/               # Configuraciones (read-only)
-├── tools/                 # Herramientas Python (read-only)
-├── templates/             # Plantillas Jinja2 (read-only)
-└── ...
+Rutas principales dentro del contenedor `mcp-orchestrator`:
 
-/data/                     # Directorio de trabajo (read-write)
-└── ...                    # Archivos de usuario y salidas
+- `/data/`: lectura y escritura (workspace operativo)
+- `/app/configs`, `/app/tools`, `/app/templates`: montajes de codigo/config
 
-/openwebui-data/          # Volumen de OpenWebUI (read-only)
-├── uploads/              # Archivos subidos a OpenWebUI
-└── ...
-```
+Si integras OpenWebUI con volumen compartido:
 
-### Acceso a Archivos desde OpenWebUI
+- `/openwebui-data/uploads/`: solo lectura
 
-✅ **Lectura permitida:**
-- `/openwebui-data/uploads/` - Archivos subidos a OpenWebUI
-- `/data/` - Directorio de trabajo del MCP
+Scripts utiles:
 
-✅ **Escritura permitida:**
-- `/data/` - Salidas de herramientas (reportes, análisis, etc.)
+- `tools/list-available-files.sh`
+- `tools/copy-latest-upload.sh <destino>`
+- `tools/clean-workspace.sh [dias]`
 
-❌ **Escritura NO permitida:**
-- `/openwebui-data/` - Volumen de OpenWebUI (read-only)
-
-## 🧪 Pruebas
-
-### Probar Análisis de Datos
+## Ejemplos MCP con curl
 
 ```bash
-# 1. Crear archivo de prueba
-docker exec mcp-orchestrator python3 -c "
-import pandas as pd
-data = {
-    'Producto': ['Laptop', 'Mouse', 'Teclado', 'Monitor', 'Webcam'],
-    'Precio': [999.99, 25.50, 75.00, 350.00, 89.99],
-    'Cantidad': [10, 50, 30, 15, 25]
-}
-pd.DataFrame(data).to_excel('/data/test.xlsx', index=False, engine='openpyxl')
-print('Archivo creado en /data/test.xlsx')
-"
+# initialize
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"usage-client","version":"1.0.0"}}}'
 
-# 2. En OpenWebUI, pregunta:
-#    "Analiza /data/test.xlsx y dime cuál es el precio promedio"
+# ping
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"ping"}'
+
+# listar herramientas
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
 ```
 
-### Verificar Archivos Disponibles
+## Troubleshooting rapido
+
+### El servidor no responde
 
 ```bash
-# Ver archivos en /data
-docker exec mcp-orchestrator ls -lh /data/
-
-# Ver archivos subidos a OpenWebUI
-docker exec mcp-orchestrator ls -lh /openwebui-data/uploads/
+docker compose ps
+docker logs --tail 200 mcp-orchestrator
+curl -v http://localhost:8080/health
 ```
 
-## 🐛 Solución de Problemas
-
-### El archivo no se encuentra
-
-1. Verifica que el archivo existe:
-   ```bash
-   docker exec mcp-orchestrator ls -lh /data/mi_archivo.xlsx
-   ```
-
-2. Si está en OpenWebUI, usa la ruta completa:
-   ```
-   /openwebui-data/uploads/[uuid]_nombre_archivo.xlsx
-   ```
-
-### Error de permisos
-
-- Los archivos en `/openwebui-data/` son read-only
-- Para procesamiento, copia a `/data/`:
-  ```bash
-  docker exec mcp-orchestrator cp /openwebui-data/uploads/archivo.xlsx /data/
-  ```
-
-### El LLM no responde
-
-1. Verifica que Ollama esté corriendo:
-   ```bash
-   docker ps | grep ollama
-   ```
-
-2. Verifica los modelos disponibles:
-   ```bash
-   docker exec mcp-orchestrator curl -s http://ollama:11434/api/tags
-   ```
-
-3. Ajusta el modelo en `configs/config.yaml` o variable de entorno `LLM_MODEL`
-
-## 📝 Variables de Entorno
+### Problemas con una herramienta
 
 ```bash
-# LLM Configuration
-LLM_API_URL=http://ollama:11434
-LLM_MODEL=qwen3:8b
-
-# Database Configuration
-DATABASE_URL=postgresql://mcp:mcp@postgres:5432/knowledge
+docker logs --tail 200 mcp-orchestrator | grep -E "tool|error|timeout"
 ```
 
-Puedes sobrescribir estas variables en un archivo `.env` en el directorio `deployments/`.
+### Problemas con LLM
 
-## 🔗 Enlaces Útiles
+Verifica variables en `configs/config.yaml` o entorno:
 
-- **OpenWebUI**: http://localhost:3000
-- **MCP Server**: http://localhost:8080/health
-- **MCPO Proxy**: http://localhost:8001
-- **PostgreSQL**: localhost:5432
-- **Ollama**: http://localhost:11434
+- `LLM_API_URL`
+- `LLM_MODEL`
 
-## 📚 Recursos Adicionales
+## Referencias
 
-- [Documentación MCP](https://modelcontextprotocol.io/)
-- [OpenWebUI Docs](https://docs.openwebui.com/)
-- [Plan de Arquitectura](Plan.md)
-
-## 🤝 Contribuir
-
-Para agregar nuevas herramientas:
-
-1. Crea un nuevo directorio en `tools/`
-2. Implementa el script en Python siguiendo el patrón de las herramientas existentes
-3. Agrega la configuración en `configs/config.yaml`
-4. Reinicia el servidor MCP
-
-## 📄 Licencia
-
-Ver archivo [LICENSE](LICENSE)
+- `README.md`
+- `QUICKSTART.md`
+- `TESTING.md`
+- `docs/API.md`
+- `docs/DEVELOPMENT.md`
+- `docs/OPENWEBUI_INTEGRATION.md`

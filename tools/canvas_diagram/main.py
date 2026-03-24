@@ -72,7 +72,7 @@ def get_rustfs_client() -> Optional[Minio]:
     if not access_key or not secret_key:
         logger.error(
             "Missing RustFS credentials",
-            extra={
+            extra_data={
                 "missing": [
                     k
                     for k, v in {

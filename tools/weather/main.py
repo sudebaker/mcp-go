@@ -5,7 +5,7 @@ import sys
 import os
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,9 +20,23 @@ def write_response(response):
     print(json.dumps(response, default=str))
 
 
+import time
+import random
+
+
 def fetch_xml(url: str) -> str:
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        # Sleep random time between 1 and 5 seconds to be polite to AEMET
+        time.sleep(random.uniform(1, 5))
+        
+        req = urllib.request.Request(
+            url, 
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/xml, text/xml, */*"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
             return response.read().decode("iso-8859-15")
     except Exception as e:
         return None
@@ -56,14 +70,36 @@ def parse_location_xml(xml_content: str, url: str) -> dict:
 
             prob_pp = "N/A"
             for pp in dia.findall("prob_precipitacion"):
-                if pp.get("periodo") in ["00-24", "00-00", None]:
-                    prob_pp = f"{pp.text}%" if pp.text else "N/A"
+                periodo = pp.get("periodo")
+                if periodo in ["00-24", "00-00", None] and pp.text:
+                    prob_pp = f"{pp.text}%"
                     break
+            if prob_pp == "N/A":
+                # fallback: coger el primer periodo con valor
+                for pp in dia.findall("prob_precipitacion"):
+                    if pp.text and pp.text.strip():
+                        prob_pp = f"{pp.text}%"
+                        break
 
-            viento = dia.find("viento")
-            v_dir = viento.findtext("direccion", "") if viento is not None else ""
-            v_vel = viento.findtext("velocidad", "N/A") if viento is not None else "N/A"
-            viento_str = f"{v_dir} {v_vel}".strip() if v_dir else v_vel
+            # Viento: buscar periodo 00-24 o el de mayor velocidad
+            viento_str = ""
+            viento_max_vel = -1
+            for v in dia.findall("viento"):
+                periodo = v.get("periodo")
+                v_dir = v.findtext("direccion", "")
+                v_vel_txt = v.findtext("velocidad", "")
+                try:
+                    v_vel = int(v_vel_txt)
+                except (ValueError, TypeError):
+                    v_vel = 0
+                if periodo in ["00-24", "00-00"]:
+                    viento_str = f"{v_dir} {v_vel}".strip() if v_dir else str(v_vel)
+                    break
+                if v_vel > viento_max_vel:
+                    viento_max_vel = v_vel
+                    viento_str = f"{v_dir} {v_vel}".strip() if v_dir else str(v_vel)
+            if not viento_str:
+                viento_str = "N/A"
 
             dias.append(
                 {
@@ -128,7 +164,7 @@ def load_urls(filepath: str) -> list:
 
 def build_comparative_forecast(locations_data: list, max_days: int = 3) -> str:
     if not locations_data:
-        return "No hay datos válidos para mostrar."
+        return "❌ *No hay datos válidos para mostrar.*"
 
     by_date = defaultdict(list)
     for loc in locations_data:
@@ -144,34 +180,27 @@ def build_comparative_forecast(locations_data: list, max_days: int = 3) -> str:
                 }
             )
 
-    sorted_dates = sorted(by_date.keys())
+    sorted_dates = sorted(
+        [d for d in by_date.keys() if d >= date.today().isoformat()]
+    )
 
     lines = []
-    lines.append("\n" + "╔" + "═" * 78 + "╗")
-    lines.append("║" + "RESUMEN COMPARATIVO - AEMET".center(78) + "║")
-    lines.append("╚" + "═" * 78 + "╝")
+    lines.append("🌤️ *RESUMEN METEOROLÓGICO AEMET* 🌤️\n")
 
     for fecha in sorted_dates:
         dias_fmt = format_date(fecha)
-        lines.append(f"\n{dias_fmt.upper()}")
-        lines.append("   " + "─" * 74)
-
-        entries = by_date[fecha]
-        for i, entry in enumerate(entries, 1):
-            connector = "├──" if i < len(entries) else "└──"
-            lines.append(f"   {connector} {entry['localidad']}")
-            lines.append(f"   │   {entry['estado']}")
-            lines.append(
-                f"   │   {entry['temp']}  {entry['prob_precip']}  {entry['viento']} km/h"
-            )
+        lines.append(f"📅 *{dias_fmt.upper()}*")
+        lines.append("▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀")
+        
+        for entry in by_date[fecha]:
+            lines.append(f"📍 *{entry['localidad']}*")
+            lines.append(f" └ ☁️ {entry['estado']} | 🌡️ {entry['temp']}")
+            lines.append(f" └ 🌧️ Lluvia: {entry['prob_precip']} | 💨 Viento: {entry['viento']} km/h")
             if entry["uv"] != "N/A":
-                lines.append(f"   │   UV max: {entry['uv']}")
-            lines.append("   │")
+                lines.append(f" └ ☀️ UV máx: {entry['uv']}")
+            lines.append("")
 
-        lines.append("   " + "─" * 74)
-
-    lines.append(f"\nFuente: AEMET | Localidades procesadas: {len(locations_data)}")
-    lines.append("https://www.aemet.es\n")
+    lines.append("🔗 _Fuente: [AEMET](https://www.aemet.es)_")
 
     return "\n".join(lines)
 

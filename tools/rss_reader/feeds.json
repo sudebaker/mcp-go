@@ -16,9 +16,9 @@
       "category": "news"
     },
     {
-      "name": "Reuters World News",
-      "url": "https://www.reutersagency.com/feed/?best-topics=tech",
-      "category": "news"
+      "name": "Xataka",
+      "url": "https://www.xataka.com/index.xml",
+      "category": "tech"
     },
     {
       "name": "TechCrunch",
@@ -57,7 +57,7 @@
     },
     {
       "name": "OMG! Ubuntu!",
-      "url": "https://feeds.feedburner.com/omgubuntu/CLsH",
+      "url": "https://www.omgubuntu.co.uk/feed",
       "category": "linux"
     },
     {
@@ -76,8 +76,8 @@
       "category": "tech"
     },
     {
-      "name": "Motorpasión Moto",
-      "url": "https://www.motorpasionmoto.com/feed",
+      "name": "MundoMotero",
+      "url": "https://mundomotero.com/feed",
       "category": "moto"
     },
     {

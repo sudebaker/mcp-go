@@ -11,6 +11,11 @@
       "category": "news"
     },
     {
+      "name": "El Confidencial",
+      "url": "https://rss.elconfidencial.com/tecnologia/",
+      "category": "news"
+    },
+    {
       "name": "BBC News",
       "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
       "category": "news"
@@ -18,6 +23,11 @@
     {
       "name": "Xataka",
       "url": "https://www.xataka.com/index.xml",
+      "category": "tech"
+    },
+    {
+      "name": "Xataka Móvil",
+      "url": "https://www.xatakamovil.com/index.xml",
       "category": "tech"
     },
     {
@@ -36,6 +46,16 @@
       "category": "tech"
     },
     {
+      "name": "Wired",
+      "url": "https://www.wired.com/feed/rss",
+      "category": "tech"
+    },
+    {
+      "name": "Hacker News",
+      "url": "https://hnrss.org/frontpage",
+      "category": "tech"
+    },
+    {
       "name": "OpenAI Blog",
       "url": "https://openai.com/blog/rss.xml",
       "category": "ai"
@@ -49,6 +69,16 @@
       "name": "MIT Technology Review",
       "url": "https://www.technologyreview.com/feed/",
       "category": "ai"
+    },
+    {
+      "name": "Hugging Face Blog",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "category": "ai"
+    },
+    {
+      "name": "ArXiv AI",
+      "url": "http://export.arxiv.org/rss/cs.AI",
+      "category": "ai_research"
     },
     {
       "name": "Linux Weekly News",
@@ -66,16 +96,6 @@
       "category": "linux"
     },
     {
-      "name": "Wired",
-      "url": "https://www.wired.com/feed/rss",
-      "category": "tech"
-    },
-    {
-      "name": "Hacker News",
-      "url": "https://hnrss.org/frontpage",
-      "category": "tech"
-    },
-    {
       "name": "MundoMotero",
       "url": "https://mundomotero.com/feed",
       "category": "moto"
@@ -86,8 +106,8 @@
       "category": "moto"
     },
     {
-      "name": "Motociclismo",
-      "url": "https://www.motociclismo.es/rss",
+      "name": "Motorpasión Moto",
+      "url": "https://www.motorpasionmoto.com/index.xml",
       "category": "moto"
     },
     {
@@ -111,14 +131,9 @@
       "category": "security"
     },
     {
-      "name": "Europol News",
-      "url": "https://www.europol.europa.eu/rss/news",
-      "category": "lea"
-    },
-    {
-      "name": "ArXiv AI",
-      "url": "http://export.arxiv.org/rss/cs.AI",
-      "category": "ai_research"
+      "name": "INCIBE",
+      "url": "https://www.incibe.es/rss.xml",
+      "category": "security"
     }
   ]
 }

@@ -32,6 +32,7 @@ execution:
     REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
     LLM_CACHE_TTL: "3600"
     PYTHONUNBUFFERED: "1"
+    WHISPER_URL: "${WHISPER_URL:-http://whisper:8000}"
     BRAVE_SEARCH_API_KEY: "${BRAVE_SEARCH_API_KEY:-}"
 
 tools:
@@ -358,6 +359,29 @@ tools:
           description: "What to extract: text (default), html, links, images"
       required:
         - url
+
+  # Transcribe - Local speech-to-text via faster-whisper (100% on-premise)
+  - name: "transcribe"
+    description: "(EN): Transcribe audio files locally using Whisper AI. 100% on-premise, no cloud, no data leaves the server. Supports mp3, wav, ogg, m4a, webm, flac. Pass a file path on the server or base64-encoded audio. (ES): Transcribir archivos de audio localmente con Whisper AI. 100% local, sin nube, sin enviar voz al exterior. Soporta mp3, wav, ogg, m4a, webm, flac."
+    command: "python3"
+    args: ["/app/tools/transcribe/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Absolute path to the audio file on the server (e.g. /data/recording.mp3)"
+        audio_base64:
+          type: string
+          description: "Base64-encoded audio content (alternative to file_path)"
+        filename:
+          type: string
+          description: "Filename with extension when using audio_base64 (e.g. recording.ogg)"
+        language:
+          type: string
+          description: "Optional language code (es, en, fr...). Auto-detected if omitted."
+      required: []
 
   # Web Search - Brave Search API
   - name: "web_search"

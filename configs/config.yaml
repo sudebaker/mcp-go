@@ -358,6 +358,37 @@ tools:
       required:
         - url
 
+  # Browser Scraper - JS-rendered pages via headless Chromium (Cloudflare, Wallapop, Milanuncios...)
+  - name: "browser_scraper"
+    description: "(EN): Scrape JavaScript-heavy or Cloudflare-protected pages using a real headless browser. Use when web_scraper fails (blocked, empty content, Cloudflare). Examples: Milanuncios, Wallapop, portals with anti-bot protection. (ES): Extraer contenido de páginas con JS pesado o protegidas por Cloudflare usando un navegador real. Usar cuando web_scraper falla o devuelve contenido vacío."
+    command: "python3"
+    args: ["/app/tools/browser_scraper/main.py"]
+    timeout: "90s"
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "URL to scrape (must start with http:// or https://)"
+        selector:
+          type: string
+          description: "Optional CSS selector to wait for and extract specific content"
+        extract_type:
+          type: string
+          enum: ["text", "html"]
+          default: "text"
+          description: "What to extract: text (default) or raw html"
+        wait_ms:
+          type: integer
+          default: 3000
+          description: "Milliseconds to wait for JS rendering (default 3000)"
+        max_chars:
+          type: integer
+          default: 5000
+          description: "Maximum characters to return (default 5000)"
+      required:
+        - url
+
   # RSS Reader - Read news feeds
   - name: "rss_reader"
     description: "(EN): Read RSS news feeds, get latest headlines from multiple sources. Returns news items with title, link, date and source. Use when user asks: latest news, what's happening, news feed, headlines. (ES): Leer feeds RSS de noticias, obtener últimos titulares de múltiples fuentes."

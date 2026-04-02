@@ -18,6 +18,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
 
       # RustFS / S3 Configuration (for presigned URL download)
+      BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
+      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:-amanda2024}
       RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
@@ -36,6 +38,8 @@ services:
       - mcp-data:/data
     depends_on:
       postgres:
+        condition: service_healthy
+      browserless:
         condition: service_healthy
     networks:
       - mcp-network
@@ -84,6 +88,33 @@ services:
         reservations:
           cpus: '1'
           memory: 1.5G
+
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: browserless
+    ports:
+      - "3000:3000"
+    environment:
+      CONCURRENT: "5"
+      TOKEN: ${BROWSERLESS_TOKEN:-amanda2024}
+      TIMEOUT: "60000"
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN:-amanda2024}", "http://localhost:3000/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
 
   rustfs:
     image: rustfs/rustfs:latest

@@ -1,6 +1,7 @@
+import ipaddress
+import os
 import re
 from pathlib import Path
-import os
 from typing import Optional
 
 
@@ -45,6 +46,51 @@ _compiled_domain_patterns = [
 ]
 
 
+def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
+    """
+    Parse SSRF_ALLOWLIST env var into (networks, hostnames).
+
+    Format: comma-separated list of CIDR ranges and/or hostnames.
+    Example: SSRF_ALLOWLIST=192.168.1.0/24,10.0.0.0/8,myservice.corp
+    """
+    raw = os.environ.get("SSRF_ALLOWLIST", "").strip()
+    if not raw:
+        return [], []
+
+    networks: list[ipaddress._BaseNetwork] = []
+    hostnames: list[str] = []
+
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            hostnames.append(entry.lower())
+
+    return networks, hostnames
+
+
+def _is_allowlisted(host: str) -> bool:
+    """Return True if the host matches an entry in SSRF_ALLOWLIST."""
+    allowed_networks, allowed_hosts = _load_ssrf_allowlist()
+
+    if host in allowed_hosts:
+        return True
+
+    try:
+        addr = ipaddress.ip_address(host)
+        for net in allowed_networks:
+            if addr in net:
+                return True
+    except ValueError:
+        # host is a domain name, not an IP — already checked above
+        pass
+
+    return False
+
+
 def is_internal_url(url: str) -> bool:
     """
     Return True if the URL resolves to an internal / private network address.
@@ -69,19 +115,27 @@ def is_internal_url(url: str) -> bool:
         if not host:
             return True
 
+        # Cloud metadata endpoints are NEVER allowable, regardless of SSRF_ALLOWLIST
         if host in BLOCKED_HOSTS:
             return True
 
         if host == "localhost" or host == "::1":
-            return True
+            # Allow only if explicitly in the allowlist
+            if not _is_allowlisted(host):
+                return True
 
         for pattern in _compiled_ip_patterns:
             if pattern.match(host):
-                return True
+                # Private/internal IP: allow if explicitly allowlisted
+                if not _is_allowlisted(host):
+                    return True
+                return False
 
         for pattern in _compiled_domain_patterns:
             if pattern.match(host):
-                return True
+                if not _is_allowlisted(host):
+                    return True
+                return False
 
         # Numeric IPv4 with reserved first octet (multicast 224+ or 0.x)
         if host.replace(".", "").isdigit():

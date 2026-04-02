@@ -1,3 +1,24 @@
+// Package executor provides tool execution functionality for the MCP orchestrator.
+//
+// This package is responsible for spawning subprocesses to execute Python tools,
+// managing their lifecycles, handling timeouts, and parsing their JSON responses.
+// It integrates with the tracing package for observability and the config package
+// for tool definitions.
+//
+// # Tool Execution Protocol
+//
+// Tools communicate via JSON over stdin/stdout:
+//
+//  1. Server sends SubprocessRequest as JSON on stdin
+//  2. Tool processes request and writes SubprocessResponse to stdout
+//  3. Optional: Tools can stream chunks prefixed with "__CHUNK__:" or "__RESULT__:"
+//  4. Stderr is captured and logged separately
+//
+// # Timeout Behavior
+//
+// Each tool has a configurable timeout (default: 60s). If execution exceeds
+// the timeout, the subprocess is terminated via context cancellation and an
+// error is returned with ErrorCodeTimeout.
 package executor
 
 import (
@@ -17,16 +38,30 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Prefixes for streaming output parsing
 const (
-	chunkPrefix  = "__CHUNK__:"
-	resultPrefix = "__RESULT__:"
+	chunkPrefix  = "__CHUNK__:"  // Prefix for streaming chunks
+	resultPrefix = "__RESULT__:" // Prefix for final result
 )
 
+// Executor manages the execution of tools as subprocesses.
+// It validates inputs, spawns processes, handles timeouts, and parses responses.
 type Executor struct {
-	config *config.Config
-	tracer *tracing.Tracer
+	config *config.Config  // Server configuration including tool definitions
+	tracer *tracing.Tracer // For distributed tracing of tool executions
 }
 
+// New creates a new Executor with no-op tracing enabled.
+//
+// This constructor is suitable for production use where tracing is handled
+// at a higher level or not required.
+//
+// Parameters:
+//   - cfg: the parsed configuration containing tool definitions
+//
+// Returns:
+//
+//	a new Executor instance with no-op tracer
 func New(cfg *config.Config) *Executor {
 	return &Executor{
 		config: cfg,
@@ -34,6 +69,18 @@ func New(cfg *config.Config) *Executor {
 	}
 }
 
+// NewWithTracer creates a new Executor with custom tracing.
+//
+// Use this constructor when you need to trace tool executions as part of
+// a distributed tracing system.
+//
+// Parameters:
+//   - cfg: the parsed configuration containing tool definitions
+//   - tracer: the tracer instance (if nil, a no-op tracer is used)
+//
+// Returns:
+//
+//	a new Executor instance with the provided or no-op tracer
 func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
 	if tracer == nil {
 		tracer = tracing.NoOpTracer()
@@ -44,15 +91,48 @@ func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
 	}
 }
 
+// ExecuteResult contains the outcome of a tool execution.
+// It wraps the tool's response with additional metadata.
 type ExecuteResult struct {
-	Success           bool
-	Content           []mcptypes.ContentItem
+	// Success indicates whether the tool executed without errors
+	Success bool
+	// Content is the list of content items returned by the tool
+	Content []mcptypes.ContentItem
+	// StructuredContent contains parsed tool-specific data
 	StructuredContent map[string]interface{}
-	Error             *mcptypes.SubprocessError
-	Stderr            string
-	Chunks            []map[string]interface{}
+	// Error contains error information if Success is false
+	Error *mcptypes.SubprocessError
+	// Stderr captures the tool's standard error output
+	Stderr string
+	// Chunks contains streaming data if the tool used chunked output
+	Chunks []map[string]interface{}
 }
 
+// Execute runs a tool by name with the provided arguments.
+//
+// This is the main entry point for tool execution. It performs the following:
+//
+//  1. Looks up the tool configuration by name
+//  2. Validates arguments against the tool's input schema
+//  3. Creates a timeout context based on tool configuration
+//  4. Spawns the subprocess with serialized request on stdin
+//  5. Captures stdout/stderr
+//  6. Parses the JSON response
+//  7. Handles streaming output if present
+//  8. Records execution metrics and tracing spans
+//
+// Parameters:
+//   - ctx: context for cancellation and tracing
+//   - toolName: the unique name of the tool to execute
+//   - arguments: the tool-specific arguments (must match input schema)
+//
+// Returns:
+//   - *ExecuteResult: the execution outcome including content or error
+//   - error: only if tool lookup or validation fails (not for tool errors)
+//
+// Possible ExecuteResult.Error codes:
+//   - ErrorCodeTimeout: execution exceeded the configured timeout
+//   - ErrorCodeExecutionFailed: subprocess error, parsing error, or tool error
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
 	// Start tracing span for tool execution
 	span, _ := e.tracer.StartSpan(ctx, fmt.Sprintf("execute_tool:%s", toolName))
@@ -253,6 +333,19 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	return result, nil
 }
 
+// parseStreamingOutput handles chunked output from long-running tools.
+//
+// Some tools emit progress updates or partial results before completing.
+// This function parses lines prefixed with "__CHUNK__:" as intermediate
+// results and "__RESULT__:" as the final response.
+//
+// Parameters:
+//   - output: the raw stdout string from the subprocess
+//   - requestID: the original request ID for validation
+//
+// Returns:
+//   - chunks: any parsed streaming chunks
+//   - SubprocessResponse: the final response (from __RESULT__ line or last resort)
 func (e *Executor) parseStreamingOutput(output string, requestID string) ([]map[string]interface{}, mcptypes.SubprocessResponse) {
 	chunks := []map[string]interface{}{}
 	var finalResp mcptypes.SubprocessResponse
@@ -304,6 +397,17 @@ func (e *Executor) parseStreamingOutput(output string, requestID string) ([]map[
 	return chunks, finalResp
 }
 
+// buildEnvironment converts a string map to a slice of "KEY=value" strings.
+//
+// This format is required by os/exec.Cmd.Env. The function preserves
+// the order of environment variables.
+//
+// Parameters:
+//   - envMap: a map of environment variable names to values
+//
+// Returns:
+//
+//	a slice of "KEY=value" strings suitable for cmd.Env
 func buildEnvironment(envMap map[string]string) []string {
 	env := make([]string, 0, len(envMap))
 	for k, v := range envMap {
@@ -312,7 +416,20 @@ func buildEnvironment(envMap map[string]string) []string {
 	return env
 }
 
-// validateInputArguments validates that the provided arguments match the tool's input schema
+// validateInputArguments validates that provided arguments match the tool's input schema.
+//
+// The validation is best-effort and allows extra fields. It checks:
+//   - Required fields are present
+//   - Types match the schema (string, number, integer, boolean, array, object)
+//   - Enum values are in the allowed list
+//
+// Parameters:
+//   - inputSchema: the JSON schema to validate against (nil = skip validation)
+//   - args: the arguments provided by the client
+//
+// Returns:
+//
+//	error: if validation fails, including which field failed
 func validateInputArguments(inputSchema map[string]interface{}, args map[string]interface{}) error {
 	if inputSchema == nil {
 		// No schema defined, accept anything
@@ -370,7 +487,18 @@ func validateInputArguments(inputSchema map[string]interface{}, args map[string]
 	return nil
 }
 
-// validateType checks if a value matches the expected JSON schema type
+// validateType checks if a value matches the expected JSON schema type.
+//
+// JSON numbers are unmarshaled as float64 in Go, so integer values may
+// appear as float64. This function handles that conversion.
+//
+// Parameters:
+//   - value: the actual value to check
+//   - schemaType: the expected JSON schema type (string, number, integer, boolean, array, object, null)
+//
+// Returns:
+//
+//	true if the value matches the expected type
 func validateType(value interface{}, schemaType string) bool {
 	switch schemaType {
 	case "string":
@@ -408,7 +536,17 @@ func validateType(value interface{}, schemaType string) bool {
 	}
 }
 
-// validateEnum checks if a value is in the allowed enum values
+// validateEnum checks if a value is in the allowed enum values.
+//
+// Type coercion is performed for numeric types (float64 vs int).
+//
+// Parameters:
+//   - value: the value to check
+//   - enumVals: the list of allowed values
+//
+// Returns:
+//
+//	true if the value is in the enum list
 func validateEnum(value interface{}, enumVals []interface{}) bool {
 	for _, enumVal := range enumVals {
 		if compareValues(value, enumVal) {
@@ -418,7 +556,18 @@ func validateEnum(value interface{}, enumVals []interface{}) bool {
 	return false
 }
 
-// compareValues compares two values for equality
+// compareValues compares two values for equality with type coercion.
+//
+// Handles string, float64, and bool comparisons. Floats are compared
+// numerically, not by exact representation.
+//
+// Parameters:
+//   - a: first value
+//   - b: second value
+//
+// Returns:
+//
+//	true if the values are equal
 func compareValues(a, b interface{}) bool {
 	switch av := a.(type) {
 	case string:
@@ -438,6 +587,17 @@ func compareValues(a, b interface{}) bool {
 	return false
 }
 
+// ValidateToolConfig performs static validation on a tool configuration.
+//
+// This is useful for CI/CD pipelines or configuration editors to catch
+// errors before runtime.
+//
+// Parameters:
+//   - toolCfg: the tool configuration to validate
+//
+// Returns:
+//
+//	error: if validation fails (missing name or command)
 func ValidateToolConfig(toolCfg *config.ToolConfig) error {
 	if toolCfg.Name == "" {
 		return fmt.Errorf("tool name is required")

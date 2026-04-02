@@ -5,10 +5,10 @@ Reports CPU, memory, disk, uptime, load average and Docker container status.
 """
 
 import json
-import sys
 import os
-import subprocess
-import traceback
+import socket
+import sys
+import time
 from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -25,13 +25,6 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def run(cmd: str) -> str:
-    try:
-        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
-    except Exception:
-        return "N/A"
-
-
 def get_uptime() -> str:
     try:
         with open("/proc/uptime") as f:
@@ -45,17 +38,20 @@ def get_uptime() -> str:
         parts.append(f"{mins}m")
         return " ".join(parts)
     except Exception:
-        return run("uptime -p")
+        return "N/A"
 
 
 def get_load() -> str:
-    return run("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'")
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+            return f"{parts[0]}, {parts[1]}, {parts[2]}"
+    except Exception:
+        return "N/A"
 
 
 def get_cpu_usage() -> str:
     try:
-        # Two reads of /proc/stat with 0.5s gap for accurate CPU%
-        import time
         def read_cpu():
             with open("/proc/stat") as f:
                 line = f.readline()
@@ -73,35 +69,66 @@ def get_cpu_usage() -> str:
         used_pct = round((1 - idle_delta / total_delta) * 100, 1)
         return f"{used_pct}%"
     except Exception:
-        return run("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4\"%\"}'")
+        return "N/A"
 
 
 def get_memory() -> dict:
-    raw = run("free -m | awk 'NR==2{print $2, $3, $4}'")
-    parts = raw.split()
-    if len(parts) == 3:
-        total, used, free = int(parts[0]), int(parts[1]), int(parts[2])
+    try:
+        with open("/proc/meminfo") as f:
+            lines = f.readlines()
+        mem_info = {}
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2:
+                key = parts[0].rstrip(":")
+                try:
+                    mem_info[key] = int(parts[1])
+                except ValueError:
+                    pass
+        total = mem_info.get("MemTotal", 0) // 1024
+        available = mem_info.get("MemAvailable", mem_info.get("MemFree", 0)) // 1024
+        used = total - available
         pct = round(used / total * 100, 1) if total > 0 else 0
-        return {"total_mb": total, "used_mb": used, "free_mb": free, "used_pct": pct}
-    return {}
+        return {"total_mb": total, "used_mb": used, "free_mb": available, "used_pct": pct}
+    except Exception:
+        return {}
 
 
 def get_disk() -> list:
-    raw = run("df -h --output=target,size,used,avail,pcent | tail -n +2 | grep -E '^(/|/home|/data)' | head -5")
     results = []
-    for line in raw.splitlines():
-        parts = line.split()
-        if len(parts) >= 5:
-            results.append({"mount": parts[0], "size": parts[1], "used": parts[2], "avail": parts[3], "pct": parts[4]})
-    return results
+    try:
+        with open("/proc/mounts") as f:
+            mounts = f.readlines()
+        for line in mounts:
+            parts = line.split()
+            if len(parts) >= 4:
+                mount = parts[1]
+                if mount in ("/", "/home", "/data"):
+                    try:
+                        stat = os.statvfs(mount)
+                        total_gb = stat.f_blocks * stat.f_frsize / (1024**3)
+                        used_gb = (stat.f_blocks - stat.f_bfree) * stat.f_frsize / (1024**3)
+                        avail_gb = stat.f_bavail * stat.f_frsize / (1024**3)
+                        pct = round(used_gb / total_gb * 100, 1) if total_gb > 0 else 0
+                        results.append({
+                            "mount": mount,
+                            "size": f"{total_gb:.1f}G",
+                            "used": f"{used_gb:.1f}G",
+                            "avail": f"{avail_gb:.1f}G",
+                            "pct": f"{pct}%"
+                        })
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return results[:5]
 
 
 def get_docker_containers() -> list:
-    # Use Docker API via unix socket directly (no CLI needed)
     try:
-        import socket
         import json as _json
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5)
         sock.connect("/var/run/docker.sock")
         request = b"GET /containers/json HTTP/1.0\r\nHost: localhost\r\n\r\n"
         sock.sendall(request)
@@ -186,7 +213,10 @@ def main() -> None:
             "error": {"code": "INVALID_INPUT", "message": str(e)}
         })
     except Exception as e:
-        logger.error("Unhandled exception in server_status", extra_data={"error": str(e), "traceback": traceback.format_exc()})
+        logger.error(
+            "Unhandled exception in server_status",
+            extra_data={"error": str(e)}
+        )
         write_response({
             "success": False,
             "request_id": request.get("request_id", "") if request else "",

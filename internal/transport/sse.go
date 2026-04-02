@@ -1,3 +1,41 @@
+// Package transport provides HTTP transport layer implementations for the MCP server.
+//
+// This package implements the server-side HTTP handlers for the MCP protocol,
+// supporting both the legacy SSE (Server-Sent Events) transport and the modern
+// Streamable HTTP specification. It wraps the mcp-go library server and adds
+// middleware for CORS, rate limiting, request logging, and distributed tracing.
+//
+// # Supported Transports
+//
+//   - Streamable HTTP (2025 spec): POST /mcp - Modern bidirectional transport
+//   - SSE (2024 spec): GET /sse, POST /message - Legacy unidirectional transport
+//
+// # Middleware Chain
+//
+// The middleware is applied in this order for each request:
+//
+//	Client Request
+//	    ↓
+//	CORS Middleware (origin validation)
+//	    ↓
+//	Rate Limiter (requests per second)
+//	    ↓
+//	Tracing Middleware (span creation)
+//	    ↓
+//	Logging Middleware (request/response logging)
+//	    ↓
+//	MCPServer Handler
+//
+// # Endpoint Summary
+//
+//	/           - Server info (GET)
+//	/health     - Basic health check (GET)
+//	/health/detailed - Component health status (GET)
+//	/metrics    - Prometheus metrics (GET)
+//	/openapi.json - OpenAPI spec (GET)
+//	/mcp        - MCP Streamable HTTP endpoint (POST)
+//	/sse        - MCP SSE endpoint (GET)
+//	/message    - MCP SSE message endpoint (POST)
 package transport
 
 import (
@@ -14,37 +52,76 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// MCPServer wraps the mcp-go Streamable HTTP server with additional functionality
+// MCPServer wraps the mcp-go Streamable HTTP server with additional functionality.
+// It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
-	mcpServer      *server.MCPServer
-	streamServer   *server.StreamableHTTPServer
-	sseServer      *server.SSEServer
-	httpServer     *http.Server
-	addr           string
-	serverName     string
-	version        string
-	tools          []config.ToolConfig
-	rateLimiter    *RateLimiter
-	tracer         *tracing.Tracer
-	allowedOrigins []string
+	mcpServer      *server.MCPServer            // Core MCP server implementation
+	streamServer   *server.StreamableHTTPServer // Streamable HTTP handler
+	sseServer      *server.SSEServer            // Legacy SSE server
+	httpServer     *http.Server                 // Go HTTP server instance
+	addr           string                       // Listen address (host:port)
+	serverName     string                       // Service name for logging/health
+	version        string                       // Semantic version
+	tools          []config.ToolConfig          // Tool configurations for docs
+	rateLimiter    *RateLimiter                 // Rate limiting middleware (nil if disabled)
+	tracer         *tracing.Tracer              // Distributed tracing
+	allowedOrigins []string                     // CORS allowed origins (empty = all)
 }
 
-// MCPConfig holds MCP server configuration
+// MCPConfig holds configuration for creating a new MCPServer.
 type MCPConfig struct {
-	Host              string
-	Port              int
-	BaseURL           string
+	// Host is the network address to bind (default: "0.0.0.0")
+	Host string
+	// Port is the TCP port to listen on (default: 8080)
+	Port int
+	// BaseURL is the public-facing URL for SSE endpoint resolution
+	BaseURL string
+	// KeepAliveInterval is the SSE keep-alive interval (default: 30s)
 	KeepAliveInterval time.Duration
-	ServerName        string
-	Version           string
-	Tools             []config.ToolConfig
-	RateLimitRPS      float64
-	RateLimitBurst    int
-	AllowedOrigins    []string
-	Tracer            *tracing.Tracer
+	// ServerName is the service name for health checks and logging
+	ServerName string
+	// Version is the semantic version string
+	Version string
+	// Tools is the list of tool configurations for documentation
+	Tools []config.ToolConfig
+	// RateLimitRPS is requests per second limit (0 = disabled)
+	RateLimitRPS float64
+	// RateLimitBurst is the maximum burst for rate limiting
+	RateLimitBurst int
+	// AllowedOrigins is the CORS origin whitelist (nil/empty = all)
+	AllowedOrigins []string
+	// Tracer is the distributed tracing instance (nil = no-op)
+	Tracer *tracing.Tracer
 }
 
-// NewMCPServer creates a new MCP server with Streamable HTTP transport
+// NewMCPServer creates a new MCP server with configured transports and middleware.
+//
+// This constructor initializes both Streamable HTTP (modern) and SSE (legacy)
+// transports, along with optional rate limiting and CORS middleware.
+//
+// The server uses WithUseFullURLForMessageEndpoint(false) for SSE, which makes
+// clients interpret message endpoints relative to their connection origin. This
+// supports multi-network deployments (e.g., localhost development vs host.docker.internal).
+//
+// Parameters:
+//   - mcpServer: the underlying mcp-go server instance (from mcp.NewServer())
+//   - cfg: the server configuration
+//
+// Returns:
+//
+//	a configured MCPServer ready to start with Start()
+//
+// Example:
+//
+//	cfg := transport.MCPConfig{
+//	    Host: "0.0.0.0",
+//	    Port: 8080,
+//	    ServerName: "mcp-orchestrator",
+//	    Version: "1.0.0",
+//	    RateLimitRPS: 10,
+//	    RateLimitBurst: 20,
+//	}
+//	mcpServer := server.NewMCPServer(transport.NewMCPServer(mcpServer, cfg))
 func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
@@ -85,7 +162,19 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 	}
 }
 
-// Start begins serving the MCP server with custom endpoints
+// Start begins serving the MCP server and blocks until shutdown.
+//
+// This method:
+//   - Creates an HTTP mux with all endpoints registered
+//   - Applies the middleware chain (CORS → Rate Limit → Tracing → Logging)
+//   - Starts the Go HTTP server with sensible timeouts
+//   - Returns when the server exits (error or shutdown signal)
+//
+// The server handles graceful shutdown via Shutdown(ctx).
+//
+// Returns:
+//
+//	error: from ListenAndServe (after graceful shutdown, usually nil)
 func (s *MCPServer) Start() error {
 	log.Info().
 		Str("addr", s.addr).
@@ -182,7 +271,17 @@ func (s *MCPServer) Start() error {
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the server
+// Shutdown gracefully shuts down the server.
+//
+// It stops accepting new connections, waits for in-flight requests to complete
+// (up to the context deadline), and stops the rate limiter cleanup goroutine.
+//
+// Parameters:
+//   - ctx: context with deadline for the shutdown operation
+//
+// Returns:
+//
+//	error: if shutdown times out or fails
 func (s *MCPServer) Shutdown(ctx context.Context) error {
 	log.Info().Msg("Shutting down MCP server")
 
@@ -199,12 +298,33 @@ func (s *MCPServer) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
 
-// Handler returns the HTTP handler for the MCP server
+// Handler returns the underlying HTTP handler for the MCP server.
+//
+// This is useful for embedding the MCP server in another HTTP server or
+// for testing purposes.
+//
+// Returns:
+//
+//	http.Handler: the Streamable HTTP handler
 func (s *MCPServer) Handler() http.Handler {
 	return s.streamServer
 }
 
-// handleHealth returns server health status
+// handleHealth returns basic server health status.
+//
+// This endpoint is intended for load balancers and orchestrators (Kubernetes,
+// Docker Compose health checks). It does not perform deep health checks.
+//
+// Response format:
+//
+//	{
+//	  "status": "healthy",
+//	  "service": "mcp-orchestrator",
+//	  "version": "1.0.0",
+//	  "protocol": "mcp",
+//	  "transport": "streamable-http + sse",
+//	  "endpoints": {...}
+//	}
 func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -225,7 +345,24 @@ func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleHealthDetailed returns detailed health status of all components
+// handleHealthDetailed returns comprehensive health status of all components.
+//
+// Unlike handleHealth, this endpoint provides detailed information about
+// individual server components and their operational status.
+//
+// Response format:
+//
+//	{
+//	  "status": "healthy",
+//	  "timestamp": "2024-01-15T10:30:00Z",
+//	  "service": "mcp-orchestrator",
+//	  "version": "1.0.0",
+//	  "components": {
+//	    "server": {"status": "healthy", ...},
+//	    "http": {"status": "operational", ...},
+//	    "rate_limiter": {"status": "operational", ...}
+//	  }
+//	}
 func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -258,7 +395,17 @@ func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleRoot returns server info
+// handleRoot returns server information and available endpoints.
+//
+// This is the root endpoint (GET /) providing an overview of the server,
+// supported protocols, and available MCP methods.
+//
+// Response includes:
+//   - Server name and version
+//   - Protocol description
+//   - Transport information
+//   - Available endpoints
+//   - Supported MCP methods (initialize, ping, tools/list, tools/call)
 func (s *MCPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -289,15 +436,21 @@ func (s *MCPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleOpenAPI returns OpenAPI-like documentation
+// handleOpenAPI returns OpenAPI-like documentation.
+//
+// This is a convenience alias for handleOpenAPISpec to maintain API
+// compatibility.
 func (s *MCPServer) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	s.handleOpenAPISpec(w, r)
 }
 
-// Legacy aliases for backwards compatibility
+// Legacy aliases for backwards compatibility with existing code.
 type SSEServer = MCPServer
 type SSEConfig = MCPConfig
 
+// NewSSEServer creates an SSEServer (alias for NewMCPServer).
+//
+// Deprecated: Use NewMCPServer directly.
 func NewSSEServer(mcpServer *server.MCPServer, cfg SSEConfig) *SSEServer {
 	return NewMCPServer(mcpServer, cfg)
 }

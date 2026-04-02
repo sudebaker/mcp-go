@@ -22,7 +22,9 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-BRAVE_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+BRAVE_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY")
+if not BRAVE_API_KEY:
+    raise ValueError("BRAVE_SEARCH_API_KEY environment variable is required")
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 DEFAULT_COUNT = 10
 DEFAULT_TIMEOUT = 15
@@ -68,7 +70,7 @@ def brave_search(query: str, count: int = DEFAULT_COUNT, country: str = "ES", la
             timeout=DEFAULT_TIMEOUT
         )
         if response.status_code != 200:
-            return None, f"Brave API returned HTTP {response.status_code}: {response.text[:200]}"
+            return None, f"Brave API returned HTTP {response.status_code}"
 
         data = response.json()
         results = []
@@ -99,10 +101,10 @@ def main() -> None:
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
 
-        query = arguments.get("query", "").strip()
-        count = int(arguments.get("count", DEFAULT_COUNT))
-        country = arguments.get("country", "ES")
-        lang = arguments.get("lang", "es")
+        query = arguments.get("query", "").strip()[:500]
+        count = max(1, min(int(arguments.get("count", DEFAULT_COUNT)), 20))
+        country = arguments.get("country", "ES")[:2].upper()
+        lang = arguments.get("lang", "es")[:5].lower()
 
         if not query:
             write_response({
@@ -160,7 +162,10 @@ def main() -> None:
             "error": {"code": "INVALID_INPUT", "message": f"Failed to parse JSON input: {str(e)}"}
         })
     except Exception as e:
-        logger.error("Unhandled exception in web_search", extra_data={"error": str(e), "traceback": traceback.format_exc()})
+        logger.error(
+            "Unhandled exception in web_search",
+            extra_data={"error": str(e)}
+        )
         write_response({
             "success": False,
             "request_id": request.get("request_id", "") if request else "",

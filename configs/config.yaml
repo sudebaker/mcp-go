@@ -358,6 +358,33 @@ tools:
       required:
         - url
 
+  # Web Search - Brave Search API
+  - name: "web_search"
+    description: "(EN): Search the web using Brave Search API. Returns real web results with titles, URLs and descriptions. Use when you need to find current information, URLs, news, prices, or anything that requires a real web search. (ES): Buscar en la web usando Brave Search. Devuelve resultados reales con títulos, URLs y descripciones. Usar cuando necesites encontrar información actual, URLs, noticias, precios o cualquier búsqueda web real."
+    command: "python3"
+    args: ["/app/tools/web_search/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        count:
+          type: integer
+          default: 10
+          description: "Number of results (max 20, default 10)"
+        country:
+          type: string
+          default: "ES"
+          description: "Country code for results (default ES for Spain)"
+        lang:
+          type: string
+          default: "es"
+          description: "Language for results (default es)"
+      required:
+        - query
+
   # Browser Scraper - JS-rendered pages via headless Chromium (Cloudflare, Wallapop, Milanuncios...)
   - name: "browser_scraper"
     description: "(EN): Scrape JavaScript-heavy or Cloudflare-protected pages using a real headless browser. Use when web_scraper fails (blocked, empty content, Cloudflare). Examples: Milanuncios, Wallapop, portals with anti-bot protection. (ES): Extraer contenido de páginas con JS pesado o protegidas por Cloudflare usando un navegador real. Usar cuando web_scraper falla o devuelve contenido vacío."

@@ -20,6 +20,7 @@ services:
       # RustFS / S3 Configuration (for presigned URL download)
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
       BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:-amanda2024}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}

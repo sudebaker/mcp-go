@@ -38,6 +38,8 @@ services:
       - ../templates:/app/templates:ro
       # Data directory (read-write)
       - mcp-data:/data
+      # Docker socket for server_status tool
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -360,6 +360,17 @@ tools:
       required:
         - url
 
+  # Server Status - CPU, RAM, disk, uptime and Docker containers
+  - name: "server_status"
+    description: "(EN): Get server health report: CPU usage, RAM, disk space, uptime, load average and running Docker containers. Use when asked about server status, resource usage, how the machine is doing, or what containers are running. (ES): Informe de estado del servidor: CPU, RAM, disco, uptime, carga y contenedores Docker activos."
+    command: "python3"
+    args: ["/app/tools/server_status/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties: {}
+      required: []
+
   # Transcribe - Local speech-to-text via faster-whisper (100% on-premise)
   - name: "transcribe"
     description: "(EN): Transcribe audio files locally using Whisper AI. 100% on-premise, no cloud, no data leaves the server. Supports mp3, wav, ogg, m4a, webm, flac. Pass a file path on the server or base64-encoded audio. (ES): Transcribir archivos de audio localmente con Whisper AI. 100% local, sin nube, sin enviar voz al exterior. Soporta mp3, wav, ogg, m4a, webm, flac."

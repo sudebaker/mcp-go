@@ -17,6 +17,7 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.structured_logging import get_logger
+from common.validators import validate_read_path, PathValidationError, sanitize_filename
 
 logger = get_logger(__name__, "transcribe")
 
@@ -29,8 +30,10 @@ except ImportError:
 WHISPER_URL = os.environ.get("WHISPER_URL", "http://whisper:8000")
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "Systran/faster-whisper-small")
 DEFAULT_TIMEOUT = 120
+MAX_AUDIO_SIZE_MB = 100
 
 SUPPORTED_FORMATS = {".mp3", ".mp4", ".wav", ".ogg", ".m4a", ".webm", ".flac", ".opus", ".mpeg", ".mpga"}
+ALLOWED_AUDIO_DIR = "/data"
 
 
 def read_request() -> dict[str, Any]:
@@ -46,9 +49,10 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
     if not REQUESTS_AVAILABLE:
         return None, "requests library not available"
 
-    path = Path(file_path)
-    if not path.exists():
-        return None, f"File not found: {file_path}"
+    try:
+        path = validate_read_path(file_path, readonly_dir=ALLOWED_AUDIO_DIR)
+    except (PathValidationError, FileNotFoundError, PermissionError) as e:
+        return None, f"Invalid file path: {str(e)}"
 
     suffix = path.suffix.lower()
     if suffix not in SUPPORTED_FORMATS:
@@ -72,7 +76,7 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
             )
 
         if response.status_code != 200:
-            return None, f"Whisper server returned HTTP {response.status_code}: {response.text[:200]}"
+            return None, f"Whisper server returned HTTP {response.status_code}"
 
         if response_format == "json":
             result = response.json()
@@ -91,9 +95,12 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
 def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
     """Decode base64 audio, save to temp file and transcribe."""
     try:
-        # Strip data URL prefix if present (data:audio/mp3;base64,...)
         if "," in audio_b64:
             audio_b64 = audio_b64.split(",", 1)[1]
+
+        size_bytes = len(audio_b64) * 3 // 4
+        if size_bytes > MAX_AUDIO_SIZE_MB * 1024 * 1024:
+            return None, f"Audio too large. Max size: {MAX_AUDIO_SIZE_MB}MB"
 
         audio_bytes = base64.b64decode(audio_b64)
     except Exception as e:
@@ -119,7 +126,7 @@ def main() -> None:
 
         file_path = arguments.get("file_path", "").strip()
         audio_b64 = arguments.get("audio_base64", "").strip()
-        filename = arguments.get("filename", "audio.wav")
+        filename = sanitize_filename(arguments.get("filename", "audio.wav"))
         language = arguments.get("language", "") or None
 
         if not file_path and not audio_b64:
@@ -169,7 +176,10 @@ def main() -> None:
             "error": {"code": "INVALID_INPUT", "message": f"Failed to parse JSON input: {str(e)}"}
         })
     except Exception as e:
-        logger.error("Unhandled exception in transcribe", extra_data={"error": str(e), "traceback": traceback.format_exc()})
+        logger.error(
+            "Unhandled exception in transcribe",
+            extra_data={"error": str(e)}
+        )
         write_response({
             "success": False,
             "request_id": request.get("request_id", "") if request else "",

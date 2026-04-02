@@ -292,8 +292,8 @@ def main() -> None:
         arguments = request.get("arguments", {})
         context = request.get("context", {})
 
-        url = arguments.get("url", "")
-        selector = arguments.get("selector", "")
+        url = arguments.get("url", "")[:2000]
+        selector = arguments.get("selector", "")[:500]
         extract_type = arguments.get("extract_type", "text")
 
         allowed_types = ["text", "html", "links", "images"]
@@ -412,7 +412,7 @@ def main() -> None:
     except Exception as e:
         logger.error(
             "Unhandled exception in web_scraper",
-            extra_data={"error": str(e), "traceback": traceback.format_exc()},
+            extra_data={"error": str(e)},
         )
         write_response(
             {

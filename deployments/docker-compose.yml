@@ -19,7 +19,7 @@ services:
 
       # RustFS / S3 Configuration (for presigned URL download)
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
-      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:-amanda2024}
+      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
@@ -124,13 +124,13 @@ services:
       - "3000:3000"
     environment:
       CONCURRENT: "5"
-      TOKEN: ${BROWSERLESS_TOKEN:-amanda2024}
+      TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
       TIMEOUT: "60000"
     networks:
       - mcp-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN:-amanda2024}", "http://localhost:3000/json/version"]
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}", "http://localhost:3000/json/version"]
       interval: 30s
       timeout: 10s
       retries: 3

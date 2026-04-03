@@ -25,6 +25,13 @@ try:
 except ImportError:
     URLLIB_AVAILABLE = False
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+try:
+    from common.validators import is_internal_url
+except ImportError:
+    def is_internal_url(url: str) -> bool:  # type: ignore[misc]
+        return False
+
 # ---------------------------------------------------------------------------
 # Default locations: (name, latitude, longitude)
 # ---------------------------------------------------------------------------
@@ -129,6 +136,11 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
         "forecast_days": max_days,
     }
     url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
+
+    # SSRF protection: block internal/private URLs
+    if is_internal_url(url):
+        return None
+
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "mcp-weather/2.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -230,11 +242,18 @@ def main() -> None:
         # Support custom locations via arguments
         custom_locs = arguments.get("locations")
         if custom_locs and isinstance(custom_locs, list):
-            locations = [
-                (loc["name"], float(loc["lat"]), float(loc["lon"]))
-                for loc in custom_locs
-                if "name" in loc and "lat" in loc and "lon" in loc
-            ]
+            locations = []
+            for loc in custom_locs:
+                if "name" not in loc or "lat" not in loc or "lon" not in loc:
+                    continue
+                lat = float(loc["lat"])
+                lon = float(loc["lon"])
+                # Validate geographic bounds
+                if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+                    continue
+                locations.append((str(loc["name"])[:64], lat, lon))
+            if not locations:
+                locations = DEFAULT_LOCATIONS
         else:
             locations = DEFAULT_LOCATIONS
 

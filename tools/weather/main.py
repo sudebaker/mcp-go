@@ -116,7 +116,8 @@ def parse_location_xml(xml_content: str, url: str) -> dict[str, Any]:
             return {"localidad": localidad, "url": url, "dias": []}
 
         for dia in prediccion.findall("dia"):
-            fecha = dia.get("fecha", "")
+            fecha = dia.get("fecha", "").strip("'\"")
+            fecha = fecha.strip()
 
             temp = dia.find("temperatura")
             tmax = temp.findtext("maxima", "N/A") if temp is not None else "N/A"
@@ -189,7 +190,7 @@ def format_date(fecha_iso: str) -> str:
         Human-readable date string in Spanish, or original if parsing fails.
     """
     try:
-        dt = datetime.fromisoformat(fecha_iso)
+        dt = datetime.fromisoformat(fecha_iso.strip("'\""))
         dias = [
             "Lunes", "Martes", "Miércoles", "Jueves",
             "Viernes", "Sábado", "Domingo",
@@ -247,7 +248,7 @@ def build_comparative_forecast(locations_data: list[dict], max_days: int = 3) ->
     by_date: dict[str, list[dict]] = {}
     for loc in locations_data:
         for dia in loc["dias"][:max_days]:
-            by_date[dia["fecha"]].append({
+            by_date.setdefault(dia["fecha"], []).append({
                 "localidad": loc["localidad"],
                 "estado": dia["estado"],
                 "temp": dia["temp"],

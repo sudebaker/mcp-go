@@ -40,6 +40,8 @@ type Config struct {
 	Execution ExecutionConfig `yaml:"execution"`
 	// Tools is the list of available tools and their configurations
 	Tools []ToolConfig `yaml:"tools"`
+	// Prompts is the list of available prompts
+	Prompts []PromptConfig `yaml:"prompts,omitempty"`
 }
 
 // ServerConfig holds HTTP server-specific settings including network binding,
@@ -90,6 +92,36 @@ type ToolConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// InputSchema defines the expected JSON schema for tool arguments
 	InputSchema map[string]interface{} `yaml:"input_schema"`
+}
+
+// PromptArgumentConfig defines an argument for a prompt.
+type PromptArgumentConfig struct {
+	// Name is the unique identifier for this argument
+	Name string `yaml:"name"`
+	// Description explains the argument for LLM consumption
+	Description string `yaml:"description"`
+	// Required indicates if this argument must be provided
+	Required bool `yaml:"required"`
+}
+
+// PromptMessageConfig defines a message within a prompt template.
+type PromptMessageConfig struct {
+	// Role is the message speaker: "user" or "assistant"
+	Role string `yaml:"role"`
+	// Content is the message text (supports {{argument}} placeholders)
+	Content string `yaml:"content"`
+}
+
+// PromptConfig defines a prompt template with configurable arguments.
+type PromptConfig struct {
+	// Name is the unique identifier for this prompt
+	Name string `yaml:"name"`
+	// Description explains the prompt's purpose for LLM consumption
+	Description string `yaml:"description"`
+	// Arguments are the configurable parameters for this prompt
+	Arguments []PromptArgumentConfig `yaml:"arguments,omitempty"`
+	// Messages are the template messages in the prompt
+	Messages []PromptMessageConfig `yaml:"messages"`
 }
 
 // envVarRegex matches ${VAR_NAME} or ${VAR_NAME:-default} patterns for expansion

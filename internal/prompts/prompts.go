@@ -3,6 +3,7 @@ package prompts
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/amphora/mcp-go/internal/config"
@@ -113,7 +114,8 @@ func createPromptHandler(cfg config.PromptConfig) server.PromptHandlerFunc {
 
 // interpolateTemplate replaces {{argument}} placeholders with provided values.
 //
-// Placeholders are case-sensitive. Unmatched placeholders are left unchanged.
+// The function uses sorted iteration over argument keys to ensure deterministic
+// behavior. Placeholders are case-sensitive. Unmatched placeholders are left unchanged.
 //
 // Parameters:
 //   - template: the template string with {{name}} placeholders
@@ -124,9 +126,21 @@ func createPromptHandler(cfg config.PromptConfig) server.PromptHandlerFunc {
 //	the template with all matched placeholders replaced
 func interpolateTemplate(template string, args map[string]string) string {
 	result := template
-	for name, value := range args {
+
+	// Sort keys to ensure deterministic iteration order
+	// (maps in Go have random iteration order which can affect results)
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Replace placeholders in sorted order
+	for _, name := range keys {
+		value := args[name]
 		placeholder := fmt.Sprintf("{{%s}}", name)
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
+
 	return result
 }

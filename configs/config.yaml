@@ -605,7 +605,175 @@ prompts:
           - Error handling tests
           - Tests using the testing framework standard for {{language}}
 
+  - name: "analyze_document"
+    description: "Analyze PDF/image documents for entities, source type, and summary"
+    arguments:
+      - name: "file_url"
+        description: "URL or file path to the document (PDF, image, or mixed)"
+        required: true
+      - name: "analysis_type"
+        description: "Type of analysis: entities (extract names, dates, amounts), summary (key points), or full (all)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an expert document analyzer with deep knowledge of OCR, entity extraction, and document classification."
+      - role: "user"
+        content: |
+          Please analyze the document at {{file_url}}.
+          
+          Focus on {{analysis_type}} analysis:
+          - Extract named entities (people, companies, dates, amounts, locations)
+          - Identify document source type (invoice, contract, report, email, etc.)
+          - Provide a concise summary of key points
+          - Highlight any critical information
 
+  - name: "investigate_entity"
+    description: "Research a person or company: cross-reference knowledge base and build timeline"
+    arguments:
+      - name: "entity_name"
+        description: "Name of the person or company to investigate"
+        required: true
+      - name: "entity_type"
+        description: "Type: person, company, organization"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an investigative researcher with expertise in OSINT (Open Source Intelligence) and knowledge base cross-referencing."
+      - role: "user"
+        content: |
+          Please investigate {{entity_name}} (type: {{entity_type}}).
+          
+          For this entity, please:
+          1. Search the knowledge base for any related information
+          2. Create a chronological timeline of key events and dates
+          3. Identify connections to other entities (people, companies, organizations)
+          4. Summarize any relevant findings or patterns
+          5. Flag any anomalies or points of interest
+
+  - name: "generate_report"
+    description: "Generate formal PDF reports from structured data"
+    arguments:
+      - name: "report_type"
+        description: "Type: incident, meeting, audit, executive_summary, formal_report, or custom"
+        required: true
+      - name: "data_summary"
+        description: "Brief summary of what the report should contain"
+        required: true
+    messages:
+      - role: "system"
+        content: "You are a professional report writer with expertise in corporate documentation, compliance, and formal communications."
+      - role: "user"
+        content: |
+          Please prepare a {{report_type}} report with the following content:
+          
+          {{data_summary}}
+          
+          The report should be:
+          - Professional and formally structured
+          - Suitable for executive/stakeholder review
+          - Include appropriate sections (executive summary, findings, recommendations)
+          - Use company branding if available
+          - Export as PDF for distribution
+
+  - name: "summarize_inbox"
+    description: "Analyze email inbox for patterns, anomalies, and key metrics"
+    arguments:
+      - name: "inbox_source"
+        description: "Email inbox identifier or account to analyze"
+        required: true
+      - name: "time_range"
+        description: "Time range: today, week, month, or custom dates"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an email analytics expert with expertise in pattern recognition, sentiment analysis, and communication trends."
+      - role: "user"
+        content: |
+          Please analyze the {{inbox_source}} inbox for the {{time_range}} period.
+          
+          Provide insights on:
+          1. Volume metrics (total emails, daily average, busiest days)
+          2. Communication patterns (frequent senders, recipients, topics)
+          3. Sentiment analysis (positive, neutral, negative tones)
+          4. Anomalies or unusual activity
+          5. Key themes and discussion topics
+          6. Action items or follow-ups needed
+
+  - name: "forecast"
+    description: "Get weather forecasts ready to use"
+    arguments:
+      - name: "location"
+        description: "Geographic location (city, coordinates, or region)"
+        required: true
+      - name: "days"
+        description: "Number of forecast days: 1-7 (default 3)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a weather specialist with expertise in meteorological data interpretation and forecast analysis."
+      - role: "user"
+        content: |
+          Please provide a weather forecast for {{location}} for the next {{days}} days.
+          
+          Include:
+          - Temperature (min/max)
+          - Sky conditions (clear, cloudy, rainy, etc.)
+          - Precipitation probability
+          - Wind speed and direction
+          - UV index
+          - Any weather alerts or anomalies
+          - Recommendations for activities/clothing
+
+  - name: "compare_documents"
+    description: "Compare two document versions for semantic differences and changes"
+    arguments:
+      - name: "old_version"
+        description: "URL or path to the original/old document version"
+        required: true
+      - name: "new_version"
+        description: "URL or path to the updated/new document version"
+        required: true
+    messages:
+      - role: "system"
+        content: "You are a document comparison expert with expertise in regulatory analysis, change tracking, and impact assessment."
+      - role: "user"
+        content: |
+          Please perform a comprehensive comparison between these two document versions:
+          
+          Old version: {{old_version}}
+          New version: {{new_version}}
+          
+          Provide:
+          1. Unified diff view of changes
+          2. Semantic analysis of what changed (not just text diffs)
+          3. Impact assessment of the changes
+          4. Sections added, removed, or significantly modified
+          5. Change summary with key modifications highlighted
+          6. Recommendations or concerns about the changes
+
+  - name: "search_knowledge"
+    description: "Search the knowledge base with hybrid search (semantic + keyword)"
+    arguments:
+      - name: "query"
+        description: "Search query or topic to find"
+        required: true
+      - name: "search_type"
+        description: "Search method: semantic (meaning), keyword (text match), or hybrid (both)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a knowledge retrieval specialist with expertise in information synthesis and context understanding."
+      - role: "user"
+        content: |
+          Please search the knowledge base for: {{query}}
+          
+          Using {{search_type}} search:
+          1. Find all relevant documents and information
+          2. Provide results in order of relevance
+          3. Include context around each result
+          4. Highlight key connections between results
+          5. Synthesize findings into a coherent summary
+          6. Suggest related topics or follow-up searches
 
 
 

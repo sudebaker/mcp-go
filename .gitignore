@@ -35,8 +35,12 @@ go.work.sum
 *.pyo
 __pycache__/
 *.swp
+
+# Binaries
 #binaries
 bin/
+mcp-server
+server
 
 # Git worktrees
 .worktrees/

@@ -536,6 +536,76 @@ tools:
       required:
         - operation
 
+# Prompts: Template messages available via MCP prompts/list and prompts/get
+# Clients (like Claude with MCP support) can discover and invoke these prompts
+# Arguments are interpolated into {{argument}} placeholders in message templates
+prompts:
+  - name: "code_review"
+    description: "Review code for quality, best practices, and potential issues"
+    arguments:
+      - name: "code"
+        description: "The code to review"
+        required: true
+      - name: "language"
+        description: "Programming language (e.g., Python, Go, JavaScript)"
+        required: false
+    messages:
+      - role: "user"
+        content: |
+          Please review the following {{language}} code for quality, best practices, and potential issues:
+          
+          ```{{language}}
+          {{code}}
+          ```
+          
+          Provide constructive feedback on:
+          - Code clarity and readability
+          - Performance considerations
+          - Security issues
+          - Best practices for the language
+  
+  - name: "explain_error"
+    description: "Explain an error message in simple, non-technical terms"
+    arguments:
+      - name: "error"
+        description: "The error message to explain"
+        required: true
+    messages:
+      - role: "user"
+        content: |
+          Please explain the following error message in simple, non-technical terms that a developer could understand:
+          
+          ```
+          {{error}}
+          ```
+          
+          Also suggest possible causes and how to fix it.
+  
+  - name: "write_tests"
+    description: "Generate test cases for code"
+    arguments:
+      - name: "code"
+        description: "The code to generate tests for"
+        required: true
+      - name: "language"
+        description: "Programming language"
+        required: false
+    messages:
+      - role: "user"
+        content: |
+          Generate comprehensive unit tests for the following {{language}} code:
+          
+          ```{{language}}
+          {{code}}
+          ```
+          
+          Include:
+          - Happy path tests
+          - Edge case tests
+          - Error handling tests
+          - Tests using the testing framework standard for {{language}}
+
+
 
 
 

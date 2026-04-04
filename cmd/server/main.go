@@ -12,6 +12,7 @@ import (
 
 	"github.com/amphora/mcp-go/internal/config"
 	"github.com/amphora/mcp-go/internal/executor"
+	"github.com/amphora/mcp-go/internal/prompts"
 	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -76,6 +77,7 @@ func main() {
 		cfg.Server.Name,
 		Version,
 		server.WithToolCapabilities(true),
+		server.WithPromptCapabilities(true),
 		server.WithLogging(),
 		server.WithRecovery(),
 	)
@@ -89,6 +91,14 @@ func main() {
 				Msg("Invalid tool configuration")
 		}
 		registerTool(mcpServer, exec, toolCfg)
+	}
+
+	// Register prompts from configuration
+	if len(cfg.Prompts) > 0 {
+		log.Info().Int("count", len(cfg.Prompts)).Msg("Registering prompts from configuration")
+		prompts.RegisterPrompts(mcpServer, cfg.Prompts)
+	} else {
+		log.Debug().Msg("No prompts configured")
 	}
 
 	log.Info().Msg("Configuration changes require server restart")

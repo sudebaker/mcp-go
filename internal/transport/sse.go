@@ -432,6 +432,8 @@ func (s *MCPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"ping",
 			"tools/list",
 			"tools/call",
+			"prompts/list",
+			"prompts/get",
 		},
 	})
 }

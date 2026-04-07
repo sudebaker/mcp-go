@@ -34,6 +34,9 @@ execution:
     PYTHONUNBUFFERED: "1"
     WHISPER_URL: "${WHISPER_URL:-http://whisper:8000}"
     BRAVE_SEARCH_API_KEY: "${BRAVE_SEARCH_API_KEY:-}"
+    SEARXNG_URL: "http://searxng:8080"
+    BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
+    BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN:-}"
 
 tools:
   # Echo tool for testing
@@ -427,6 +430,9 @@ tools:
     command: "python3"
     args: ["/app/tools/browser_scraper/main.py"]
     timeout: "90s"
+    environment:
+      BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
+      BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN}"
     input_schema:
       type: object
       properties:

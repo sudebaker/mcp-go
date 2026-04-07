@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Web Search Tool for MCP Orchestrator.
-Uses Brave Search API to perform real web searches.
+Uses Brave Search API (primary) or SearXNG (fallback) to perform real web searches.
 """
 
 import json
@@ -22,9 +22,8 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-BRAVE_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY")
-if not BRAVE_API_KEY:
-    raise ValueError("BRAVE_SEARCH_API_KEY environment variable is required")
+BRAVE_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
+SEARXNG_URL = os.environ.get("SEARXNG_URL", "").strip()
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 DEFAULT_COUNT = 10
 DEFAULT_TIMEOUT = 15
@@ -55,12 +54,9 @@ def brave_search(query: str, count: int = DEFAULT_COUNT, country: str = "ES", la
         "country": country,
         "search_lang": lang,
         "safesearch": "moderate",
-        "freshness": None,
         "text_decorations": False,
         "spellcheck": True
     }
-    # Remove None values
-    params = {k: v for k, v in params.items() if v is not None}
 
     try:
         response = requests.get(
@@ -74,16 +70,14 @@ def brave_search(query: str, count: int = DEFAULT_COUNT, country: str = "ES", la
 
         data = response.json()
         results = []
-
-        web_results = data.get("web", {}).get("results", [])
-        for item in web_results:
+        for item in data.get("web", {}).get("results", []):
             results.append({
                 "title": item.get("title", ""),
                 "url": item.get("url", ""),
                 "description": item.get("description", ""),
                 "age": item.get("age", ""),
+                "source": "brave",
             })
-
         return results, None
 
     except requests.exceptions.Timeout:
@@ -92,6 +86,61 @@ def brave_search(query: str, count: int = DEFAULT_COUNT, country: str = "ES", la
         return None, f"Connection error: {str(e)}"
     except Exception as e:
         return None, f"Search failed: {str(e)}"
+
+
+def searxng_search(query: str, count: int = DEFAULT_COUNT) -> tuple[Optional[list], Optional[str]]:
+    """Search via local SearXNG instance (fallback when Brave is unavailable)."""
+    if not REQUESTS_AVAILABLE:
+        return None, "requests library not available"
+    if not SEARXNG_URL:
+        return None, "SEARXNG_URL not configured"
+
+    try:
+        response = requests.get(
+            f"{SEARXNG_URL}/search",
+            params={
+                "q": query,
+                "format": "json",
+                "language": "es-ES",
+            },
+            headers={"Accept": "application/json"},
+            timeout=DEFAULT_TIMEOUT
+        )
+        if response.status_code != 200:
+            return None, f"SearXNG returned HTTP {response.status_code}"
+
+        data = response.json()
+        results = []
+        for item in data.get("results", [])[:count]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("content", ""),
+                "age": "",
+                "source": "searxng",
+            })
+        return results, None
+
+    except requests.exceptions.Timeout:
+        return None, "SearXNG timed out"
+    except requests.exceptions.ConnectionError as e:
+        return None, f"SearXNG connection error: {str(e)}"
+    except Exception as e:
+        return None, f"SearXNG search failed: {str(e)}"
+
+
+def search(query: str, count: int = DEFAULT_COUNT, country: str = "ES", lang: str = "es") -> tuple[Optional[list], Optional[str]]:
+    """Try Brave first, fall back to SearXNG."""
+    if BRAVE_API_KEY:
+        results, error = brave_search(query, count=count, country=country, lang=lang)
+        if results is not None:
+            return results, None
+        logger.warning("Brave search failed, trying SearXNG fallback", extra_data={"error": error})
+
+    if SEARXNG_URL:
+        return searxng_search(query, count=count)
+
+    return None, "No search backend configured. Set BRAVE_SEARCH_API_KEY or SEARXNG_URL."
 
 
 def main() -> None:
@@ -114,7 +163,7 @@ def main() -> None:
             })
             return
 
-        results, error = brave_search(query, count=count, country=country, lang=lang)
+        results, error = search(query, count=count, country=country, lang=lang)
         if error:
             write_response({
                 "success": False,
@@ -132,8 +181,8 @@ def main() -> None:
             })
             return
 
-        # Format results
-        lines = [f"**Resultados para:** {query}\n"]
+        backend = results[0].get("source", "unknown") if results else "unknown"
+        lines = [f"**Resultados para:** {query} _(via {backend})_\n"]
         for i, r in enumerate(results, 1):
             age = f" · {r['age']}" if r.get("age") else ""
             lines.append(f"**{i}. {r['title']}**{age}")
@@ -142,16 +191,15 @@ def main() -> None:
                 lines.append(f"{r['description']}")
             lines.append("")
 
-        response_text = "\n".join(lines)
-
         write_response({
             "success": True,
             "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
+            "content": [{"type": "text", "text": "\n".join(lines)}],
             "structured_content": {
                 "query": query,
                 "results": results,
-                "count": len(results)
+                "count": len(results),
+                "backend": backend,
             }
         })
 
@@ -162,10 +210,7 @@ def main() -> None:
             "error": {"code": "INVALID_INPUT", "message": f"Failed to parse JSON input: {str(e)}"}
         })
     except Exception as e:
-        logger.error(
-            "Unhandled exception in web_search",
-            extra_data={"error": str(e)}
-        )
+        logger.error("Unhandled exception in web_search", extra_data={"error": str(e)})
         write_response({
             "success": False,
             "request_id": request.get("request_id", "") if request else "",

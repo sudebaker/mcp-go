@@ -424,6 +424,36 @@ tools:
       required:
         - query
 
+  # SearXNG Search - Private self-hosted search (no API key, no limits)
+  - name: "searxng_search"
+    description: "(EN): Search the web using the local self-hosted SearXNG instance. Private, unlimited, no API key needed. Aggregates results from Google, Bing, DuckDuckGo and Wikipedia. Supports filtering by category (general, news, images, science) and time range. Ideal for unrestricted searches without API quotas. (ES): Buscar en la web usando el servidor SearXNG local privado. Sin API key, sin límites, sin rastreo. Agrega resultados de Google, Bing, DuckDuckGo y Wikipedia. Soporta filtros por categoría y rango temporal."
+    command: "python3"
+    args: ["/app/tools/searxng_search/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        count:
+          type: integer
+          default: 10
+          description: "Number of results (max 20, default 10)"
+        language:
+          type: string
+          default: "es-ES"
+          description: "Language/locale for results (e.g. es-ES, en-US)"
+        categories:
+          type: string
+          description: "Comma-separated categories: general, news, images, science, it, map (default: general)"
+        time_range:
+          type: string
+          enum: ["day", "week", "month", "year"]
+          description: "Filter results by time range (optional)"
+      required:
+        - query
+
   # Browser Scraper - JS-rendered pages via headless Chromium (Cloudflare, Wallapop, Milanuncios...)
   - name: "browser_scraper"
     description: "(EN): Scrape JavaScript-heavy or Cloudflare-protected pages using a real headless browser. Use when web_scraper fails (blocked, empty content, Cloudflare). Examples: Milanuncios, Wallapop, portals with anti-bot protection. (ES): Extraer contenido de páginas con JS pesado o protegidas por Cloudflare usando un navegador real. Usar cuando web_scraper falla o devuelve contenido vacío."

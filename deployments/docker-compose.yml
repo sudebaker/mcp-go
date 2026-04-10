@@ -9,7 +9,7 @@ services:
     environment:
       # MCP Configuration
       BASE_URL: ${BASE_URL:-http://mcp-orchestrator:8080}
-      SEARXNG_URL: ${SEARXNG_URL:-http://172.17.0.1:8081}
+      SEARXNG_URL: http://searxng:8080
 
       # LLM Configuration - can be overridden via .env or CLI
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}

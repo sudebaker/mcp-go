@@ -178,12 +178,12 @@ def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict
             content_type=content_type,
         )
 
-         stat = client.stat_object(bucket, key)
+        stat = client.stat_object(bucket, key)
 
-         # Generate presigned URL for download (configurable TTL via RUSTFS_PRESIGNED_TTL_SECONDS)
-         presigned_url = client.presigned_get_object(
-             bucket, key, expires=timedelta(seconds=PRESIGNED_URL_TTL_SECONDS)
-         )
+        # Generate presigned URL for download (configurable TTL via RUSTFS_PRESIGNED_TTL_SECONDS)
+        presigned_url = client.presigned_get_object(
+            bucket, key, expires=timedelta(seconds=PRESIGNED_URL_TTL_SECONDS)
+        )
 
         return {
             "success": True,

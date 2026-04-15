@@ -73,6 +73,15 @@ go test ./...
 ./tests/test_excel_analysis.sh
 ```
 
+## Sandbox Docker Image
+
+El sandbox Docker (`mcp-python-sandbox:latest`) es usado por `data_analysis` para ejecutar codigo Pandas generado por LLM en aislamiento.
+
+```bash
+# Build desde la raiz del repositorio
+docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
+```
+
 ## Documentacion
 
 - `QUICKSTART.md`: guia corta de arranque y verificacion

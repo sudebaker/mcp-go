@@ -21,12 +21,13 @@ RUN pip install --no-cache-dir \
     xlrd==2.0.1
 
 # Copy common modules (safe_file_ops, validators, etc.)
-COPY ../common/*.py /app/tools/common/
+# Context is repo root, so use absolute paths from there
+COPY tools/common/*.py /app/tools/common/
 RUN chown -R sandbox:sandbox /app/tools && \
     chmod 755 /app/tools/common
 
 # Copy and secure bootstrap script
-COPY sandbox_bootstrap.py /sandbox/sandbox_bootstrap.py
+COPY tools/data_analysis/sandbox_bootstrap.py /sandbox/sandbox_bootstrap.py
 RUN chown root:root /sandbox/sandbox_bootstrap.py && \
     chmod 400 /sandbox/sandbox_bootstrap.py
 

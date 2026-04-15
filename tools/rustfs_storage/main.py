@@ -34,6 +34,8 @@ except ImportError:
 MAX_UPLOAD_SIZE_MB = 100
 ALLOWED_OPERATIONS = ["upload", "download", "list", "search", "delete", "stat"]
 DEFAULT_BUCKET = "openwebui"
+# Presigned URL TTL (Time To Live) in seconds, configurable via RUSTFS_PRESIGNED_TTL_SECONDS env var
+PRESIGNED_URL_TTL_SECONDS = int(os.environ.get("RUSTFS_PRESIGNED_TTL_SECONDS", "3600"))
 
 
 def read_request() -> dict[str, Any]:
@@ -176,12 +178,12 @@ def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict
             content_type=content_type,
         )
 
-        stat = client.stat_object(bucket, key)
+         stat = client.stat_object(bucket, key)
 
-        # Generate presigned URL for download (valid for 1 hour)
-        presigned_url = client.presigned_get_object(
-            bucket, key, expires=timedelta(seconds=3600)
-        )
+         # Generate presigned URL for download (configurable TTL via RUSTFS_PRESIGNED_TTL_SECONDS)
+         presigned_url = client.presigned_get_object(
+             bucket, key, expires=timedelta(seconds=PRESIGNED_URL_TTL_SECONDS)
+         )
 
         return {
             "success": True,
@@ -200,7 +202,7 @@ def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict
 
 
 def operation_download(
-    client: Minio, bucket: str, key: str, expiry: int = 3600
+    client: Minio, bucket: str, key: str, expiry: int = None
 ) -> dict:
     try:
         is_valid, err = validate_object_key(key)
@@ -212,9 +214,12 @@ def operation_download(
             return {"success": False, "error": err}
 
         stat = client.stat_object(bucket, key)
+        
+        # Use provided expiry or fall back to configured TTL constant
+        ttl_seconds = expiry if expiry is not None else PRESIGNED_URL_TTL_SECONDS
 
         presigned_url = client.presigned_get_object(
-            bucket, key, expires=timedelta(seconds=expiry)
+            bucket, key, expires=timedelta(seconds=ttl_seconds)
         )
 
         return {
@@ -222,7 +227,7 @@ def operation_download(
             "bucket": bucket,
             "key": key,
             "presigned_url": presigned_url,
-            "expires": expiry,
+            "expires": ttl_seconds,
             "size": stat.size,
             "content_type": stat.content_type,
         }

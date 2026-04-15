@@ -167,11 +167,11 @@ Analyzes Excel/CSV files using Pandas and LLM-generated code.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file_url | string | No | HTTP URL to data file (presigned S3 URL) |
+| file_url | string | No | HTTP URL to data file (presigned S3 URL or rustfs://bucket/key) |
 | file_name | string | No | Original filename with extension |
 | question | string | Yes | Natural language question |
 | output_format | string | No | `text`, `json`, `markdown`, `png` |
-| __files__ | array | No | Attached files (OpenWebUI) |
+| __files__ | array | No | Attached files (OpenWebUI). Each file can include `content` (base64) or `url`. Max size: 100MB per file when using base64 content. |
 
 ---
 
@@ -321,6 +321,14 @@ Classifies documents into categories.
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
 | S3_BUCKET_NAME | openwebui | Bucket name |
+| SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges |
+| S3_OPERATION_TIMEOUT_SECONDS | 30 | Timeout for S3 read operations (seconds) |
+| RUSTFS_PRESIGNED_TTL_SECONDS | 3600 | Presigned URL validity window (seconds) |
+
+**Security Notes:**
+- `SSRF_ALLOWLIST`: Controls which internal hosts can be accessed via `file_url` parameter. Default allows only `rustfs`.
+- `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
+- `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
 
 ---
 

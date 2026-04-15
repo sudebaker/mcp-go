@@ -1,6 +1,7 @@
 import logging
+import os
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -12,6 +13,60 @@ from tenacity import (
 import requests
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_API_KEYS = {
+    "openrouter": "OPENROUTER_API_KEY",
+    "opencode": "OPENCODE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "cohere": "COHERE_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+
+
+def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
+    """
+    Detects the API format (ollama or openai) and returns the appropriate API key.
+
+    Detection order:
+    1. URL contains known OpenAI-compatible provider domains
+    2. LLM_API_FORMAT environment variable
+
+    Args:
+        llm_api_url: URL of the LLM API
+
+    Returns:
+        Tuple of (api_format: 'ollama' | 'openai', api_key: str | None)
+    """
+    url_lower = llm_api_url.lower()
+
+    if "openrouter.ai" in url_lower:
+        return "openai", os.environ.get("OPENROUTER_API_KEY")
+    elif "openai.com" in url_lower:
+        return "openai", os.environ.get("OPENAI_API_KEY")
+    elif "generativelanguage.googleapis.com" in url_lower or "gemini" in url_lower:
+        return "openai", os.environ.get("GEMINI_API_KEY")
+    elif "api.anthropic.com" in url_lower:
+        return "openai", os.environ.get("ANTHROPIC_API_KEY")
+    elif "api.cohere.ai" in url_lower or "cohere" in url_lower:
+        return "openai", os.environ.get("COHERE_API_KEY")
+    elif "api.mistral.ai" in url_lower or "mistral" in url_lower:
+        return "openai", os.environ.get("MISTRAL_API_KEY")
+    elif "api.groq.com" in url_lower or "groq" in url_lower:
+        return "openai", os.environ.get("GROQ_API_KEY")
+    elif "api.deepseek.com" in url_lower or "deepseek" in url_lower:
+        return "openai", os.environ.get("DEEPSEEK_API_KEY")
+    elif "opencode" in url_lower:
+        return "openai", os.environ.get("OPENCODE_API_KEY")
+
+    api_format = os.environ.get("LLM_API_FORMAT", "ollama").lower()
+    if api_format == "openai":
+        return "openai", os.environ.get("OPENROUTER_API_KEY")
+
+    return "ollama", None
 
 
 class TransientError(Exception):
@@ -92,6 +147,9 @@ def call_llm_with_retry(
     """
     Llama a la API LLM con reintentos automáticos en errores transitorios.
 
+    Detecta automáticamente el formato de API (Ollama u OpenAI-compatible)
+    según la URL o la variable de entorno LLM_API_FORMAT.
+
     Args:
         llm_api_url: URL base de la API LLM
         llm_model: Nombre del modelo a usar
@@ -121,20 +179,38 @@ def call_llm_with_retry(
     if len(prompt) > 100000:
         raise ValueError("Prompt exceeds maximum length of 100000 characters")
 
-    payload = {
-        "model": llm_model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": max(0.0, min(1.0, temperature)),
-            "num_predict": max(1, min(4096, max_tokens)),
-        },
-    }
+    api_format, api_key = detect_api_format_and_key(llm_api_url)
 
-    if images:
-        if len(images) > 10:
-            raise ValueError("Maximum 10 images allowed")
-        payload["images"] = images
+    headers = {"Content-Type": "application/json"}
+
+    if api_format == "openai":
+        headers["Authorization"] = f"Bearer {api_key}" if api_key else ""
+
+        payload = {
+            "model": llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": max(0.0, min(2.0, temperature)),
+            "max_tokens": max(1, min(4096, max_tokens)),
+        }
+
+        endpoint = f"{llm_api_url}/chat/completions"
+    else:
+        payload = {
+            "model": llm_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": max(0.0, min(1.0, temperature)),
+                "num_predict": max(1, min(4096, max_tokens)),
+            },
+        }
+
+        if images:
+            if len(images) > 10:
+                raise ValueError("Maximum 10 images allowed")
+            payload["images"] = images
+
+        endpoint = f"{llm_api_url}/api/generate"
 
     try:
         jitter = random.uniform(0, 0.1)
@@ -143,15 +219,19 @@ def call_llm_with_retry(
         time.sleep(jitter)
 
         response = requests.post(
-            f"{llm_api_url}/api/generate",
+            endpoint,
             json=payload,
             timeout=timeout,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         response.raise_for_status()
 
         result = response.json()
-        return result.get("response", "")
+
+        if api_format == "openai":
+            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        else:
+            return result.get("response", "")
 
     except requests.HTTPError as e:
         status_code = e.response.status_code

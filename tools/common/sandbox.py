@@ -362,7 +362,6 @@ def emit_result(success, output=None, structured=None, files=None):
 
 code = base64.b64decode("CODE_PLACEHOLDER").decode()
 
-input_data = None
 if "INPUT_PLACEHOLDER":
     try:
         csv_data = base64.b64decode("INPUT_PLACEHOLDER").decode()

@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir \
     matplotlib==3.8.2 \
     seaborn==0.13.0 \
     openpyxl==3.1.2 \
-    xlrd==2.0.1
+    xlrd==2.0.1 \
+    tabulate==0.9.0
 
 # Copy common modules (safe_file_ops, validators, etc.)
 # Context is repo root, so use absolute paths from there

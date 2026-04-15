@@ -110,23 +110,41 @@ def get_rustfs_s3_client() -> Optional[Minio]:
 
 
 def is_rustfs_url(url: str) -> bool:
-    """Check if URL points to rustfs/S3 endpoint."""
+    """
+    Check if URL points to rustfs/S3 endpoint.
+    
+    Uses SSRF_ALLOWLIST to validate the host is allowed.
+    Returns True only if:
+    1. URL is not blocked by is_internal_url() SSRF checks
+    2. Hostname matches the configured RUSTFS_ENDPOINT (exact match or in SSRF_ALLOWLIST)
+    
+    This prevents SSRF bypass attacks like evilrustfs.com bypassing substring matching.
+    """
+    # Check if URL is internal/blocked (returns True for dangerous URLs)
+    if is_internal_url(url):
+        return False
+    
     rustfs_endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
     # Extract hostname from endpoint (e.g., "rustfs:9000" -> "rustfs")
     rustfs_host = rustfs_endpoint.split(":")[0] if ":" in rustfs_endpoint else rustfs_endpoint
 
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
+    rustfs_host_lower = rustfs_host.lower()
 
-    return (
-        hostname == rustfs_host
-        or hostname.startswith("rustfs")
-        or rustfs_host in hostname
-    )
+    # Exact match on configured host
+    return hostname == rustfs_host_lower
 
 
 def download_from_s3(url: str, client: Minio) -> BytesIO:
-    """Download file directly from S3 using minio client."""
+    """
+    Download file directly from S3 using minio client with timeout protection.
+    
+    Prevents indefinite blocking on S3 operations.
+    Timeout is configurable via S3_OPERATION_TIMEOUT_SECONDS env var (default: 30s).
+    """
+    import signal
+    
     parsed = urlparse(url)
     # URL format: http://rustfs:9000/bucket/key
     path_parts = parsed.path.lstrip("/").split("/", 1)
@@ -136,10 +154,30 @@ def download_from_s3(url: str, client: Minio) -> BytesIO:
 
     bucket = path_parts[0]
     key = path_parts[1]
+    
+    # Get timeout from environment, default to 30 seconds
+    timeout_seconds = int(os.environ.get("S3_OPERATION_TIMEOUT_SECONDS", "30"))
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"S3 operation timed out after {timeout_seconds} seconds")
 
     try:
-        response = client.get_object(bucket, key)
-        return BytesIO(response.read())
+        # Set signal handler for timeout
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout_seconds)
+        
+        try:
+            response = client.get_object(bucket, key)
+            # Read with timeout protection
+            data = response.read()
+            signal.alarm(0)  # Cancel alarm
+        finally:
+            signal.alarm(0)  # Ensure alarm is cancelled
+            signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
+        
+        return BytesIO(data)
+    except TimeoutError as e:
+        raise Exception(f"S3 download timed out: {e}") from e
     except S3Error as e:
         raise Exception(f"S3 download failed: {e}") from e
 
@@ -326,7 +364,10 @@ def load_data_from_buffer(buffer: BytesIO, filename: str) -> "pd.DataFrame":
 
 def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
     """
-    Load data from base64-encoded content.
+    Load data from base64-encoded content with size validation.
+    
+    Prevents DoS attacks via unlimited base64 file uploads.
+    Size limit is based on MAX_FILE_SIZE_MB constant (100MB by default).
 
     Args:
         content: Base64-encoded file content
@@ -336,7 +377,7 @@ def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
         pandas DataFrame with loaded data
 
     Raises:
-        ValueError: If content is invalid base64 or file format is unsupported
+        ValueError: If content is invalid base64, file format is unsupported, or size exceeds limit
     """
     if not PANDAS_AVAILABLE:
         raise ImportError("pandas is not installed")
@@ -344,7 +385,18 @@ def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
     try:
         import base64
 
+        # Decode base64 content
         content_bytes = base64.b64decode(content)
+        
+        # Check decoded size against MAX_FILE_SIZE_MB limit
+        size_mb = len(content_bytes) / (1024 * 1024)
+        if size_mb > MAX_FILE_SIZE_MB:
+            raise ValueError(
+                f"Decoded file size ({size_mb:.2f}MB) exceeds maximum allowed size ({MAX_FILE_SIZE_MB}MB)"
+            )
+    except ValueError:
+        # Re-raise ValueError (size limit exceeded)
+        raise
     except Exception as e:
         raise ValueError(f"Invalid base64 content: {str(e)}") from e
 

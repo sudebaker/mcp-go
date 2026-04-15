@@ -72,6 +72,8 @@ pandas>=2.1.0
 openpyxl>=3.1.0
 numpy>=1.24.0,<2.0.0
 matplotlib>=3.8.0
+tabulate>=0.9.0
+docker>=7.0.0
 
 # Vision/OCR
 opencv-python-headless>=4.8.0

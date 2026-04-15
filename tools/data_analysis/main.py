@@ -894,36 +894,37 @@ def main() -> None:
             "\n\nIMPORTANT RULES:\n",
             "1. Write ONLY Python code, no explanations\n",
             "2. Use the variable 'df' for the DataFrame (it's already loaded)\n",
-            "3. Store the final answer in a variable called 'result'\n",
-            "4. Use pandas (pd) and numpy (np) - they're already imported\n",
+            "3. Use print() with markdown formatting — the sandbox captures stdout only\n",
+            "4. Use pandas (pd), numpy (np) and tabulate — they're already imported\n",
             "5. Keep the code simple and efficient\n",
-            "6. Use print() if you need to show intermediate steps\n",
+            "6. Use print(df.to_markdown()) to display DataFrames beautifully\n",
             "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
+            "8. ALWAYS use print() for every result. Never just assign to 'result' without printing it\n",
         ]
 
         # Add visualization-specific instructions for image output format
         if output_format == "image":
             prompt_parts.extend(
                 [
-                    "8. VISUALIZATION REQUIRED: Create a chart/plot using matplotlib\n",
-                    "9. Import matplotlib: import matplotlib.pyplot as plt; import matplotlib; matplotlib.use('Agg')\n",
-                    "10. Save the plot: plt.savefig('/data/output/chart.png', dpi=150, bbox_inches='tight'); plt.close()\n",
-                    "11. Set result='Chart saved successfully' after saving\n",
-                    "12. DO NOT use plt.show() - only plt.savefig()\n",
+                    "9. VISUALIZATION REQUIRED: Create a chart/plot using matplotlib\n",
+                    "10. Import matplotlib: import matplotlib.pyplot as plt; import matplotlib; matplotlib.use('Agg')\n",
+                    "11. Save the plot: plt.savefig('/data/output/chart.png', dpi=150, bbox_inches='tight'); plt.close()\n",
+                    "12. Set result='Chart saved successfully' after saving\n",
+                    "13. DO NOT use plt.show() - only plt.savefig()\n",
                 ]
             )
         else:
             prompt_parts.extend(
                 [
-                    "8. For visualizations, save to writable directory with .png extension\n",
+                    "9. For visualizations, save to writable directory with .png extension\n",
                 ]
             )
 
         prompt_parts.extend(
             [
-                "13. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
-                "14. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re\n\n",
-                "Python code:\n```python\n",
+                "14. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
+                "15. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re, tabulate\n\n",
+                "Python code (use print() with markdown for ALL output):\n```python\n",
             ]
         )
 

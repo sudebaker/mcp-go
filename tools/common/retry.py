@@ -14,18 +14,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_API_KEYS = {
-    "openrouter": "OPENROUTER_API_KEY",
-    "opencode": "OPENCODE_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "cohere": "COHERE_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-}
-
 
 def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
     """
@@ -43,23 +31,23 @@ def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
     """
     url_lower = llm_api_url.lower()
 
-    if "openrouter.ai" in url_lower:
+    if "openrouter.ai" in url_lower or "api.openrouter.ai" in url_lower:
         return "openai", os.environ.get("OPENROUTER_API_KEY")
-    elif "openai.com" in url_lower:
+    elif "api.openai.com" in url_lower:
         return "openai", os.environ.get("OPENAI_API_KEY")
-    elif "generativelanguage.googleapis.com" in url_lower or "gemini" in url_lower:
+    elif "generativelanguage.googleapis.com" in url_lower:
         return "openai", os.environ.get("GEMINI_API_KEY")
-    elif "api.anthropic.com" in url_lower:
+    elif "api.anthropic.com" in url_lower or "anthropic.com" in url_lower:
         return "openai", os.environ.get("ANTHROPIC_API_KEY")
-    elif "api.cohere.ai" in url_lower or "cohere" in url_lower:
+    elif "api.cohere.ai" in url_lower:
         return "openai", os.environ.get("COHERE_API_KEY")
-    elif "api.mistral.ai" in url_lower or "mistral" in url_lower:
+    elif "api.mistral.ai" in url_lower:
         return "openai", os.environ.get("MISTRAL_API_KEY")
-    elif "api.groq.com" in url_lower or "groq" in url_lower:
+    elif "api.groq.com" in url_lower:
         return "openai", os.environ.get("GROQ_API_KEY")
-    elif "api.deepseek.com" in url_lower or "deepseek" in url_lower:
+    elif "api.deepseek.com" in url_lower:
         return "openai", os.environ.get("DEEPSEEK_API_KEY")
-    elif "opencode" in url_lower:
+    elif "opencode.ai" in url_lower:
         return "openai", os.environ.get("OPENCODE_API_KEY")
 
     api_format = os.environ.get("LLM_API_FORMAT", "ollama").lower()
@@ -184,7 +172,8 @@ def call_llm_with_retry(
     headers = {"Content-Type": "application/json"}
 
     if api_format == "openai":
-        headers["Authorization"] = f"Bearer {api_key}" if api_key else ""
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {
             "model": llm_model,
@@ -229,7 +218,16 @@ def call_llm_with_retry(
         result = response.json()
 
         if api_format == "openai":
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if "choices" not in result or not result["choices"]:
+                logger.error(f"Unexpected OpenAI API response structure: {result.keys()}")
+                raise PermanentError("Invalid response format from LLM API")
+
+            choice = result["choices"][0]
+            if "message" not in choice or "content" not in choice["message"]:
+                logger.error(f"Missing 'message.content' in response: {choice.keys()}")
+                raise PermanentError("Invalid response format from LLM API")
+
+            return choice["message"]["content"]
         else:
             return result.get("response", "")
 

@@ -165,7 +165,10 @@ def download_file(url: str) -> io.BytesIO:
 
     try:
         with httpx.Client(timeout=60.0) as client:
-            response = client.get(url)
+            # CRITICAL: For S3 presigned URLs, do NOT follow redirects (breaks signature)
+            # Presigned URLs authenticate via query parameters (X-Amz-*) which are
+            # invalidated by redirect chains. Also avoid adding extra headers.
+            response = client.get(url, follow_redirects=False)
             response.raise_for_status()
             return io.BytesIO(response.content)
     except Exception as e:

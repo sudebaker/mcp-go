@@ -895,7 +895,7 @@ def main() -> None:
             "1. Write ONLY Python code, no explanations\n",
             "2. Use the variable 'df' for the DataFrame (it's already loaded)\n",
             "3. Use print() with markdown formatting — the sandbox captures stdout only\n",
-            "4. Use pandas (pd), numpy (np) and tabulate — they're already imported\n",
+            "4. Use pandas (pd) and numpy (np) — they're already imported. Use df.to_markdown(index=False) for tables (no need to import tabulate directly)\n",
             "5. Keep the code simple and efficient\n",
             "6. Use print(df.to_markdown()) to display DataFrames beautifully\n",
             "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
@@ -923,7 +923,7 @@ def main() -> None:
         prompt_parts.extend(
             [
                 "14. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
-                "15. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re, tabulate\n\n",
+                "15. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re. For markdown tables use df.to_markdown(index=False) directly\n\n",
                 "Python code (use print() with markdown for ALL output):\n```python\n",
             ]
         )

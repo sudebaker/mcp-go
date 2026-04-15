@@ -324,6 +324,34 @@ def load_data_from_buffer(buffer: BytesIO, filename: str) -> "pd.DataFrame":
         raise ValueError(f"Failed to parse file '{filename}': {str(e)}") from e
 
 
+def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
+    """
+    Load data from base64-encoded content.
+
+    Args:
+        content: Base64-encoded file content
+        filename: Original filename to determine file type
+
+    Returns:
+        pandas DataFrame with loaded data
+
+    Raises:
+        ValueError: If content is invalid base64 or file format is unsupported
+    """
+    if not PANDAS_AVAILABLE:
+        raise ImportError("pandas is not installed")
+
+    try:
+        import base64
+
+        content_bytes = base64.b64decode(content)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 content: {str(e)}") from e
+
+    buffer = BytesIO(content_bytes)
+    return load_data_from_buffer(buffer, filename)
+
+
 def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
     """
     Load data from Excel or CSV file using safe file operations.
@@ -722,35 +750,52 @@ def main() -> None:
                 )
                 return
 
-            # Download file from URL
+            # Try base64 content first (if present), then fall back to URL
+            file_content_base64 = data_file.get("content", "")
             file_url = data_file.get("url", "")
-            if not file_url:
-                write_response(
-                    {
-                        "success": False,
-                        "request_id": request_id,
-                        "error": {
-                            "code": "INVALID_INPUT",
-                            "message": "File URL not provided in __files__",
-                        },
-                    }
-                )
-                return
 
             try:
-                buffer = download_file_from_url(file_url, actual_filename)
-                df = load_data_from_buffer(buffer, actual_filename)
-                emit_chunk(
-                    "data_loaded",
-                    {"rows": df.shape[0], "columns": df.shape[1], "source": "url"},
-                )
+                if file_content_base64:
+                    # Load from base64 content
+                    emit_chunk("status", {"message": "Loading file from base64 content"})
+                    df = load_data_from_base64(file_content_base64, actual_filename)
+                    emit_chunk(
+                        "data_loaded",
+                        {
+                            "rows": df.shape[0],
+                            "columns": df.shape[1],
+                            "source": "base64_content",
+                        },
+                    )
+                elif file_url:
+                    # Download file from URL
+                    emit_chunk("status", {"message": "Downloading file from URL"})
+                    buffer = download_file_from_url(file_url, actual_filename)
+                    df = load_data_from_buffer(buffer, actual_filename)
+                    emit_chunk(
+                        "data_loaded",
+                        {"rows": df.shape[0], "columns": df.shape[1], "source": "url"},
+                    )
+                else:
+                    # Neither content nor URL provided
+                    write_response(
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            "error": {
+                                "code": "INVALID_INPUT",
+                                "message": "Neither 'content' (base64) nor 'url' provided in __files__",
+                            },
+                        }
+                    )
+                    return
             except Exception as e:
                 write_response(
                     {
                         "success": False,
                         "request_id": request_id,
                         "error": {
-                            "code": "FILE_DOWNLOAD_ERROR",
+                            "code": "FILE_LOAD_ERROR",
                             "message": str(e),
                         },
                     }

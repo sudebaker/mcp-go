@@ -60,6 +60,15 @@ except ImportError:
     HTTPX_AVAILABLE = False
     httpx = None  # type: ignore
 
+try:
+    from minio import Minio
+    from minio.error import S3Error
+
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+    S3Error = Exception  # type: ignore
+
 
 # Constants
 CHUNK_PREFIX = "__CHUNK__:"
@@ -74,6 +83,65 @@ SUPPORTED_FILE_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 _chunks_sent: list = []
 _chunk_callback: Optional[Callable[[dict], None]] = None
+
+
+def get_rustfs_s3_client() -> Optional[Minio]:
+    """Get S3 client for rustfs using environment credentials."""
+    if not MINIO_AVAILABLE:
+        return None
+
+    try:
+        endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+        access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY")
+        use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
+
+        if not endpoint or not access_key or not secret_key:
+            return None
+
+        return Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=use_ssl,
+        )
+    except Exception:
+        return None
+
+
+def is_rustfs_url(url: str) -> bool:
+    """Check if URL points to rustfs/S3 endpoint."""
+    rustfs_endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+    # Extract hostname from endpoint (e.g., "rustfs:9000" -> "rustfs")
+    rustfs_host = rustfs_endpoint.split(":")[0] if ":" in rustfs_endpoint else rustfs_endpoint
+
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+
+    return (
+        hostname == rustfs_host
+        or hostname.startswith("rustfs")
+        or rustfs_host in hostname
+    )
+
+
+def download_from_s3(url: str, client: Minio) -> BytesIO:
+    """Download file directly from S3 using minio client."""
+    parsed = urlparse(url)
+    # URL format: http://rustfs:9000/bucket/key
+    path_parts = parsed.path.lstrip("/").split("/", 1)
+
+    if len(path_parts) != 2:
+        raise ValueError(f"Invalid S3 URL format: {url}")
+
+    bucket = path_parts[0]
+    key = path_parts[1]
+
+    try:
+        response = client.get_object(bucket, key)
+        return BytesIO(response.read())
+    except S3Error as e:
+        raise Exception(f"S3 download failed: {e}") from e
 
 
 def set_chunk_callback(callback: Callable[[dict], None]):
@@ -165,10 +233,15 @@ def validate_request_input(
 
 def download_file_from_url(file_url: str, filename: str) -> BytesIO:
     """
-    Download file content from URL.
+    Download file content from URL or S3.
+
+    Supports:
+    - Presigned S3 URLs (via HTTP)
+    - Direct S3 access (for rustfs URLs with credentials)
+    - Regular HTTP URLs
 
     Args:
-        file_url: HTTP URL to download from
+        file_url: HTTP/S3 URL to download from
         filename: Original filename for error messages
 
     Returns:
@@ -177,6 +250,21 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
     Raises:
         Exception: If download fails
     """
+    # Check if this is a rustfs/S3 URL - use direct S3 client
+    if is_rustfs_url(file_url):
+        client = get_rustfs_s3_client()
+        if client:
+            emit_chunk("status", {"message": "Downloading file from S3 storage (direct)"})
+            try:
+                return download_from_s3(file_url, client)
+            except Exception as e:
+                # Fall through to HTTP download as fallback
+                logger.warning(
+                    "S3 direct download failed, falling back to HTTP",
+                    extra_data={"url": file_url, "error": str(e)},
+                )
+
+    # Fall back to HTTP download (for presigned URLs or regular HTTP)
     if not HTTPX_AVAILABLE:
         raise ImportError("httpx is not installed. Install with: pip install httpx")
 
@@ -184,9 +272,9 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
         raise ValueError(f"Access to internal URLs is not allowed: {file_url}")
 
     try:
-        # Use httpx to download file synchronously
+        # CRITICAL: For S3 presigned URLs, do NOT follow redirects
         with httpx.Client(timeout=60.0) as client:
-            response = client.get(file_url)
+            response = client.get(file_url, follow_redirects=False)
             response.raise_for_status()
             return BytesIO(response.content)
     except Exception as e:

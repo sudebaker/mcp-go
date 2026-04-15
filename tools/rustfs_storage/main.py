@@ -178,6 +178,11 @@ def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict
 
         stat = client.stat_object(bucket, key)
 
+        # Generate presigned URL for download (valid for 1 hour)
+        presigned_url = client.presigned_get_object(
+            bucket, key, expires=timedelta(seconds=3600)
+        )
+
         return {
             "success": True,
             "bucket": bucket,
@@ -185,6 +190,7 @@ def operation_upload(client: Minio, bucket: str, key: str, content: str) -> dict
             "size": stat.size,
             "content_type": stat.content_type,
             "etag": stat.etag,
+            "presigned_url": presigned_url,
         }
 
     except S3Error as e:
@@ -517,6 +523,7 @@ def main() -> None:
             response_text += f"**Bucket:** {result.get('bucket')}\n"
             response_text += f"**Key:** {result.get('key')}\n"
             response_text += f"**Size:** {result.get('size')} bytes\n"
+            response_text += f"**Download URL:** {result.get('presigned_url', 'N/A')[:80]}...\n"
 
         elif operation == "download":
             response_text += f"✅ Download URL generated\n"

@@ -366,7 +366,7 @@ input_data = None
 if "INPUT_PLACEHOLDER":
     try:
         csv_data = base64.b64decode("INPUT_PLACEHOLDER").decode()
-        input_data = pd.read_csv(StringIO(csv_data))
+        df = pd.read_csv(StringIO(csv_data))
     except Exception as e:
         emit_chunk("error", {"message": str(e)})
         emit_result(False, str(e))
@@ -410,7 +410,7 @@ restricted_globals = {
     "pd": pd,
     "plt": None,
     "np": None,
-    "input_data": input_data,
+    "df": df,
     "emit_chunk": emit_chunk,
     "emit_result": emit_result,
 }
@@ -688,7 +688,7 @@ if __name__ == "__main__":
                 "__builtins__": safe_builtins,
                 "pd": pd,
                 "np": np,
-                "input_data": df,
+                "df": df,
                 "emit_chunk": self.emit_chunk,
             }
 
@@ -724,7 +724,7 @@ if __name__ == "__main__":
                 "__builtins__": safe_builtins,
                 "pd": pd,
                 "np": np,
-                "input_data": df,
+                "df": df,
                 "emit_chunk": self.emit_chunk,
             }
 

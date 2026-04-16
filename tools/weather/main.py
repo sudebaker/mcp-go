@@ -95,6 +95,7 @@ def wmo_emoji(code: int) -> str:
 
 
 def format_date_es(iso_date: str) -> str:
+    """Convert ISO date to Spanish human-readable format."""
     DAYS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun",
                  "jul", "ago", "sep", "oct", "nov", "dic"]
@@ -107,6 +108,7 @@ def format_date_es(iso_date: str) -> str:
 
 
 def geocode_city(city_name: str) -> tuple[float, float, str] | None:
+    """Convert city name to coordinates using Open-Meteo Geocoding API."""
     params = {
         "name": city_name,
         "count": 1,
@@ -137,6 +139,7 @@ def geocode_city(city_name: str) -> tuple[float, float, str] | None:
 
 
 def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | None:
+    """Fetch weather forecast from Open-Meteo API for given coordinates."""
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -166,6 +169,7 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
 
 
 def wind_direction_es(degrees: float | None) -> str:
+    """Convert wind degrees to Spanish compass direction."""
     if degrees is None:
         return "N/D"
     directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
@@ -175,6 +179,7 @@ def wind_direction_es(degrees: float | None) -> str:
 
 
 def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int) -> str:
+    """Build comparative forecast markdown for all locations."""
     all_data: list[tuple[str, dict]] = []
     for name, lat, lon in locations:
         data = fetch_forecast(lat, lon, max_days)
@@ -226,13 +231,19 @@ def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int
 
 
 def read_request() -> dict:
+    """Read JSON request from stdin (MCP protocol)."""
     raw = sys.stdin.read()
     return json.loads(raw)
 
 
 def write_response(data: dict) -> None:
+    """Write JSON response to stdout (MCP protocol)."""
     print(json.dumps(data, ensure_ascii=False), flush=True)
 
+
+# ---------------------------------------------------------------------------
+# MCP stdio protocol
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     request_id = ""

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/transport"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/transport"
 
 	mark3 "github.com/mark3labs/mcp-go/server"
 

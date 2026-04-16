@@ -3,10 +3,10 @@ package tests
 import (
 	"testing"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/prompts"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/prompts"
 )
 
 func TestPromptRegistration(t *testing.T) {

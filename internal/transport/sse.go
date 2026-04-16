@@ -45,11 +45,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
 // MCPServer wraps the mcp-go Streamable HTTP server with additional functionality.

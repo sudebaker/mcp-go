@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/executor"
-	"github.com/amphora/mcp-go/internal/tracing"
-	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/executor"
+	"github.com/sudebaker/mcp-go/internal/tracing"
+	"github.com/sudebaker/mcp-go/internal/transport"
 )
 
 // TestExecutorBasic tests basic executor functionality

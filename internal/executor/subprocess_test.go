@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amphora/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/config"
 )
 
 func TestParseStreamingOutput(t *testing.T) {

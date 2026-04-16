@@ -59,8 +59,8 @@ import (
     "github.com/rs/zerolog/log"
     "gopkg.in/yaml.v3"
 
-    "github.com/amphora/mcp-go/internal/config"
-    mcptypes "github.com/amphora/mcp-go/internal/mcp"
+    "github.com/sudebaker/mcp-go/internal/config"
+    mcptypes "github.com/sudebaker/mcp-go/internal/mcp"
 )
 ```
 **Groups:** stdlib → external → internal

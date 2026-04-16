@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/transport"
 )
 
 func createTestMCPServer(port int, tools []config.ToolConfig, rateLimitRPS float64, rateLimitBurst int) *transport.MCPServer {

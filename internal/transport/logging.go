@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
 // responseWriter wraps http.ResponseWriter to capture status code

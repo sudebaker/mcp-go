@@ -31,11 +31,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	mcptypes "github.com/amphora/mcp-go/internal/mcp"
-	"github.com/amphora/mcp-go/internal/tracing"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/config"
+	mcptypes "github.com/sudebaker/mcp-go/internal/mcp"
+	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
 // Prefixes for streaming output parsing

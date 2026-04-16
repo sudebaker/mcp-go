@@ -17,6 +17,7 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.structured_logging import get_logger  # noqa: E402
+from common.content_sanitizer import sanitize_external_content
 from common.validators import is_internal_url  # noqa: E402
 
 
@@ -332,10 +333,11 @@ def main() -> None:
             data = html_content[:max_chars]
             response_text = f"**URL:** {url}\n\n**Title:** {title}\n\n**HTML:**\n{data}"
 
+        sanitized_text = sanitize_external_content(response_text)
         write_response({
             "success": True,
             "request_id": request_id,
-            "content": [{"type": "text", "text": response_text}],
+            "content": [{"type": "text", "text": sanitized_text}],
             "structured_content": {
                 "url": url,
                 "title": title,

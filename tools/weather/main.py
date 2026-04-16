@@ -2,20 +2,16 @@
 """
 Weather Forecast Tool — Open-Meteo backend.
 
-Fetches daily forecasts for configured locations using the Open-Meteo API
+Fetches daily forecasts for city names using Open-Meteo API
 (https://open-meteo.com). No API key required. Free for non-commercial use.
 
-Default locations:
-  - Valle de Manzanedo (Burgos): 42.8833, -3.5167
-  - Puentes Viejas (Madrid):     41.0167, -3.6167
-  - Madrid:                      40.4168, -3.7038
+Uses Open-Meteo Geocoding API to convert city names to coordinates.
 """
 
 import json
 import os
 import sys
-from datetime import date, datetime
-from pathlib import Path
+from datetime import date
 from typing import Any
 
 try:
@@ -32,16 +28,9 @@ except ImportError:
     def is_internal_url(url: str) -> bool:  # type: ignore[misc]
         return False
 
-# ---------------------------------------------------------------------------
-# Default locations: (name, latitude, longitude)
-# ---------------------------------------------------------------------------
-DEFAULT_LOCATIONS = [
-    ("Valle de Manzanedo (Burgos)", 42.8833, -3.5167),
-    ("Puentes Viejas (Madrid)",     41.0167, -3.6167),
-    ("Madrid",                      40.4168, -3.7038),
-]
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
-# Open-Meteo WMO weather code → Spanish description
 WMO_CODES: dict[int, str] = {
     0:  "Despejado",
     1:  "Principalmente despejado",
@@ -106,7 +95,6 @@ def wmo_emoji(code: int) -> str:
 
 
 def format_date_es(iso_date: str) -> str:
-    """Convert ISO date to Spanish human-readable format."""
     DAYS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun",
                  "jul", "ago", "sep", "oct", "nov", "dic"]
@@ -118,8 +106,37 @@ def format_date_es(iso_date: str) -> str:
         return iso_date
 
 
+def geocode_city(city_name: str) -> tuple[float, float, str] | None:
+    params = {
+        "name": city_name,
+        "count": 1,
+        "language": "es",
+        "format": "json",
+    }
+    url = f"{GEOCODING_URL}?{urllib.parse.urlencode(params)}"
+
+    if is_internal_url(url):
+        return None
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "mcp-weather/2.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            results = data.get("results")
+            if results and len(results) > 0:
+                loc = results[0]
+                display_name = loc.get("name", city_name)
+                if loc.get("admin1"):
+                    display_name = f"{display_name}, {loc['admin1']}"
+                if loc.get("country"):
+                    display_name = f"{display_name} ({loc['country']})"
+                return (loc["latitude"], loc["longitude"], display_name)
+            return None
+    except Exception:
+        return None
+
+
 def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | None:
-    """Fetch forecast from Open-Meteo API."""
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -135,9 +152,8 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
         "timezone": "Europe/Madrid",
         "forecast_days": max_days,
     }
-    url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
+    url = f"{FORECAST_URL}?{urllib.parse.urlencode(params)}"
 
-    # SSRF protection: block internal/private URLs
     if is_internal_url(url):
         return None
 
@@ -145,12 +161,11 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
         req = urllib.request.Request(url, headers={"User-Agent": "mcp-weather/2.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
-    except Exception as e:
+    except Exception:
         return None
 
 
 def wind_direction_es(degrees: float | None) -> str:
-    """Convert wind degrees to Spanish compass direction."""
     if degrees is None:
         return "N/D"
     directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
@@ -160,8 +175,6 @@ def wind_direction_es(degrees: float | None) -> str:
 
 
 def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int) -> str:
-    """Build comparative forecast markdown for all locations."""
-    # Fetch all locations
     all_data: list[tuple[str, dict]] = []
     for name, lat, lon in locations:
         data = fetch_forecast(lat, lon, max_days)
@@ -171,7 +184,6 @@ def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int
     if not all_data:
         return "❌ *No se pudo obtener el pronóstico. Comprueba la conexión.*"
 
-    # Get date list from first location
     dates = all_data[0][1].get("time", [])
     today = date.today().isoformat()
     future_dates = [d for d in dates if d >= today][:max_days]
@@ -213,10 +225,6 @@ def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# MCP stdio protocol
-# ---------------------------------------------------------------------------
-
 def read_request() -> dict:
     raw = sys.stdin.read()
     return json.loads(raw)
@@ -239,35 +247,69 @@ def main() -> None:
         if max_days > 7:
             max_days = 7
 
-        # Support custom locations via arguments
-        custom_locs = arguments.get("locations")
-        if custom_locs and isinstance(custom_locs, list):
-            locations = []
-            for loc in custom_locs:
-                if "name" not in loc or "lat" not in loc or "lon" not in loc:
-                    continue
-                lat = float(loc["lat"])
-                lon = float(loc["lon"])
-                # Validate geographic bounds
-                if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
-                    continue
-                locations.append((str(loc["name"])[:64], lat, lon))
-            if not locations:
-                locations = DEFAULT_LOCATIONS
-        else:
-            locations = DEFAULT_LOCATIONS
+        city_names = arguments.get("locations")
+        if not city_names or not isinstance(city_names, list):
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "MISSING_LOCATIONS",
+                    "message": "locations parameter is required. Provide array of city names (e.g., ['Madrid', 'Barcelona'])."
+                },
+            })
+            return
+
+        if len(city_names) == 0:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "EMPTY_LOCATIONS",
+                    "message": "At least one city name is required."
+                },
+            })
+            return
+
+        locations: list[tuple[str, float, float]] = []
+        not_found: list[str] = []
+
+        for city in city_names:
+            if not isinstance(city, str) or not city.strip():
+                continue
+            city = city.strip()[:100]
+            result = geocode_city(city)
+            if result:
+                lat, lon, display_name = result
+                locations.append((display_name, lat, lon))
+            else:
+                not_found.append(city)
+
+        if not locations:
+            write_response({
+                "success": False,
+                "request_id": request_id,
+                "error": {
+                    "code": "CITIES_NOT_FOUND",
+                    "message": f"Could not find any of the specified cities: {', '.join(not_found)}"
+                },
+            })
+            return
 
         output = build_forecast_text(locations, max_days)
+
+        structured = {
+            "source": "Open-Meteo",
+            "locations": [loc[0] for loc in locations],
+            "days_shown": max_days,
+        }
+        if not_found:
+            structured["not_found"] = not_found
 
         write_response({
             "success": True,
             "request_id": request_id,
             "content": [{"type": "text", "text": output}],
-            "structured_content": {
-                "source": "Open-Meteo",
-                "locations": [loc[0] for loc in locations],
-                "days_shown": max_days,
-            },
+            "structured_content": structured,
         })
 
     except json.JSONDecodeError:

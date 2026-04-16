@@ -49,3 +49,6 @@ worktrees/
 # Browser session files
 cookies.txt
 
+# OpenCode agent workspace
+.opencode/
+

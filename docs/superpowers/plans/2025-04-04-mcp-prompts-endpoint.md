@@ -128,7 +128,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/amphora/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
@@ -303,7 +303,7 @@ cd /home/hp/Proyectos/mcp-go && git add internal/prompts/prompts.go && git commi
 At line 16 (after other internal imports), add:
 
 ```go
-	"github.com/amphora/mcp-go/internal/prompts"
+	"github.com/sudebaker/mcp-go/internal/prompts"
 ```
 
 The imports section should have three groups:
@@ -522,8 +522,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/prompts"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/prompts"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"

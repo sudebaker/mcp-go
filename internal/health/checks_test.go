@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/config"
 )
 
 func TestHealthStatus(t *testing.T) {

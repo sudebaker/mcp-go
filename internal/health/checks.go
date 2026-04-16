@@ -8,10 +8,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/config"
 )
 
 type HealthStatus string

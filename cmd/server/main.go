@@ -10,15 +10,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/amphora/mcp-go/internal/config"
-	"github.com/amphora/mcp-go/internal/executor"
-	"github.com/amphora/mcp-go/internal/prompts"
-	"github.com/amphora/mcp-go/internal/tracing"
-	"github.com/amphora/mcp-go/internal/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/executor"
+	"github.com/sudebaker/mcp-go/internal/prompts"
+	"github.com/sudebaker/mcp-go/internal/tracing"
+	"github.com/sudebaker/mcp-go/internal/transport"
 )
 
 const (

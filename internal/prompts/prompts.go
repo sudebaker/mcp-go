@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/amphora/mcp-go/internal/config"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/config"
 )
 
 // RegisterPrompts registers all configured prompts with the MCP server.

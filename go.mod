@@ -1,4 +1,4 @@
-module github.com/amphora/mcp-go
+module github.com/sudebaker/mcp-go
 
 go 1.23.0
 

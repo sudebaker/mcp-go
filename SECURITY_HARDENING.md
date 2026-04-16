@@ -16,8 +16,9 @@ El servidor MCP-Go ha sido fortalecido contra las siguientes técnicas de hackin
 | **SSTI** | Server-Side Template Injection | ✅ Mitigado | `tools/pdf_reports/main.py:31-72` |
 | **ReDoS** | Regular Expression Denial of Service | ✅ Mitigado | `tools/config_auditor/main.py:81-130` |
 | **YAML Deserialization** | Arbitrary code execution via YAML | ✅ Seguro | `internal/config/config.go:84-91` |
+| **Prompt Injection** | Indirect prompt injection via web content | ✅ Mitigado | `tools/common/content_sanitizer.py` |
 
-**Test Coverage**: 22 security tests, all passing ✅
+**Test Coverage**: 31 security tests, all passing ✅
 
 ---
 
@@ -192,6 +193,73 @@ go test ./internal/config -v
 
 ---
 
+## 5. Prompt Injection Mitigation (Content Sanitization)
+
+### Vulnerability
+Web content scraped from external pages could contain prompt injection attacks designed to manipulate the AI orchestrator's behavior. Malicious web pages could include hidden instructions that attempt to override system prompts.
+
+### Implementation
+**Files**:
+- `tools/common/content_sanitizer.py` - Sanitization module
+- `tools/web_scraper/main.py` - Integration
+- `tools/browser_scraper/main.py` - Integration
+
+```python
+def sanitize_external_content(text: str) -> str:
+    """
+    Sanitize external web content to prevent prompt injection attacks.
+
+    1. Truncate to MAX_CONTENT_LENGTH (50000 chars)
+    2. Strip prompt injection patterns
+    3. Normalize whitespace
+    4. Wrap in untrusted content markers
+    """
+```
+
+### Protection
+- ✅ Strips English injection patterns (`ignore previous instructions`)
+- ✅ Strips Spanish injection patterns (`ignora tus instrucciones`)
+- ✅ Strips system delimiters (`<<SYS>>`, `[INST]`, `<|...|>`)
+- ✅ Strips role markers (`user:`, `assistant:`, `human:`, `ai:`)
+- ✅ Truncates content to 50,000 characters max
+- ✅ Normalizes excessive whitespace
+- ✅ Wraps all content in `[EXTERNAL_UNTRUSTED_CONTENT]` markers
+
+### Patterns Detected
+```
+ignore previous instructions
+ignora tus instrucciones
+you are now
+ahora eres
+<<SYS>>, <SYS>, <  system  >
+[INST]
+<|...|>
+```system
+user:, assistant:, human:, ai:
+```
+
+### Tests
+```bash
+cd /home/hp/Proyectos/mcp-go
+python -m pytest tests/tools/common/test_content_sanitizer.py -v
+# Result: 9 passed ✅
+```
+
+### Integration
+Both `web_scraper` and `browser_scraper` apply sanitization to all scraped content before returning responses. The sanitization is mandatory and always active - there is no option to disable it.
+
+### Output Format
+All scraped content is wrapped in untrusted content markers:
+```
+[EXTERNAL_UNTRUSTED_CONTENT]
+{contenido_sanitizado}
+[/EXTERNAL_UNTRUSTED_CONTENT]
+```
+
+This allows downstream systems to identify and handle external content appropriately.
+
+---
+
 ## Test Suite
 
 ### All Security Tests
@@ -204,8 +272,9 @@ python -m pytest tests/test_security_mitigations.py -v
 # ✅ 4 ReDoS tests
 # ✅ 2 SSTI tests
 # ✅ 1 YAML test
+# ✅ 9 Prompt Injection tests
 # ━━━━━━━━━━━━━━━━
-# ✅ 22 total tests passed
+# ✅ 31 total tests passed
 ```
 
 ### Existing Tests Still Pass
@@ -307,7 +376,8 @@ Use pattern for matching
 - [x] SSTI sandbox enabled
 - [x] ReDoS protection via caching
 - [x] YAML safe deserialization verified
-- [x] 22 security tests written and passing
+- [x] Prompt injection sanitization implemented
+- [x] 31 security tests written and passing
 - [x] No existing tests broken
 - [x] All changes documented
 

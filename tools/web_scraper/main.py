@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.validators import is_internal_url as _is_internal_url
 from common.structured_logging import get_logger
+from common.content_sanitizer import sanitize_external_content
 
 logger = get_logger(__name__, "web_scraper")
 
@@ -382,11 +383,12 @@ def main() -> None:
             data = None
             response_text = "Unknown extract type"
 
+        sanitized_text = sanitize_external_content(response_text)
         write_response(
             {
                 "success": True,
                 "request_id": request_id,
-                "content": [{"type": "text", "text": response_text}],
+                "content": [{"type": "text", "text": sanitized_text}],
                 "structured_content": {
                     "url": url,
                     "title": title,

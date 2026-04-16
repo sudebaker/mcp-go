@@ -58,7 +58,7 @@ Definidas en `configs/config.yaml`:
 - Analisis y generacion: `analyze_data`, `analyze_image`, `generate_report`
 - Knowledge base: `kb_ingest`, `kb_search`
 - Nuevas capacidades: `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier`
-- Utilidades externas: `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`
+- Utilidades externas: `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `server_status`, `transcribe`, `web_search`, `searxng_search`, `browser_scraper`
 
 ## Pruebas
 

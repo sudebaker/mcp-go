@@ -263,6 +263,131 @@ Classifies documents into categories.
 
 ---
 
+### weather_forecast
+
+Gets weather forecast for specified cities using Open-Meteo API. Automatically geocodes city names to coordinates.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| locations | array | Yes | Array of city names (e.g., ["Madrid", "Barcelona"]) |
+| max_days | integer | No | Number of forecast days 1-7 (default: 3) |
+
+---
+
+### web_scraper
+
+Extracts content from web pages. Returns page text, links, images, or raw HTML.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| url | string | Yes | URL to scrape (http:// or https://) |
+| selector | string | No | CSS selector to extract specific content |
+| extract_type | string | No | `text`, `html`, `links`, `images` (default: `text`) |
+
+---
+
+### server_status
+
+Returns server health report: CPU, RAM, disk usage, uptime, and running Docker containers.
+
+*No parameters required.*
+
+---
+
+### transcribe
+
+Transcribes audio files locally using Whisper AI. 100% on-premise, no data leaves the server.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| file_path | string | No | Absolute path to audio file on server |
+| audio_base64 | string | No | Base64-encoded audio (alternative to file_path) |
+| filename | string | No | Filename with extension when using audio_base64 |
+| language | string | No | Language code (es, en, fr...). Auto-detected if omitted. |
+
+---
+
+### web_search
+
+Searches the web using Brave Search API. Returns real web results with titles, URLs and descriptions.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| query | string | Yes | Search query |
+| count | integer | No | Number of results, max 20 (default: 10) |
+| country | string | No | Country code for results (default: ES) |
+| lang | string | No | Language for results (default: es) |
+
+---
+
+### searxng_search
+
+Searches the web using local self-hosted SearXNG instance. Private, unlimited, no API key.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| query | string | Yes | Search query |
+| count | integer | No | Number of results, max 20 (default: 10) |
+| language | string | No | Language/locale (e.g., es-ES, en-US) |
+| categories | string | No | Comma-separated: general, news, images, science, it, map |
+| time_range | string | No | Filter by: `day`, `week`, `month`, `year` |
+
+---
+
+### browser_scraper
+
+Scrapes JavaScript-heavy or Cloudflare-protected pages using headless browser.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| url | string | Yes | URL to scrape |
+| selector | string | No | CSS selector to wait for and extract |
+| extract_type | string | No | `text` or `html` (default: `text`) |
+| wait_ms | integer | No | MS to wait for JS rendering (default: 3000) |
+| max_chars | integer | No | Maximum characters to return (default: 5000) |
+
+---
+
+### rss_reader
+
+Reads RSS news feeds and returns latest headlines from multiple sources.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| limit | integer | No | Max items per feed (default: 10) |
+| feeds | array | No | Filter by feed names. If omitted, fetches all feeds. |
+| extract | string | No | `titles`, `content`, `full` (default: `titles`) |
+
+---
+
+### canvas_diagram
+
+Creates visual diagrams using Obsidian Canvas JSON format from text descriptions.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| description | string | Yes | Text description of the diagram |
+| layout | string | No | `horizontal`, `vertical`, `radial`, `auto` (default: `auto`) |
+| save_path | string | No | Optional custom path for .canvas file |
+
+---
+
+### rustfs_storage
+
+Interacts with RustFS/S3 storage for file operations.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| operation | string | Yes | `upload`, `download`, `list`, `search`, `delete`, `stat` |
+| bucket | string | No | S3 bucket name (default: openwebui) |
+| key | string | No | Object key (path) in bucket |
+| content | string | No | Base64-encoded content for upload |
+| prefix | string | No | Prefix for list/search operations |
+| max_keys | integer | No | Max items to return (default: 100) |
+| expiry | integer | No | URL expiry in seconds for download (default: 3600) |
+
+---
+
 ## Error Responses
 
 ### Tool Execution Error

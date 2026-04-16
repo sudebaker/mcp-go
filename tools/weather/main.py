@@ -9,10 +9,14 @@ Uses Open-Meteo Geocoding API to convert city names to coordinates.
 """
 
 import json
+import logging
 import os
 import sys
 from datetime import date
 from typing import Any
+
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 try:
     import urllib.request
@@ -135,6 +139,7 @@ def geocode_city(city_name: str) -> tuple[float, float, str] | None:
                 return (loc["latitude"], loc["longitude"], display_name)
             return None
     except Exception:
+        logger.error("Geocoding failed for city: %s", city_name)
         return None
 
 
@@ -152,7 +157,7 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
             "winddirection_10m_dominant",
             "uv_index_max",
         ]),
-        "timezone": "Europe/Madrid",
+        "timezone": "auto",
         "forecast_days": max_days,
     }
     url = f"{FORECAST_URL}?{urllib.parse.urlencode(params)}"

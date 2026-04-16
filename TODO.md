@@ -68,7 +68,35 @@ def validate_file_path(file_path: str, allowed_dir: str = "/data") -> None:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 ---
- 3. Gestión de Conexiones a Base de Datos con Pooling
+  3. Prompt Injection Mitigation (Sanitización de Contenido Web)
+  Estado: ✅ Completado (Abril 2026)
+  Archivos afectados: tools/web_scraper/main.py, tools/browser_scraper/main.py
+ Problema: Contenido web externo podría contener ataques de prompt injection diseñados para manipular el orquestador.
+ Implementación:
+ # tools/common/content_sanitizer.py
+ def sanitize_external_content(text: str) -> str:
+     """
+     Sanitiza contenido web externo para prevenir ataques de prompt injection.
+
+     1. Trunca a 50,000 caracteres máximo
+     2. Elimina patrones de inyección (EN/ES)
+     3. Normaliza whitespace excesivo
+     4. Envuelve en marcadores [EXTERNAL_UNTRUSTED_CONTENT]
+     """
+ Patrones detectados:
+ - English: "ignore previous instructions"
+ - Spanish: "ignora tus instrucciones"
+ - System: "<<SYS>>", "[INST]", "<|...|>", "```system"
+ - Roles: "user:", "assistant:", "human:", "ai:"
+ Archivos nuevos:
+ - tools/common/content_sanitizer.py       # Módulo de sanitización
+ - tests/tools/common/test_content_sanitizer.py  # 9 tests unitarios
+ Integración:
+ - web_scraper: sanitiza todo el contenido antes de write_response
+ - browser_scraper: sanitiza todo el contenido antes de write_response
+ Tests: 9 passed ✅
+---
+  4. Gestión de Conexiones a Base de Datos con Pooling
  Estado: ✅ Completado  
  Archivos afectados: tools/knowledge_base/main.py:55-57
 Problema: Se crea una conexión nueva por cada request (ineficiente y agota conexiones).
@@ -106,8 +134,8 @@ execution:
     DB_POOL_MIN: "2"
     DB_POOL_MAX: "10"
 ---
-🟡 ALTA Prioridad (Implementar en próximas 2 semanas)
- 4. Suite de Tests Completa
+ 🟡 ALTA Prioridad (Implementar en próximas 2 semanas)
+  5. Suite de Tests Completa
  Estado: ✅ Go tests completos (config, executor, transport, metrics, health)
  Archivos nuevos:
  - internal/config/config_test.go      # Config loading, env vars, defaults
@@ -118,7 +146,7 @@ execution:
  Cobertura Go: ~70%
  Pendiente: Python tests para tools
 ---
- 5. Métricas y Observabilidad con Prometheus
+   6. Métricas y Observabilidad con Prometheus
   Estado: ✅ Completado  
   Archivos nuevos:
   - internal/metrics/metrics.go      # Prometheus metrics definition
@@ -140,7 +168,7 @@ execution:
   - mcp_llm_request_duration_seconds (provider)
   - mcp_health_* (memory metrics)
 ---
-  6. Caching de Respuestas LLM con Redis
+   7. Caching de Respuestas LLM con Redis
   Estado: ✅ Completado  
   Objetivo: Reducir llamadas LLM para queries repetidas
  Archivos nuevos:
@@ -186,7 +214,7 @@ execution:
     REDIS_URL: "redis://redis:6379/0"
     LLM_CACHE_TTL: "3600"
 ---
-  7. Connection Pooling para LLM API
+   8. Connection Pooling para LLM API
   Estado: ✅ Completado  
   Objetivo: Reutilizar conexiones HTTP a Ollama
  Archivos nuevos:
@@ -223,14 +251,14 @@ func (c *LLMClient) Call(model string, prompt string) (string, error) {
 }
 ---
  🟢 MEDIA Prioridad (Implementar en 1-2 meses)
- 8. Refactorización: Biblioteca Común Python
+  9. Refactorización: Biblioteca Común Python
  Estado: Parcialmente completado - validators.py y retry.py creados
  Archivos nuevos:
  - tools/common/validators.py      # validate_file_path, validate_output_path
  - tools/common/retry.py           # call_llm_with_retry
  - tools/knowledge_base/db_pool.py # Connection pooling
 
- 8.1 Mejoras a tools/pdf_reports/main.py
+  9.1 Mejoras a tools/pdf_reports/main.py
  Estado: ✅ Completado
  - Fix imports (execute_values, SentenceTransformer)
  - Eliminar conn.commit() redundantes
@@ -239,7 +267,7 @@ func (c *LLMClient) Call(model string, prompt string) (string, error) {
  - Cache de Jinja2 Environment
  - Mejor manejo de errores con traceback
 
- 8.2 Correcciones a tools/knowledge_base/main.py
+  9.2 Correcciones a tools/knowledge_base/main.py
  Estado: ✅ Completado
  - Mover imports fuera de try/except (execute_values, SentenceTransformer)
  - Eliminar conn.commit() redundantes en ensure_schema()
@@ -300,8 +328,8 @@ def handle_tool_error(e: Exception, request_id: str) -> dict[str, Any]:
     if isinstance(e, ToolError):
         return write_error_dict(request_id, e.code, e.message, e.details)
     return write_error_dict(request_id, "EXECUTION_FAILED", str(e), traceback.format_exc())
----
- 9. Retry con Backoff Exponencial
+ ---
+  10. Retry con Backoff Exponencial
  Estado: ✅ Completado  
  Objetivo: Manejo robusto de fallos transitorios
 Implementación:
@@ -340,7 +368,7 @@ def call_llm_with_retry(llm_api_url: str, llm_model: str, prompt: str) -> str:
         raise
 # Instalar: pip install tenacity
 ---
- 10. Validación de Configuración al Inicio
+  11. Validación de Configuración al Inicio
  Estado: ✅ Completado  
  Objetivo: Fallar rápido con mensajes claros
 Implementación:
@@ -412,7 +440,7 @@ if err := config.Validate(cfg); err != nil {
     log.Fatal().Err(err).Msg("Configuration validation failed")
 }
 ---
- 11. Rate Limiting por Cliente
+  12. Rate Limiting por Cliente
   Estado: ✅ Completado  
   Objetivo: Proteger contra DoS
  Archivos nuevos:
@@ -480,7 +508,7 @@ server:
     requests_per_second: 10
     burst: 20
 ---
- 12. Logging Estructurado Python
+  13. Logging Estructurado Python
   Estado: ✅ Completado  
   Archivos nuevos:
   - tools/common/logging.py         # StructuredLogger class
@@ -491,8 +519,8 @@ server:
   - Decorador @timed_operation para logging automático de funciones
   - Compatible con sistemas de agregación de logs
 ---
-🔵 BAJA Prioridad (Mejoramiento Continuo)
-13. Sistema de Plugins para Herramientas
+ 🔵 BAJA Prioridad (Mejoramiento Continuo)
+14. Sistema de Plugins para Herramientas
 Estado: Herramientas estáticas en config.yaml  
 Objetivo: Carga dinámica de herramientas
 Implementación:
@@ -535,7 +563,7 @@ func LoadPlugins(dir string) ([]Tool, error) {
     return tools, nil
 }
 ---
-14. Documentación OpenAPI/Swagger
+ 15. Documentación OpenAPI/Swagger
 Estado: Endpoint /openapi.json parcial en sse.go  
 Objetivo: Documentación completa generada automáticamente
 Herramientas:
@@ -557,7 +585,7 @@ func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
     // ...
 }
 ---
-15. Migraciones de Base de Datos
+ 16. Migraciones de Base de Datos
 Estado: Schema creado manualmente en código  
 Objetivo: Versionado y rollback automático
 Implementación:
@@ -591,7 +619,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding
 ON kb_chunks USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 ---
-16. Linting Automático (golangci-lint)
+ 17. Linting Automático (golangci-lint)
 Estado: No configurado  
 Objetivo: Código consistente y seguro
 Archivo:
@@ -639,7 +667,7 @@ golangci-lint run
 # Fix automático
 golangci-lint run --fix
 ---
-17. CI/CD Pipeline con GitHub Actions
+ 18. CI/CD Pipeline con GitHub Actions
 Estado: No configurado  
 Objetivo: Tests automáticos en cada PR
 Archivo:
@@ -720,7 +748,7 @@ jobs:
       - name: Build image
         run: docker build -f deployments/Dockerfile -t mcp-go:test .
 ---
- 18. Health Checks Profundos
+  19. Health Checks Profundos
   Estado: ✅ Completado  
   Archivos nuevos:
   - internal/health/checks.go         # Checker implementation
@@ -734,7 +762,7 @@ jobs:
   - LLM endpoint reachability
   - GetHealthMetrics() export function
 ---
- 19. Optimización de Modelos Embeddings
+ 20. Optimización de Modelos Embeddings
   Estado: ✅ Completado  
   Objetivo: Cargar una vez y reutilizar
  Archivos nuevos:
@@ -768,7 +796,7 @@ def handle_search(request: dict, context: dict) -> dict:
     model = ModelCache.get_model()
     # ...
 ---
-20. Streaming de Respuestas y Tool Execution
+ 21. Streaming de Respuestas y Tool Execution
  Estado: ✅ Completado (con soporte para imágenes)
  Objetivo: UX más rápida con respuestas progresivas y archivos
  Archivos modificados:

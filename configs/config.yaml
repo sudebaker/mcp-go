@@ -40,7 +40,7 @@ execution:
     DB_POOL_MIN: "2"
     DB_POOL_MAX: "10"
     REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
-    LLM_CACHE_TTL: "3600"
+    LLM_CACHE_TTL: "604800"
     PYTHONUNBUFFERED: "1"
     WHISPER_URL: "${WHISPER_URL:-http://whisper:8000}"
     BRAVE_SEARCH_API_KEY: "${BRAVE_SEARCH_API_KEY:-}"

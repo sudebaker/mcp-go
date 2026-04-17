@@ -23,7 +23,7 @@ class CacheError(Exception):
 
 
 class LLMCache:
-    MAX_TTL = 86400  # 24 hours
+    MAX_TTL = 604800  # 7 days
     MIN_TTL = 60  # 1 minute
     ALLOWED_REDIS_HOSTS = {"localhost", "127.0.0.1", "::1"}
 

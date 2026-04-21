@@ -413,33 +413,6 @@ tools:
           description: "Optional language code (es, en, fr...). Auto-detected if omitted."
       required: []
 
-  # Web Search
-  - name: "web_search"
-    description: "Busca en la web usando Brave Search API. Retorna resultados reales con titles, URLs y descriptions. Usar para: información actual, URLs, news, prices, o cualquier búsqueda web real."
-    command: "python3"
-    args: ["/app/tools/web_search/main.py"]
-    timeout: "30s"
-    input_schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "Search query"
-        count:
-          type: integer
-          default: 10
-          description: "Number of results (max 20, default 10)"
-        country:
-          type: string
-          default: "ES"
-          description: "Country code for results (default ES for Spain)"
-        lang:
-          type: string
-          default: "es"
-          description: "Language for results (default es)"
-      required:
-        - query
-
   # SearXNG Search
   - name: "searxng_search"
     description: "Busca en la web usando servidor SearXNG local privado. Sin API key, sin límites, sin rastreo. Agrega resultados de Google, Bing, DuckDuckGo y Wikipedia. Filtros por categoría (general, news, images, science) y rango temporal."

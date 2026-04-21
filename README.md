@@ -54,6 +54,12 @@ Metodos MCP soportados: `initialize`, `ping`, `tools/list`, `tools/call`.
 
 Definidas en `configs/config.yaml`:
 
+> **Nota:** El fichero por defecto (`config.yaml`) tiene descripciones en **español**. Para usar descripciones en **inglés**, renombra `config-en.yaml` a `config.yaml`:
+> ```bash
+> mv configs/config-en.yaml configs/config.yaml
+> docker compose restart mcp-server
+> ```
+
 - Base: `echo`
 - Analisis y generacion: `analyze_data`, `analyze_image`, `generate_report`
 - Knowledge base: `kb_ingest`, `kb_search`

@@ -1,0 +1,831 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  name: "mcp-orchestrator"
+  # base_url: Public-facing URL for SSE clients to send messages (e.g., http://localhost:8080).
+  # Required for SSE transport (/sse, /message endpoints).
+  # In Docker, override via environment: BASE_URL=http://mcp-orchestrator:8080
+  # Examples:
+  #   Local dev:  http://localhost:8080
+  #   Docker:     http://mcp-orchestrator:8080
+  #   Production: https://mcp.example.com
+  base_url: "${BASE_URL:-http://localhost:8080}"
+  rate_limit_rps: 10
+  rate_limit_burst: 20
+  # allowed_origins: CORS origins allowed to access MCP endpoints (/mcp, /sse, /message).
+  # If omitted or empty, allows all origins (*).
+  # Use a list of specific origins for production to prevent DNS rebinding attacks:
+  # allowed_origins:
+  #   - "http://localhost:3000"
+  #   - "https://lobe-chat.mycompany.com"
+  #   - "https://another-client.example.com"
+
+execution:
+  default_timeout: "60s"
+  working_dir: "/data"
+  environment:
+    LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
+    LLM_MODEL: "${LLM_MODEL:-llama3}"
+    LLM_API_FORMAT: "${LLM_API_FORMAT:-ollama}"
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+    OPENCODE_API_KEY: "${OPENCODE_API_KEY:-}"
+    OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    COHERE_API_KEY: "${COHERE_API_KEY:-}"
+    MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
+    GROQ_API_KEY: "${GROQ_API_KEY:-}"
+    DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"
+    DB_POOL_MIN: "2"
+    DB_POOL_MAX: "10"
+    REDIS_URL: "${REDIS_URL:-redis://localhost:6379/0}"
+    LLM_CACHE_TTL: "604800"
+    PYTHONUNBUFFERED: "1"
+    WHISPER_URL: "${WHISPER_URL:-http://whisper:8000}"
+    BRAVE_SEARCH_API_KEY: "${BRAVE_SEARCH_API_KEY:-}"
+    RUSTFS_ENDPOINT: "${RUSTFS_ENDPOINT:-rustfs:9000}"
+    RUSTFS_ACCESS_KEY_ID: "${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}"
+    RUSTFS_SECRET_ACCESS_KEY: "${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}"
+    SSRF_ALLOWLIST: "${SSRF_ALLOWLIST:-rustfs}"
+    SEARXNG_URL: "http://searxng:8080"
+    BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
+    BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN:-}"
+
+tools:
+  # Echo tool for testing
+  - name: "echo"
+    description: "Simply repeats the exact text provided. Exclusively for debugging or explicit text repetition, NOT for memorizing or storing information."
+    command: "python3"
+    args: ["/app/tools/echo/main.py"]
+    timeout: "10s"
+    input_schema:
+      type: object
+      properties:
+        text:
+          type: string
+          description: "Text to echo back"
+      required:
+        - text
+
+  # PDF Report Generation
+  - name: "generate_report"
+    description: "Generate professional PDF reports with branding. Use when user asks: create report, generate PDF, export document, make summary. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Returns PDF base64 + download URL."
+    command: "python3"
+    args: ["/app/tools/pdf_reports/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        report_type:
+          type: string
+          enum: ["incident", "meeting", "audit", "executive_summary", "formal_report", "corporate_email", "llm_response"]
+          description: "Type of report. Use 'llm_response' for AI-generated markdown content, 'executive_summary' for business summaries, 'formal_report' for formal documents."
+        data:
+          type: object
+          description: "Report data object. For llm_response: {title, content (markdown), author, logo_url}. For others: see tool documentation."
+        output_path:
+          type: string
+          description: "Optional output path for the PDF file"
+      required:
+        - report_type
+        - data
+
+  # Data Analysis
+  - name: "analyze_data"
+    description: "Analyze Excel/CSV files with Python/Pandas. Use for: analyze file, process spreadsheet, calculate totals, generate charts, show trends, sales data, statistics. Returns: text, JSON, markdown tables or PNG chart images."
+    command: "python3"
+    args: ["/app/tools/data_analysis/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        file_url:
+          type: string
+          description: "HTTP URL to the data file (presigned S3 URL or direct download link). Supports .xlsx, .xls, .csv"
+        file_name:
+          type: string
+          description: "Original filename with extension (e.g., sales.xlsx) - required to determine file format"
+        question:
+          type: string
+          description: "What to do with the data: 'calculate total sales', 'average price by category', 'show top 10 products', 'create bar chart of monthly revenue'"
+        output_format:
+          type: string
+          enum: ["text", "json", "markdown", "png"]
+          default: "text"
+          description: "How to return results: 'text' (plain), 'json' (structured), 'markdown' (tables), 'png' (chart image)"
+        __files__:
+          type: array
+          description: "Alternative: attach files directly in OpenWebUI. The tool will download them automatically."
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              url:
+                type: string
+              name:
+                type: string
+              id:
+                type: string
+      required:
+        - question
+
+  # Vision/OCR
+  - name: "analyze_image"
+    description: "Analyze images: OCR, describe content, detect objects/people/text. Use for: read image, extract text, describe photo, scan document, extract invoice data. Supports: screenshots, photos, documents, diagrams."
+    command: "python3"
+    args: ["/app/tools/vision_ocr/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        image_path:
+          type: string
+          description: "URL or path to the image file. Supports JPEG, PNG, WebP, PDF pages"
+        task:
+          type: string
+          enum: ["ocr", "describe", "extract_entities", "answer"]
+          description: "Task type: 'ocr' (extract all text), 'describe' (natural language description), 'extract_entities' (detect specific items like names, dates, amounts), 'answer' (answer a specific question about the image)"
+        question:
+          type: string
+          description: "Specific question for 'answer' task, or what to extract for 'extract_entities'. Example: 'What product is shown?' or 'Extract all dates and amounts'"
+      required:
+        - image_path
+        - task
+
+  # Knowledge Base - Ingest
+  - name: "kb_ingest"
+    description: "Store and memorize text content for future retrieval. Use for: memorize, save information, remember knowledge, learn about a topic. Stores content semantically for search."
+    command: "python3"
+    args: ["/app/tools/knowledge_base/main.py", "ingest"]
+    timeout: "300s"
+    input_schema:
+      type: object
+      properties:
+        content:
+          type: string
+          description: "The text content to memorize and store in the knowledge base."
+        collection:
+          type: string
+          default: "default"
+          description: "Collection name for organizing memorized content."
+        metadata:
+          type: object
+          description: "Additional metadata to associate with the content (e.g., source, topic, timestamp)."
+      required:
+        - content
+
+  # Knowledge Base - Search
+  - name: "kb_search"
+    description: "Search previously memorized information. Use for: recall, retrieve, search, what do you know about something, what did you tell me. Searches with semantic similarity."
+    command: "python3"
+    args: ["/app/tools/knowledge_base/main.py", "search"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        collection:
+          type: string
+          default: "default"
+          description: "Collection to search in"
+        top_k:
+          type: integer
+          default: 5
+          description: "Number of results to return"
+        search_type:
+          type: string
+          enum: ["semantic", "keyword", "hybrid"]
+          default: "hybrid"
+          description: "Type of search to perform"
+      required:
+        - query
+
+  # Batch Summarize
+  - name: "batch_summarize"
+    description: "Summarize multiple documents at once. Create batch summaries, generate master summary of several files, extract key points. Input: __files__ (array), summary_type (individual/master/both), focus, max_length (default 500 chars). Output: summaries array + optional master summary."
+    command: "python3"
+    args: ["/app/tools/batch_summarize/main.py"]
+    timeout: "300s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Files to summarize"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        summary_type:
+          type: string
+          enum: ["individual", "master", "both"]
+          default: "both"
+          description: "Type of summary to generate"
+        focus:
+          type: string
+          description: "Optional focus area for summaries"
+        max_length:
+          type: integer
+          default: 500
+          description: "Maximum length of summary in characters"
+      required:
+        - __files__
+
+  # Regulation Diff
+  - name: "regulation_diff"
+    description: "Compare two versions of a document or regulation. Show differences between old and new version, track changes in legal documents, analyze revisions. Input: __files__ (exactly 2: [0]=old, [1]=new), focus, output_format (markdown/structured). Output: unified diff + LLM analysis + change counts."
+    command: "python3"
+    args: ["/app/tools/regulation_diff/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          minItems: 2
+          maxItems: 2
+          description: "Two files: index 0 = old version, index 1 = new version"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        focus:
+          type: string
+          description: "Optional focus area for analysis"
+        output_format:
+          type: string
+          enum: ["markdown", "structured"]
+          default: "markdown"
+          description: "Output format for analysis"
+      required:
+        - __files__
+
+  # Config Auditor
+  - name: "config_auditor"
+    description: "Audit configuration files for security issues. Detect hardcoded secrets, dangerous port configurations, debug mode, empty required fields. Supports: YAML, JSON, TOML, INI, ENV. Rules: secrets, empty_required, dangerous_ports, debug_mode, hardcoded_ips. Output: findings array + security score (0-100)."
+    command: "python3"
+    args: ["/app/tools/config_auditor/main.py"]
+    timeout: "120s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Configuration files to audit"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        rules:
+          type: array
+          items:
+            type: string
+            enum: ["secrets", "empty_required", "dangerous_ports", "debug_mode", "hardcoded_ips"]
+          description: "Rules to apply (default: all)"
+        severity_filter:
+          type: string
+          enum: ["all", "critical", "high", "medium"]
+          default: "all"
+          description: "Filter findings by severity"
+      required:
+        - __files__
+
+  # Document Classifier
+  - name: "document_classifier"
+    description: "Classify documents into categories, identify document type (contract, invoice, report, regulation, email, etc.). Detects language automatically. Default categories: contract, invoice, report, regulation, technical_manual, meeting_minutes, email, form, other. Input: __files__, categories (optional), language (auto/es/en). Output: classification + confidence + justification + keywords."
+    command: "python3"
+    args: ["/app/tools/document_classifier/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        __files__:
+          type: array
+          description: "Documents to classify"
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              name:
+                type: string
+        categories:
+          type: array
+          items:
+            type: string
+          description: "Custom categories (default: predefined list)"
+        language:
+          type: string
+          enum: ["auto", "es", "en"]
+          default: "auto"
+          description: "Document language detection"
+      required:
+        - __files__
+
+  # Weather Forecast
+  - name: "weather_forecast"
+    description: "Get comparative weather forecast for cities using Open-Meteo API. Shows temperature, sky state, precipitation, wind and UV index. Automatically geocodes city names."
+    command: "python3"
+    args: ["/app/tools/weather/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      required:
+        - locations
+      properties:
+        locations:
+          type: array
+          description: "Array of city names (e.g., ['Madrid', 'Barcelona', 'Valencia'])"
+          items:
+            type: string
+        max_days:
+          type: integer
+          default: 3
+          description: "Number of forecast days (1-7, default 3)"
+
+  # Web Scraper
+  - name: "web_scraper"
+    description: "Extract content from web pages. Scraping, get page text, find links and images. Use for: extract text from website, find all links on a page."
+    command: "python3"
+    args: ["/app/tools/web_scraper/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "URL to scrape (must start with http:// or https://)"
+        selector:
+          type: string
+          description: "Optional CSS selector to extract specific content"
+        extract_type:
+          type: string
+          enum: ["text", "html", "links", "images"]
+          default: "text"
+          description: "What to extract: text (default), html, links, images"
+      required:
+        - url
+
+  # Server Status
+  - name: "server_status"
+    description: "Server status report: CPU, RAM, disk space, uptime, load average and active Docker containers."
+    command: "python3"
+    args: ["/app/tools/server_status/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties: {}
+      required: []
+
+  # Transcribe
+  - name: "transcribe"
+    description: "Transcribe audio files locally with Whisper AI. 100% on-premise, no cloud, no data leaves the server. Supports mp3, wav, ogg, m4a, webm, flac."
+    command: "python3"
+    args: ["/app/tools/transcribe/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        file_path:
+          type: string
+          description: "Absolute path to the audio file on the server (e.g. /data/recording.mp3)"
+        audio_base64:
+          type: string
+          description: "Base64-encoded audio content (alternative to file_path)"
+        filename:
+          type: string
+          description: "Filename with extension when using audio_base64 (e.g. recording.ogg)"
+        language:
+          type: string
+          description: "Optional language code (es, en, fr...). Auto-detected if omitted."
+      required: []
+
+  # Web Search
+  - name: "web_search"
+    description: "Search the web using Brave Search API. Returns real results with titles, URLs and descriptions. Use for: current information, URLs, news, prices, or any real web search."
+    command: "python3"
+    args: ["/app/tools/web_search/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        count:
+          type: integer
+          default: 10
+          description: "Number of results (max 20, default 10)"
+        country:
+          type: string
+          default: "ES"
+          description: "Country code for results (default ES for Spain)"
+        lang:
+          type: string
+          default: "es"
+          description: "Language for results (default es)"
+      required:
+        - query
+
+  # SearXNG Search
+  - name: "searxng_search"
+    description: "Search the web using local private SearXNG server. No API key, no limits, no tracking. Aggregates results from Google, Bing, DuckDuckGo and Wikipedia. Filters by category (general, news, images, science) and time range."
+    command: "python3"
+    args: ["/app/tools/searxng_search/main.py"]
+    timeout: "30s"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "Search query"
+        count:
+          type: integer
+          default: 10
+          description: "Number of results (max 20, default 10)"
+        language:
+          type: string
+          default: "es-ES"
+          description: "Language/locale for results (e.g. es-ES, en-US)"
+        categories:
+          type: string
+          description: "Comma-separated categories: general, news, images, science, it, map (default: general)"
+        time_range:
+          type: string
+          enum: ["day", "week", "month", "year"]
+          description: "Filter results by time range (optional)"
+      required:
+        - query
+
+  # Browser Scraper
+  - name: "browser_scraper"
+    description: "Extract content from pages with heavy JS or protected by Cloudflare using headless browser. Use when web_scraper fails or returns empty content. Examples: Milanuncios, Wallapop, portals with anti-bot protection."
+    command: "python3"
+    args: ["/app/tools/browser_scraper/main.py"]
+    timeout: "90s"
+    environment:
+      BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
+      BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN}"
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "URL to scrape (must start with http:// or https://)"
+        selector:
+          type: string
+          description: "Optional CSS selector to wait for and extract specific content"
+        extract_type:
+          type: string
+          enum: ["text", "html"]
+          default: "text"
+          description: "What to extract: text (default) or raw html"
+        wait_ms:
+          type: integer
+          default: 3000
+          description: "Milliseconds to wait for JS rendering (default 3000)"
+        max_chars:
+          type: integer
+          default: 5000
+          description: "Maximum characters to return (default 5000)"
+      required:
+        - url
+
+  # RSS Reader
+  - name: "rss_reader"
+    description: "Read RSS news feeds. Get latest headlines from multiple sources. Returns items with title, link, date and source. Useful for: latest news, what's happening, news feed, headlines."
+    command: "python3"
+    args: ["/app/tools/rss_reader/main.py"]
+    timeout: "180s"
+    input_schema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          default: 10
+          description: "Maximum number of items to return per feed"
+        feeds:
+          type: array
+          items:
+            type: string
+          description: "Optional: filter by feed names (e.g. ['TechCrunch', 'BBC News']). If omitted, fetches all feeds."
+        extract:
+          type: string
+          enum: ["titles", "content", "full"]
+          default: "titles"
+          description: "What to extract: titles (default), content (summaries), full (full content if available)"
+
+  # Canvas Diagram Generator
+  - name: "canvas_diagram"
+    description: "Create visual diagrams using Obsidian Canvas JSON format. Generate flowcharts, mind maps, process diagrams. Output: .canvas file for Obsidian."
+    command: "python3"
+    args: ["/app/tools/canvas_diagram/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        description:
+          type: string
+          description: "Text description or DSL of the diagram to create. E.g., 'Usuario -> Verificar Email -> Login -> Dashboard'"
+        layout:
+          type: string
+          enum: ["horizontal", "vertical", "radial", "auto"]
+          default: "auto"
+          description: "Layout direction: horizontal, vertical, radial, or auto (automatic selection)"
+        save_path:
+          type: string
+          description: "Optional custom path to save the .canvas file"
+      required:
+        - description
+
+  # RustFS/S3 Storage
+  - name: "rustfs_storage"
+    description: "Interact with RustFS/S3 storage. Upload, download, list, search, delete files and get object metadata."
+    command: "python3"
+    args: ["/app/tools/rustfs_storage/main.py"]
+    timeout: "60s"
+    input_schema:
+      type: object
+      properties:
+        operation:
+          type: string
+          enum: [upload, download, list, search, delete, stat]
+          description: "Operation to perform"
+        bucket:
+          type: string
+          default: "openwebui"
+          description: "S3 bucket name"
+        key:
+          type: string
+          description: "Object key (path) in the bucket"
+        content:
+          type: string
+          description: "Base64-encoded content for upload operation"
+        prefix:
+          type: string
+          description: "Prefix for list/search operations"
+        max_keys:
+          type: integer
+          default: 100
+          description: "Maximum number of items to return"
+        expiry:
+          type: integer
+          default: 3600
+          description: "URL expiry time in seconds for download"
+      required:
+        - operation
+
+# Prompts: Template messages available via MCP prompts/list and prompts/get
+# Clients (like Claude with MCP support) can discover and invoke these prompts
+# Arguments are interpolated into {{argument}} placeholders in message templates
+prompts:
+  - name: "code_review"
+    description: "Review code for quality, best practices, and potential issues"
+    arguments:
+      - name: "code"
+        description: "The code to review"
+        required: true
+      - name: "language"
+        description: "Programming language (e.g., Python, Go, JavaScript)"
+        required: false
+    messages:
+      - role: "user"
+        content: |
+          Please review the following {{language}} code for quality, best practices, and potential issues:
+          
+          ```{{language}}
+          {{code}}
+          ```
+          
+          Provide constructive feedback on:
+          - Code clarity and readability
+          - Performance considerations
+          - Security issues
+          - Best practices for the language
+  
+  - name: "explain_error"
+    description: "Explain an error message in simple, non-technical terms"
+    arguments:
+      - name: "error"
+        description: "The error message to explain"
+        required: true
+    messages:
+      - role: "user"
+        content: |
+          Please explain the following error message in simple, non-technical terms that a developer could understand:
+          
+          ```
+          {{error}}
+          ```
+          
+          Also suggest possible causes and how to fix it.
+  
+  - name: "write_tests"
+    description: "Generate test cases for code"
+    arguments:
+      - name: "code"
+        description: "The code to generate tests for"
+        required: true
+      - name: "language"
+        description: "Programming language"
+        required: false
+    messages:
+      - role: "user"
+        content: |
+          Generate comprehensive unit tests for the following {{language}} code:
+          
+          ```{{language}}
+          {{code}}
+          ```
+          
+          Include:
+          - Happy path tests
+          - Edge case tests
+          - Error handling tests
+          - Tests using the testing framework standard for {{language}}
+
+  - name: "analyze_document"
+    description: "Analyze PDF/image documents for entities, source type, and summary"
+    arguments:
+      - name: "file_url"
+        description: "URL or file path to the document (PDF, image, or mixed)"
+        required: true
+      - name: "analysis_type"
+        description: "Type of analysis: entities (extract names, dates, amounts), summary (key points), or full (all)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an expert document analyzer with deep knowledge of OCR, entity extraction, and document classification."
+      - role: "user"
+        content: |
+          Please analyze the document at {{file_url}}.
+          
+          Focus on {{analysis_type}} analysis:
+          - Extract named entities (people, companies, dates, amounts, locations)
+          - Identify document source type (invoice, contract, report, email, etc.)
+          - Provide a concise summary of key points
+          - Highlight any critical information
+
+  - name: "investigate_entity"
+    description: "Research a person or company: cross-reference knowledge base and build timeline"
+    arguments:
+      - name: "entity_name"
+        description: "Name of the person or company to investigate"
+        required: true
+      - name: "entity_type"
+        description: "Type: person, company, organization"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an investigative researcher with expertise in OSINT (Open Source Intelligence) and knowledge base cross-referencing."
+      - role: "user"
+        content: |
+          Please investigate {{entity_name}} (type: {{entity_type}}).
+          
+          For this entity, please:
+          1. Search the knowledge base for any related information
+          2. Create a chronological timeline of key events and dates
+          3. Identify connections to other entities (people, companies, organizations)
+          4. Summarize any relevant findings or patterns
+          5. Flag any anomalies or points of interest
+
+  - name: "generate_report"
+    description: "Generate formal PDF reports from structured data"
+    arguments:
+      - name: "report_type"
+        description: "Type: incident, meeting, audit, executive_summary, formal_report, or custom"
+        required: true
+      - name: "data_summary"
+        description: "Brief summary of what the report should contain"
+        required: true
+    messages:
+      - role: "system"
+        content: "You are a professional report writer with expertise in corporate documentation, compliance, and formal communications."
+      - role: "user"
+        content: |
+          Please prepare a {{report_type}} report with the following content:
+          
+          {{data_summary}}
+          
+          The report should be:
+          - Professional and formally structured
+          - Suitable for executive/stakeholder review
+          - Include appropriate sections (executive summary, findings, recommendations)
+          - Use company branding if available
+          - Export as PDF for distribution
+
+  - name: "summarize_inbox"
+    description: "Analyze email inbox for patterns, anomalies, and key metrics"
+    arguments:
+      - name: "inbox_source"
+        description: "Email inbox identifier or account to analyze"
+        required: true
+      - name: "time_range"
+        description: "Time range: today, week, month, or custom dates"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are an email analytics expert with expertise in pattern recognition, sentiment analysis, and communication trends."
+      - role: "user"
+        content: |
+          Please analyze the {{inbox_source}} inbox for the {{time_range}} period.
+          
+          Provide insights on:
+          1. Volume metrics (total emails, daily average, busiest days)
+          2. Communication patterns (frequent senders, recipients, topics)
+          3. Sentiment analysis (positive, neutral, negative tones)
+          4. Anomalies or unusual activity
+          5. Key themes and discussion topics
+          6. Action items or follow-ups needed
+
+  - name: "forecast"
+    description: "Get weather forecasts ready to use"
+    arguments:
+      - name: "location"
+        description: "Geographic location (city, coordinates, or region)"
+        required: true
+      - name: "days"
+        description: "Number of forecast days: 1-7 (default 3)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a weather specialist with expertise in meteorological data interpretation and forecast analysis."
+      - role: "user"
+        content: |
+          Please provide a weather forecast for {{location}} for the next {{days}} days.
+          
+          Include:
+          - Temperature (min/max)
+          - Sky conditions (clear, cloudy, rainy, etc.)
+          - Precipitation probability
+          - Wind speed and direction
+          - UV index
+          - Any weather alerts or anomalies
+          - Recommendations for activities/clothing
+
+  - name: "compare_documents"
+    description: "Compare two document versions for semantic differences and changes"
+    arguments:
+      - name: "old_version"
+        description: "URL or path to the original/old document version"
+        required: true
+      - name: "new_version"
+        description: "URL or path to the updated/new document version"
+        required: true
+    messages:
+      - role: "system"
+        content: "You are a document comparison expert with expertise in regulatory analysis, change tracking, and impact assessment."
+      - role: "user"
+        content: |
+          Please perform a comprehensive comparison between these two document versions:
+          
+          Old version: {{old_version}}
+          New version: {{new_version}}
+          
+          Provide:
+          1. Unified diff view of changes
+          2. Semantic analysis of what changed (not just text diffs)
+          3. Impact assessment of the changes
+          4. Sections added, removed, or significantly modified
+          5. Change summary with key modifications highlighted
+          6. Recommendations or concerns about the changes
+
+  - name: "search_knowledge"
+    description: "Search the knowledge base with hybrid search (semantic + keyword)"
+    arguments:
+      - name: "query"
+        description: "Search query or topic to find"
+        required: true
+      - name: "search_type"
+        description: "Search method: semantic (meaning), keyword (text match), or hybrid (both)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a knowledge retrieval specialist with expertise in information synthesis and context understanding."
+      - role: "user"
+        content: |
+          Please search the knowledge base for: {{query}}
+          
+          Using {{search_type}} search:
+          1. Find all relevant documents and information
+          2. Provide results in order of relevance
+          3. Include context around each result
+          4. Highlight key connections between results
+          5. Synthesize findings into a coherent summary
+          6. Suggest related topics or follow-up searches
+
+
+

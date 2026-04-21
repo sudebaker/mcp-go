@@ -55,7 +55,7 @@ execution:
 tools:
   # Echo tool for testing
   - name: "echo"
-    description: "Simply repeats the exact text provided. Exclusively for debugging or explicit text repetition, NOT for memorizing or storing information."
+    description: "Repeats exact text. Only for debugging or explicit repetition, NOT for memorizing."
     command: "python3"
     args: ["/app/tools/echo/main.py"]
     timeout: "10s"
@@ -70,7 +70,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Generate professional PDF reports with branding. Use when user asks: create report, generate PDF, export document, make summary. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Returns PDF base64 + download URL."
+    description: "Generate professional PDFs. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Returns PDF base64 + download URL."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"
@@ -93,7 +93,7 @@ tools:
 
   # Data Analysis
   - name: "analyze_data"
-    description: "Analyze Excel/CSV files with Python/Pandas. Use for: analyze file, process spreadsheet, calculate totals, generate charts, show trends, sales data, statistics. Returns: text, JSON, markdown tables or PNG chart images."
+    description: "Analyze Excel/CSV files with Pandas. Returns: text, JSON, markdown tables or PNG charts."
     command: "python3"
     args: ["/app/tools/data_analysis/main.py"]
     timeout: "180s"
@@ -133,7 +133,7 @@ tools:
 
   # Vision/OCR
   - name: "analyze_image"
-    description: "Analyze images: OCR, describe content, detect objects/people/text. Use for: read image, extract text, describe photo, scan document, extract invoice data. Supports: screenshots, photos, documents, diagrams."
+    description: "OCR and image analysis. Tasks: ocr, describe, extract_entities, answer. Supports JPEG, PNG, WebP, PDF."
     command: "python3"
     args: ["/app/tools/vision_ocr/main.py"]
     timeout: "120s"
@@ -156,7 +156,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Store and memorize text content for future retrieval. Use for: memorize, save information, remember knowledge, learn about a topic. Stores content semantically for search."
+    description: "Store text in knowledge base for future semantic retrieval."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -178,7 +178,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Search previously memorized information. Use for: recall, retrieve, search, what do you know about something, what did you tell me. Searches with semantic similarity."
+    description: "Search knowledge base with semantic similarity."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"
@@ -206,7 +206,7 @@ tools:
 
   # Batch Summarize
   - name: "batch_summarize"
-    description: "Summarize multiple documents at once. Create batch summaries, generate master summary of several files, extract key points. Input: __files__ (array), summary_type (individual/master/both), focus, max_length (default 500 chars). Output: summaries array + optional master summary."
+    description: "Summarize multiple documents. Input: __files__, summary_type (individual/master/both). Output: summaries + optional master summary."
     command: "python3"
     args: ["/app/tools/batch_summarize/main.py"]
     timeout: "300s"
@@ -240,7 +240,7 @@ tools:
 
   # Regulation Diff
   - name: "regulation_diff"
-    description: "Compare two versions of a document or regulation. Show differences between old and new version, track changes in legal documents, analyze revisions. Input: __files__ (exactly 2: [0]=old, [1]=new), focus, output_format (markdown/structured). Output: unified diff + LLM analysis + change counts."
+    description: "Compare two document/regulation versions. Input: __files__ (2: [0]=old, [1]=new). Output: unified diff + analysis + change counts."
     command: "python3"
     args: ["/app/tools/regulation_diff/main.py"]
     timeout: "180s"
@@ -272,7 +272,7 @@ tools:
 
   # Config Auditor
   - name: "config_auditor"
-    description: "Audit configuration files for security issues. Detect hardcoded secrets, dangerous port configurations, debug mode, empty required fields. Supports: YAML, JSON, TOML, INI, ENV. Rules: secrets, empty_required, dangerous_ports, debug_mode, hardcoded_ips. Output: findings array + security score (0-100)."
+    description: "Audit config files for hardcoded secrets, dangerous ports, debug mode. Supports YAML, JSON, TOML, INI, ENV. Output: findings + security score (0-100)."
     command: "python3"
     args: ["/app/tools/config_auditor/main.py"]
     timeout: "120s"
@@ -305,7 +305,7 @@ tools:
 
   # Document Classifier
   - name: "document_classifier"
-    description: "Classify documents into categories, identify document type (contract, invoice, report, regulation, email, etc.). Detects language automatically. Default categories: contract, invoice, report, regulation, technical_manual, meeting_minutes, email, form, other. Input: __files__, categories (optional), language (auto/es/en). Output: classification + confidence + justification + keywords."
+    description: "Classify documents (contract, invoice, report, regulation, etc.). Auto-detects language. Output: classification + confidence + keywords."
     command: "python3"
     args: ["/app/tools/document_classifier/main.py"]
     timeout: "180s"
@@ -337,7 +337,7 @@ tools:
 
   # Weather Forecast
   - name: "weather_forecast"
-    description: "Get comparative weather forecast for cities using Open-Meteo API. Shows temperature, sky state, precipitation, wind and UV index. Automatically geocodes city names."
+    description: "Weather forecast by city (Open-Meteo). Temperature, rain, wind, UV. Auto-geocodes city names."
     command: "python3"
     args: ["/app/tools/weather/main.py"]
     timeout: "30s"
@@ -358,7 +358,7 @@ tools:
 
   # Web Scraper
   - name: "web_scraper"
-    description: "Extract content from web pages. Scraping, get page text, find links and images. Use for: extract text from website, find all links on a page."
+    description: "Extract text, links or images from web pages. Optional CSS selector support."
     command: "python3"
     args: ["/app/tools/web_scraper/main.py"]
     timeout: "60s"
@@ -381,7 +381,7 @@ tools:
 
   # Server Status
   - name: "server_status"
-    description: "Server status report: CPU, RAM, disk space, uptime, load average and active Docker containers."
+    description: "Server status: CPU, RAM, disk, uptime and Docker containers."
     command: "python3"
     args: ["/app/tools/server_status/main.py"]
     timeout: "30s"
@@ -392,7 +392,7 @@ tools:
 
   # Transcribe
   - name: "transcribe"
-    description: "Transcribe audio files locally with Whisper AI. 100% on-premise, no cloud, no data leaves the server. Supports mp3, wav, ogg, m4a, webm, flac."
+    description: "Transcribe audio on-premise with Whisper AI. Supports mp3, wav, ogg, m4a, webm, flac."
     command: "python3"
     args: ["/app/tools/transcribe/main.py"]
     timeout: "180s"
@@ -415,7 +415,7 @@ tools:
 
   # Web Search
   - name: "web_search"
-    description: "Search the web using Brave Search API. Returns real results with titles, URLs and descriptions. Use for: current information, URLs, news, prices, or any real web search."
+    description: "Web search via Brave Search API. Returns titles, URLs and descriptions."
     command: "python3"
     args: ["/app/tools/web_search/main.py"]
     timeout: "30s"
@@ -442,7 +442,7 @@ tools:
 
   # SearXNG Search
   - name: "searxng_search"
-    description: "Search the web using local private SearXNG server. No API key, no limits, no tracking. Aggregates results from Google, Bing, DuckDuckGo and Wikipedia. Filters by category (general, news, images, science) and time range."
+    description: "Web search via local private SearXNG. No API key, no tracking. Aggregates Google, Bing, DDG and Wikipedia."
     command: "python3"
     args: ["/app/tools/searxng_search/main.py"]
     timeout: "30s"
@@ -472,7 +472,7 @@ tools:
 
   # Browser Scraper
   - name: "browser_scraper"
-    description: "Extract content from pages with heavy JS or protected by Cloudflare using headless browser. Use when web_scraper fails or returns empty content. Examples: Milanuncios, Wallapop, portals with anti-bot protection."
+    description: "Scrape JS-heavy or anti-bot protected pages with headless browser. Use when web_scraper fails."
     command: "python3"
     args: ["/app/tools/browser_scraper/main.py"]
     timeout: "90s"
@@ -506,7 +506,7 @@ tools:
 
   # RSS Reader
   - name: "rss_reader"
-    description: "Read RSS news feeds. Get latest headlines from multiple sources. Returns items with title, link, date and source. Useful for: latest news, what's happening, news feed, headlines."
+    description: "Read RSS feeds. Returns title, link, date and source. Extract titles, content or full."
     command: "python3"
     args: ["/app/tools/rss_reader/main.py"]
     timeout: "180s"
@@ -530,7 +530,7 @@ tools:
 
   # Canvas Diagram Generator
   - name: "canvas_diagram"
-    description: "Create visual diagrams using Obsidian Canvas JSON format. Generate flowcharts, mind maps, process diagrams. Output: .canvas file for Obsidian."
+    description: "Create diagrams (flowcharts, mind maps) in Obsidian Canvas format (.canvas)."
     command: "python3"
     args: ["/app/tools/canvas_diagram/main.py"]
     timeout: "60s"
@@ -553,7 +553,7 @@ tools:
 
   # RustFS/S3 Storage
   - name: "rustfs_storage"
-    description: "Interact with RustFS/S3 storage. Upload, download, list, search, delete files and get object metadata."
+    description: "RustFS/S3 operations: upload, download, list, search, delete, stat."
     command: "python3"
     args: ["/app/tools/rustfs_storage/main.py"]
     timeout: "60s"

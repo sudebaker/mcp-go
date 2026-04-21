@@ -70,7 +70,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Generate professional PDF reports with company branding. Use when user asks (EN): create report, generate PDF, make a report, export to PDF, create document, make summary, write invoice. (ES): crear informe, generar PDF, hacer reporte, exportar a PDF, crear documento, redactar acta, hacer resumen. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response (markdown). Returns PDF base64 + download URL."
+    description: "Genera PDFs profesionales con branding. Usar cuando el usuario pida: crear informe, generar PDF, exportar documento, hacer resumen. Soporta: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Retorna PDF base64 + download URL."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"
@@ -93,7 +93,7 @@ tools:
 
   # Data Analysis
   - name: "analyze_data"
-    description: "Analyze Excel/CSV data files with Python/Pandas. Use when user asks (EN): analyze file, process spreadsheet, calculate totals, generate charts, show trends, sales data, financial data, statistics. (ES): analizar archivo Excel, procesar hoja de cálculo, calcular totales, generar gráficos, mostrar tendencias, datos de ventas, estadísticas, crear visualización. Returns: text, JSON, markdown tables, or PNG chart images."
+    description: "Analiza archivos Excel/CSV con Python/Pandas. Usar para: analizar archivo, procesar hoja de cálculo, calcular totales, generar gráficos, mostrar tendencias, datos de ventas, estadísticas. Retorna: text, JSON, markdown tables o PNG chart images."
     command: "python3"
     args: ["/app/tools/data_analysis/main.py"]
     timeout: "180s"
@@ -133,7 +133,7 @@ tools:
 
   # Vision/OCR
   - name: "analyze_image"
-    description: "Analyze images: extract text (OCR), describe what you see, detect objects/people/text. Use when user asks (EN): read image, extract text, what's in photo, describe picture, scan document, extract invoice. (ES): leer imagen, extraer texto, qué hay en esta foto, describir imagen, escanear documento, extraer datos de factura, reconocer matrícula. Supports: screenshots, photos, documents, diagrams."
+    description: "Analiza imágenes: OCR, describir contenido, detectar objetos/personas/texto. Usar para: leer imagen, extraer texto, describir foto, escanear documento, extraer datos de factura. Soporta: screenshots, photos, documents, diagrams."
     command: "python3"
     args: ["/app/tools/vision_ocr/main.py"]
     timeout: "120s"
@@ -156,7 +156,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Store and memorize text content for future retrieval. Use when user says (EN): memorize, save, remember, learn, store knowledge, keep track. (ES): memoriza esto, guarda esta información, recuerda que, aprende sobre, guardar conocimiento, no olvides que. Stores content semantically for search."
+    description: "Almacena y memoriza contenido de texto para recuperación futura. Usar para: memorizar, guardar información, recordar conocimiento, aprender sobre un tema. Guarda contenido semánticamente para búsqueda."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -178,7 +178,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Search previously memorized information. Use when user asks (EN): recall, retrieve, search, find, what do you know, what did I tell you, do you remember. (ES): qué sabes sobre, qué me dijiste, recuerdas, busca información, busca lo que te dije, qué tienes registrado. Searches with semantic similarity."
+    description: "Busca información previamente memorizada. Usar para: recordar, recuperar, buscar, qué sabes sobre algo, qué me dijiste. Busca con similaridad semántica."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"
@@ -204,9 +204,9 @@ tools:
       required:
         - query
 
-  # Batch Summarize - Summarize multiple documents
+  # Batch Summarize
   - name: "batch_summarize"
-    description: "(EN): Summarize multiple documents at once, create batch summaries, generate master summary of multiple files, extract key points from documents. (ES): Resumir múltiples documentos a la vez, crear resúmenes por lotes, generar resumen maestro de varios archivos, extraer puntos clave de documentos. Input: __files__ (array), summary_type (individual/master/both), focus (optional), max_length (default 500 chars). Output: summaries array + optional master summary."
+    description: "Resume múltiples documentos a la vez. Crear batch summaries, generar resumen maestro de varios archivos, extraer puntos clave. Input: __files__ (array), summary_type (individual/master/both), focus, max_length (default 500 chars). Output: summaries array + optional master summary."
     command: "python3"
     args: ["/app/tools/batch_summarize/main.py"]
     timeout: "300s"
@@ -238,9 +238,9 @@ tools:
       required:
         - __files__
 
-  # Regulation Diff - Compare two versions of documents
+  # Regulation Diff
   - name: "regulation_diff"
-    description: "(EN): Compare two versions of a document or regulation, show differences between old and new version, track changes in legal documents, analyze document revisions. (ES): Comparar dos versiones de un documento o regulación, mostrar diferencias entre versión antigua y nueva, rastrear cambios en documentos legales, analizar revisiones de documentos. Input: __files__ (exactly 2: [0]=old, [1]=new), focus (optional), output_format (markdown/structured). Output: unified diff + LLM analysis + change counts."
+    description: "Compara dos versiones de un documento o regulación. Muestra diferencias entre versión antigua y nueva, rastrea cambios en documentos legales, analiza revisiones. Input: __files__ (exactly 2: [0]=old, [1]=new), focus, output_format (markdown/structured). Output: unified diff + LLM analysis + change counts."
     command: "python3"
     args: ["/app/tools/regulation_diff/main.py"]
     timeout: "180s"
@@ -270,9 +270,9 @@ tools:
       required:
         - __files__
 
-  # Config Auditor - Audit configuration files for security issues
+  # Config Auditor
   - name: "config_auditor"
-    description: "(EN): Audit configuration files for security issues, detect hardcoded secrets, find dangerous port configurations, check for debug mode, find empty required fields. (ES): Auditar archivos de configuración en busca de problemas de seguridad, detectar secretos hardcodeados, encontrar configuraciones de puertos peligrosos, verificar modo debug, buscar campos vacíos requeridos. Supports: YAML, JSON, TOML, INI, ENV. Rules: secrets, empty_required, dangerous_ports, debug_mode, hardcoded_ips. Output: findings array + security score (0-100)."
+    description: "Audija archivos de configuración en busca de problemas de seguridad. Detectar secretos hardcodeados, configuraciones de puertos peligrosas, debug mode, campos vacíos requeridos. Soporta: YAML, JSON, TOML, INI, ENV. Rules: secrets, empty_required, dangerous_ports, debug_mode, hardcoded_ips. Output: findings array + security score (0-100)."
     command: "python3"
     args: ["/app/tools/config_auditor/main.py"]
     timeout: "120s"
@@ -303,9 +303,9 @@ tools:
       required:
         - __files__
 
-  # Document Classifier - Classify documents into categories
+  # Document Classifier
   - name: "document_classifier"
-    description: "(EN): Classify documents into categories, identify document type, detect if document is contract/invoice/report/regulation/email/etc. (ES): Clasificar documentos en categorías, identificar tipo de documento, detectar si el documento es contrato/factura/informe/regulación/correquisitos/etc. Default categories: contract, invoice, report, regulation, technical_manual, meeting_minutes, email, form, other. Supports custom categories. Input: __files__, categories (optional), language (auto/es/en). Output: classification with confidence, justification, keywords, detected language."
+    description: "Clasifica documentos en categorías, identifica tipo de documento (contrato, factura, informe, regulación, email, etc.). Detecta idioma automáticamente. Categorías por defecto: contract, invoice, report, regulation, technical_manual, meeting_minutes, email, form, other. Input: __files__, categories (opcional), language (auto/es/en). Output: classification + confidence + justification + keywords."
     command: "python3"
     args: ["/app/tools/document_classifier/main.py"]
     timeout: "180s"
@@ -335,9 +335,9 @@ tools:
       required:
         - __files__
 
-  # Weather Forecast - Open-Meteo
+  # Weather Forecast
   - name: "weather_forecast"
-    description: "(EN): Get comparative weather forecast for specified cities using Open-Meteo API. Shows temperature, sky state, precipitation probability, wind and UV index. Automatically geocodes city names. (ES): Obtener prevision meteorologica comparativa para ciudades especificadas usando Open-Meteo. Muestra temperatura, estado del cielo, probabilidad de precipitacion, viento y indice UV. Geocodifica automaticamente los nombres de ciudades."
+    description: "Obtiene prevision meteorológica comparativa para ciudades usando Open-Meteo API. Muestra temperatura, estado del cielo, precipitación, viento y UV index. Geocodifica automáticamente nombres de ciudades."
     command: "python3"
     args: ["/app/tools/weather/main.py"]
     timeout: "30s"
@@ -356,9 +356,9 @@ tools:
           default: 3
           description: "Number of forecast days (1-7, default 3)"
 
-  # Web Scraper - Extract content from web pages
+  # Web Scraper
   - name: "web_scraper"
-    description: "(EN): Extract content from web pages, scrape websites, get page text, find links and images, analyze web content. Use when user asks: scrape this page, get content from URL, extract text from website, find all links on page. (ES): Extraer contenido de páginas web, hacer scraping, obtener texto de página, encontrar enlaces e imágenes, analizar contenido web."
+    description: "Extrae contenido de páginas web. scraping, obtener texto de página, encontrar enlaces e imágenes. Usar para: extraer texto de website, encontrar todos los links de una página."
     command: "python3"
     args: ["/app/tools/web_scraper/main.py"]
     timeout: "60s"
@@ -379,9 +379,9 @@ tools:
       required:
         - url
 
-  # Server Status - CPU, RAM, disk, uptime and Docker containers
+  # Server Status
   - name: "server_status"
-    description: "(EN): Get server health report: CPU usage, RAM, disk space, uptime, load average and running Docker containers. Use when asked about server status, resource usage, how the machine is doing, or what containers are running. (ES): Informe de estado del servidor: CPU, RAM, disco, uptime, carga y contenedores Docker activos."
+    description: "Informe de estado del servidor: CPU, RAM, disk space, uptime, load average y contenedores Docker activos."
     command: "python3"
     args: ["/app/tools/server_status/main.py"]
     timeout: "30s"
@@ -390,9 +390,9 @@ tools:
       properties: {}
       required: []
 
-  # Transcribe - Local speech-to-text via faster-whisper (100% on-premise)
+  # Transcribe
   - name: "transcribe"
-    description: "(EN): Transcribe audio files locally using Whisper AI. 100% on-premise, no cloud, no data leaves the server. Supports mp3, wav, ogg, m4a, webm, flac. Pass a file path on the server or base64-encoded audio. (ES): Transcribir archivos de audio localmente con Whisper AI. 100% local, sin nube, sin enviar voz al exterior. Soporta mp3, wav, ogg, m4a, webm, flac."
+    description: "Transcribe archivos de audio localmente con Whisper AI. 100% on-premise, sin nube, sin enviar voz al exterior. Soporta mp3, wav, ogg, m4a, webm, flac."
     command: "python3"
     args: ["/app/tools/transcribe/main.py"]
     timeout: "180s"
@@ -413,9 +413,9 @@ tools:
           description: "Optional language code (es, en, fr...). Auto-detected if omitted."
       required: []
 
-  # Web Search - Brave Search API
+  # Web Search
   - name: "web_search"
-    description: "(EN): Search the web using Brave Search API. Returns real web results with titles, URLs and descriptions. Use when you need to find current information, URLs, news, prices, or anything that requires a real web search. (ES): Buscar en la web usando Brave Search. Devuelve resultados reales con títulos, URLs y descripciones. Usar cuando necesites encontrar información actual, URLs, noticias, precios o cualquier búsqueda web real."
+    description: "Busca en la web usando Brave Search API. Retorna resultados reales con titles, URLs y descriptions. Usar para: información actual, URLs, news, prices, o cualquier búsqueda web real."
     command: "python3"
     args: ["/app/tools/web_search/main.py"]
     timeout: "30s"
@@ -440,9 +440,9 @@ tools:
       required:
         - query
 
-  # SearXNG Search - Private self-hosted search (no API key, no limits)
+  # SearXNG Search
   - name: "searxng_search"
-    description: "(EN): Search the web using the local self-hosted SearXNG instance. Private, unlimited, no API key needed. Aggregates results from Google, Bing, DuckDuckGo and Wikipedia. Supports filtering by category (general, news, images, science) and time range. Ideal for unrestricted searches without API quotas. (ES): Buscar en la web usando el servidor SearXNG local privado. Sin API key, sin límites, sin rastreo. Agrega resultados de Google, Bing, DuckDuckGo y Wikipedia. Soporta filtros por categoría y rango temporal."
+    description: "Busca en la web usando servidor SearXNG local privado. Sin API key, sin límites, sin rastreo. Agrega resultados de Google, Bing, DuckDuckGo y Wikipedia. Filtros por categoría (general, news, images, science) y rango temporal."
     command: "python3"
     args: ["/app/tools/searxng_search/main.py"]
     timeout: "30s"
@@ -470,9 +470,9 @@ tools:
       required:
         - query
 
-  # Browser Scraper - JS-rendered pages via headless Chromium (Cloudflare, Wallapop, Milanuncios...)
+  # Browser Scraper
   - name: "browser_scraper"
-    description: "(EN): Scrape JavaScript-heavy or Cloudflare-protected pages using a real headless browser. Use when web_scraper fails (blocked, empty content, Cloudflare). Examples: Milanuncios, Wallapop, portals with anti-bot protection. (ES): Extraer contenido de páginas con JS pesado o protegidas por Cloudflare usando un navegador real. Usar cuando web_scraper falla o devuelve contenido vacío."
+    description: "Extrae contenido de páginas con JS pesado o protegidas por Cloudflare usando headless browser. Usar cuando web_scraper falla o devuelve contenido vacío. Ejemplos: Milanuncios, Wallapop, portales con anti-bot protection."
     command: "python3"
     args: ["/app/tools/browser_scraper/main.py"]
     timeout: "90s"
@@ -504,9 +504,9 @@ tools:
       required:
         - url
 
-  # RSS Reader - Read news feeds
+  # RSS Reader
   - name: "rss_reader"
-    description: "(EN): Read RSS news feeds, get latest headlines from multiple sources. Returns news items with title, link, date and source. Use when user asks: latest news, what's happening, news feed, headlines. (ES): Leer feeds RSS de noticias, obtener últimos titulares de múltiples fuentes."
+    description: "Lee feeds RSS de noticias. Obtiene últimos titulares de múltiples fuentes. Retorna items con title, link, date y source. Útil para: latest news, what's happening, news feed, headlines."
     command: "python3"
     args: ["/app/tools/rss_reader/main.py"]
     timeout: "180s"
@@ -528,9 +528,9 @@ tools:
           default: "titles"
           description: "What to extract: titles (default), content (summaries), full (full content if available)"
 
-  # Canvas Diagram Generator - Create Obsidian Canvas diagrams
+  # Canvas Diagram Generator
   - name: "canvas_diagram"
-    description: "(EN): Create visual diagrams using Obsidian Canvas JSON format from text descriptions. Generates flowcharts, mind maps, process diagrams. Uses LLM if available. Output: .canvas file for Obsidian. (ES): Crear diagramas visuales usando formato JSON de Obsidian Canvas a partir de descripciones de texto."
+    description: "Crea diagramas visuales usando formato JSON de Obsidian Canvas. Genera flowcharts, mind maps, process diagrams. Output: archivo .canvas para Obsidian."
     command: "python3"
     args: ["/app/tools/canvas_diagram/main.py"]
     timeout: "60s"
@@ -551,9 +551,9 @@ tools:
       required:
         - description
 
-  # RustFS/S3 Storage - File operations with S3-compatible storage
+  # RustFS/S3 Storage
   - name: "rustfs_storage"
-    description: "(EN): Interact with RustFS/S3 storage. Upload, download, list, search, delete files and get object metadata. (ES): Interactuar con almacenamiento RustFS/S3. Subir, descargar, listar, buscar y eliminar archivos."
+    description: "Interactúa con almacenamiento RustFS/S3. Upload, download, list, search, delete files y get object metadata."
     command: "python3"
     args: ["/app/tools/rustfs_storage/main.py"]
     timeout: "60s"

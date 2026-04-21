@@ -156,7 +156,7 @@ services:
       - BASE_URL=http://searxng:8080
       - INSTANCE_NAME=SearXNG-MCP
     volumes:
-      - searxng-data:/etc/searxng
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
     networks:
       - mcp-network
     restart: unless-stopped
@@ -219,6 +219,4 @@ volumes:
   postgres-data:
     driver: local
   rustfs-data:
-    driver: local
-  searxng-data:
     driver: local

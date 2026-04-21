@@ -22,7 +22,6 @@ services:
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
       BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
-      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-rustfs}
       LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -51,6 +50,8 @@ services:
         condition: service_healthy
       whisper:
         condition: service_started
+      searxng:
+        condition: service_healthy
     networks:
       - mcp-network
       - docker_default
@@ -148,6 +149,32 @@ services:
           cpus: '0.25'
           memory: 512M
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    environment:
+      - BASE_URL=http://searxng:8080
+      - INSTANCE_NAME=SearXNG-MCP
+    volumes:
+      - searxng-data:/etc/searxng
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
   rustfs:
     image: rustfs/rustfs:latest
     container_name: rustfs
@@ -192,4 +219,6 @@ volumes:
   postgres-data:
     driver: local
   rustfs-data:
+    driver: local
+  searxng-data:
     driver: local

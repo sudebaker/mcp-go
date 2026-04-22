@@ -134,11 +134,47 @@ def get_rustfs_client() -> Minio | None:
         return None
 
 
+def validate_rustfs_public_url() -> tuple[bool, str | None]:
+    """Validate that RUSTFS_PUBLIC_URL is configured for external access."""
+    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
+    if not public_url:
+        return False, (
+            "RUSTFS_PUBLIC_URL is not configured. "
+            "Set this environment variable to the publicly accessible URL "
+            "for RustFS (e.g., http://192.168.1.100:9000)"
+        )
+    return True, None
+
+
+def rewrite_to_public_url(presigned_url: str) -> str:
+    """Rewrite internal RustFS URL to public URL for external agents."""
+    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
+
+    if not public_url:
+        return presigned_url
+
+    # Handle both http and https, with or without protocol in endpoint
+    endpoint_clean = endpoint.replace("http://", "").replace("https://", "")
+
+    # Replace internal endpoint with public URL
+    rewritten = presigned_url.replace(f"http://{endpoint_clean}", public_url)
+    rewritten = rewritten.replace(f"https://{endpoint_clean}", public_url)
+
+    return rewritten
+
+
 def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
     """Upload PDF to RustFS and return presigned URL and file info."""
     client = get_rustfs_client()
     if not client:
         logger.warning("RustFS client not available, skipping upload")
+        return None
+
+    # Validate that public URL is configured for external access
+    is_valid, err = validate_rustfs_public_url()
+    if not is_valid:
+        logger.error(f"Cannot upload to RustFS: {err}")
         return None
 
     try:
@@ -163,10 +199,13 @@ def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
             bucket, object_name, expires=timedelta(hours=1)
         )
 
+        # Rewrite internal URL to public URL for external agents
+        public_url = rewrite_to_public_url(presigned_url)
+
         return {
             "bucket": bucket,
             "object_name": object_name,
-            "presigned_url": presigned_url,
+            "presigned_url": public_url,
         }
     except S3Error as e:
         logger.error(f"Failed to upload to RustFS: {e}")

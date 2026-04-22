@@ -94,8 +94,43 @@ def get_rustfs_client() -> Optional[Minio]:
         return None
 
 
+def validate_rustfs_public_url() -> tuple[bool, Optional[str]]:
+    """Validate that RUSTFS_PUBLIC_URL is configured for external access."""
+    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
+    if not public_url:
+        return False, (
+            "RUSTFS_PUBLIC_URL is not configured. "
+            "Set this environment variable to the publicly accessible URL "
+            "for RustFS (e.g., http://192.168.1.100:9000)"
+        )
+    return True, None
+
+
+def rewrite_to_public_url(presigned_url: str) -> str:
+    """Rewrite internal RustFS URL to public URL for external agents."""
+    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
+    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
+
+    if not public_url:
+        return presigned_url
+
+    # Handle both http and https, with or without protocol in endpoint
+    endpoint_clean = endpoint.replace("http://", "").replace("https://", "")
+
+    # Replace internal endpoint with public URL
+    rewritten = presigned_url.replace(f"http://{endpoint_clean}", public_url)
+    rewritten = rewritten.replace(f"https://{endpoint_clean}", public_url)
+
+    return rewritten
+
+
 def upload_to_rustfs(client: Minio, bucket: str, key: str, content: str) -> dict:
     try:
+        # Validate that public URL is configured for external access
+        is_valid, err = validate_rustfs_public_url()
+        if not is_valid:
+            return {"success": False, "error": err}
+
         if not client.bucket_exists(bucket):
             client.make_bucket(bucket)
 
@@ -108,7 +143,10 @@ def upload_to_rustfs(client: Minio, bucket: str, key: str, content: str) -> dict
             bucket, key, expires=timedelta(hours=72)
         )
 
-        return {"success": True, "url": presigned_url, "key": key, "bucket": bucket}
+        # Rewrite internal URL to public URL for external agents
+        public_url = rewrite_to_public_url(presigned_url)
+
+        return {"success": True, "url": public_url, "key": key, "bucket": bucket}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

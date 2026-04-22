@@ -157,6 +157,73 @@ def write_response(response: dict) -> None:
 3. Respect configured timeouts
 4. Handle context cancellation gracefully
 
+## Local Storage Architecture (RustFS)
+
+This project uses **RustFS** as a local S3-compatible object storage solution. Data stays on-premise - no cloud services are used.
+
+### URL Architecture
+
+To support external agents accessing files while keeping RustFS within the Docker network, we use a dual-URL approach:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker Network                            │
+│  ┌──────────────┐         ┌──────────────┐                  │
+│  │  mcp-server  │────────▶│    rustfs    │:9000             │
+│  └──────────────┘         └──────────────┘                  │
+│         │                                                    │
+│         │ RUSTFS_ENDPOINT=http://rustfs:9000                 │
+│         │ (internal communication)                           │
+└─────────┼────────────────────────────────────────────────────┘
+          │
+          │ Generates presigned URL with internal endpoint
+          │
+          ▼
+   http://rustfs:9000/bucket/file?signature...
+          │
+          │ URL Rewriting (in Python tools)
+          │
+          ▼
+   http://192.168.1.100:9000/bucket/file?signature...
+          │
+          │ RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
+          │ (external access)
+          ▼
+┌─────────────────────────────────────────────────────────────┐
+│              External Agents (outside Docker)               │
+│                     Can download files                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Required Environment Variables
+
+```bash
+# Internal endpoint (Docker network communication)
+RUSTFS_ENDPOINT=http://rustfs:9000
+
+# Public endpoint (external agents access) - REQUIRED
+RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
+
+# Credentials
+RUSTFS_ACCESS_KEY_ID=rustfsadmin
+RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
+```
+
+### Tools Using RustFS
+
+- **rustfs_storage**: Upload, download, list, search, delete operations
+- **canvas_diagram**: Stores generated canvas files
+- **pdf_reports**: Stores generated PDF reports
+
+All these tools implement URL rewriting to convert internal URLs to public URLs before returning them to external agents.
+
+### Configuration Notes
+
+- If `RUSTFS_PUBLIC_URL` is not configured, tools will fail with an error
+- The presigned URLs contain signatures that remain valid after URL rewriting
+- External agents must be able to reach the public URL (firewall rules, routing)
+- For production, consider HTTPS with a reverse proxy
+
 ## Dependencies
 
 - Go 1.23+ | `github.com/mark3labs/mcp-go` | `github.com/rs/zerolog` | `gopkg.in/yaml.v3` | `github.com/google/uuid` | `github.com/prometheus/client_golang` | `github.com/redis/go-redis/v9`

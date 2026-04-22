@@ -442,7 +442,8 @@ Interacts with RustFS/S3 storage for file operations.
 ### RustFS/S3 Configuration
 | Variable | Default | Description |
 |----------|---------|-------------|
-| RUSTFS_ENDPOINT | rustfs:9000 | S3-compatible storage endpoint |
+| RUSTFS_ENDPOINT | rustfs:9000 | S3-compatible storage endpoint (internal Docker network) |
+| RUSTFS_PUBLIC_URL | **required** | Public URL for external agents (e.g., http://192.168.1.100:9000) |
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
 | S3_BUCKET_NAME | openwebui | Bucket name |
@@ -454,6 +455,8 @@ Interacts with RustFS/S3 storage for file operations.
 - `SSRF_ALLOWLIST`: Controls which internal hosts can be accessed via `file_url` parameter. Default allows only `rustfs`.
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
+
+**Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram, pdf_reports). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
 
 ---
 

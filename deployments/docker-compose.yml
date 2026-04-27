@@ -136,6 +136,7 @@ services:
     networks:
       - mcp-network
     restart: unless-stopped
+    # SECURITY: Token visible in process list (ps aux) - acceptable for dev, review for prod
     healthcheck:
       test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}", "http://localhost:3000/json/version"]
       interval: 30s

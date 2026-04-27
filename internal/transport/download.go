@@ -102,7 +102,7 @@ func (h *DownloadHandler) handleRustfsDownload(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	customResolver := s3.EndpointResolverFromURL(fmt.Sprintf("http://%s", endpoint))
+	customResolver := s3.EndpointResolverFromURL(getStorageURL(endpoint))
 
 	client := s3.New(s3.Options{
 		Region:           "us-east-1",
@@ -166,6 +166,21 @@ func getBaseURL() string {
 		baseURL = "http://localhost:8080"
 	}
 	return strings.TrimSuffix(baseURL, "/")
+}
+
+func getStorageURL(endpoint string) string {
+	protocol := "http"
+	if os.Getenv("RUSTFS_USE_SSL") == "true" {
+		protocol = "https"
+	}
+	if strings.HasPrefix(endpoint, "http://") {
+		return endpoint
+	}
+	if strings.HasPrefix(endpoint, "https://") {
+		protocol = "https"
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+	}
+	return fmt.Sprintf("%s://%s", protocol, endpoint)
 }
 
 func DownloadFile(ctx context.Context, downloadURL string, destPath string) error {

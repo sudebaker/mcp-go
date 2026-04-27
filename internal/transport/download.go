@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -89,26 +91,36 @@ func (h *DownloadHandler) handleRustfsDownload(w http.ResponseWriter, r *http.Re
 
 	accessKey := os.Getenv("RUSTFS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("RUSTFS_SECRET_ACCESS_KEY")
-	useSSL := os.Getenv("RUSTFS_USE_SSL") == "true"
 
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: useSSL,
-	})
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("us-east-1"),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
 	if err != nil {
-		log.Error().Err(err).Str("bucket", bucket).Str("object", object).Msg("Failed to create Minio client")
+		log.Error().Err(err).Str("bucket", bucket).Str("object", object).Msg("Failed to load AWS config")
 		http.Error(w, "Failed to connect to storage", http.StatusInternalServerError)
 		return
 	}
 
-	presignedURL, err := client.PresignedGetObject(r.Context(), bucket, object, time.Duration(h.defaultExpiryHours)*time.Hour, nil)
+	client := s3.New(s3.Options{
+		Region:       "us-east-1",
+		Credentials:  cfg.Credentials,
+		BaseEndpoint: aws.String(fmt.Sprintf("http://%s", endpoint)),
+	})
+
+	presignClient := s3.NewPresignClient(client)
+
+	presignedReq, err := presignClient.PresignGetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(object),
+	}, s3.WithPresignExpires(time.Duration(h.defaultExpiryHours)*time.Hour))
 	if err != nil {
 		log.Error().Err(err).Str("bucket", bucket).Str("object", object).Msg("Failed to generate presigned URL")
 		http.Error(w, "Failed to generate download URL", http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, presignedURL.String(), http.StatusTemporaryRedirect)
+	http.Redirect(w, r, presignedReq.URL, http.StatusTemporaryRedirect)
 }
 
 func (h *DownloadHandler) handleLocalDownload(w http.ResponseWriter, r *http.Request, filename string) {

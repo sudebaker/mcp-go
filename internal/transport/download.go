@@ -102,10 +102,12 @@ func (h *DownloadHandler) handleRustfsDownload(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	customResolver := s3.EndpointResolverFromURL(fmt.Sprintf("http://%s", endpoint))
+
 	client := s3.New(s3.Options{
-		Region:       "us-east-1",
-		Credentials:  cfg.Credentials,
-		BaseEndpoint: aws.String(fmt.Sprintf("http://%s", endpoint)),
+		Region:           "us-east-1",
+		Credentials:      cfg.Credentials,
+		EndpointResolver: customResolver,
 	})
 
 	presignClient := s3.NewPresignClient(client)

@@ -56,14 +56,12 @@ def get_template_env() -> Environment:
     if _template_env is None:
         templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
 
-        # Use SandboxedEnvironment for security (prevents SSTI)
         if SandboxedEnvironment is not None:
             _template_env = SandboxedEnvironment(
                 loader=FileSystemLoader(templates_dir),
                 autoescape=select_autoescape(["html", "xml"]),
             )
         else:
-            # Fallback if sandbox not available (shouldn't happen in normal setup)
             _template_env = Environment(
                 loader=FileSystemLoader(templates_dir),
                 autoescape=select_autoescape(["html", "xml"]),
@@ -74,6 +72,28 @@ def get_template_env() -> Environment:
 def get_default_output_dir() -> Path:
     """Get default output directory."""
     return Path(os.environ.get("OUTPUT_DIR", "/data/reports"))
+
+
+def get_base_url() -> str:
+    """Get base URL for constructing download links."""
+    base_url = os.environ.get("BASE_URL", "http://localhost:8080")
+    return base_url.rstrip("/")
+
+
+def generate_download_url(filename: str, storage_type: str = "local") -> str:
+    """Generate public download URL through MCP server proxy.
+
+    Args:
+        filename: The filename or object path
+        storage_type: 'local' for files in /data/reports, 'rustfs' for S3 objects
+
+    Returns:
+        URL to download the file through the MCP server proxy
+    """
+    base_url = get_base_url()
+    if storage_type == "rustfs":
+        return f"{base_url}/download/rustfs/{filename}"
+    return f"{base_url}/download/local/{filename}"
 
 
 def read_request() -> dict[str, Any]:
@@ -106,7 +126,6 @@ def generate_pdf(
     if css_path and css_path.exists():
         stylesheets.append(CSS(filename=str(css_path)))
 
-    # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     html.write_pdf(str(output_path), stylesheets=stylesheets)
@@ -154,14 +173,22 @@ def rewrite_to_public_url(presigned_url: str) -> str:
     if not public_url:
         return presigned_url
 
-    # Handle both http and https, with or without protocol in endpoint
     endpoint_clean = endpoint.replace("http://", "").replace("https://", "")
 
-    # Replace internal endpoint with public URL
     rewritten = presigned_url.replace(f"http://{endpoint_clean}", public_url)
     rewritten = rewritten.replace(f"https://{endpoint_clean}", public_url)
 
     return rewritten
+
+
+def get_rustfs_expiry_hours() -> int:
+    """Get RustFS presigned URL expiry in hours."""
+    default_hours = 24
+    try:
+        hours = int(os.environ.get("DOWNLOAD_URL_EXPIRY_HOURS", default_hours))
+        return hours if hours > 0 else default_hours
+    except ValueError:
+        return default_hours
 
 
 def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
@@ -171,22 +198,18 @@ def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
         logger.warning("RustFS client not available, skipping upload")
         return None
 
-    # Validate that public URL is configured for external access
     is_valid, err = validate_rustfs_public_url()
     if not is_valid:
         logger.error(f"Cannot upload to RustFS: {err}")
         return None
 
     try:
-        # Ensure bucket exists
         if not client.bucket_exists(bucket):
             client.make_bucket(bucket)
 
-        # Generate unique object name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/{timestamp}_{file_path.name}"
 
-        # Upload file
         client.fput_object(
             bucket,
             object_name,
@@ -194,18 +217,19 @@ def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
             content_type="application/pdf",
         )
 
-        # Generate presigned URL (expires in 1 hour)
+        expiry_hours = get_rustfs_expiry_hours()
         presigned_url = client.presigned_get_object(
-            bucket, object_name, expires=timedelta(hours=1)
+            bucket, object_name, expires=timedelta(hours=expiry_hours)
         )
 
-        # Rewrite internal URL to public URL for external agents
         public_url = rewrite_to_public_url(presigned_url)
+        download_url = generate_download_url(f"{bucket}/{object_name}", "rustfs")
 
         return {
             "bucket": bucket,
             "object_name": object_name,
             "presigned_url": public_url,
+            "download_url": download_url,
         }
     except S3Error as e:
         logger.error(f"Failed to upload to RustFS: {e}")
@@ -474,15 +498,18 @@ def main() -> None:
             styles_css_path if styles_css_path.exists() else None,
         )
 
-        # Read the generated PDF file and encode as base64
         with open(output_path, "rb") as pdf_file:
             pdf_content = pdf_file.read()
             pdf_base64 = base64.b64encode(pdf_content).decode("utf-8")
 
-        # Upload to RustFS
         rustfs_info = upload_to_rustfs(output_path)
 
-        # Build response
+        filename = output_path.name
+        if rustfs_info:
+            download_url = rustfs_info.get("download_url", generate_download_url(filename, "local"))
+        else:
+            download_url = generate_download_url(filename, "local")
+
         response_content = [
             {
                 "type": "text",
@@ -506,11 +533,19 @@ def main() -> None:
                 }
             )
 
+        response_content.append(
+            {
+                "type": "text",
+                "text": f"Download URL (valid for {get_rustfs_expiry_hours()}h): {download_url}",
+            }
+        )
+
         structured_content = {
             "report_type": report_type,
             "output_path": str(output_path),
             "file_size": output_path.stat().st_size if output_path.exists() else 0,
             "pdf_base64": pdf_base64,
+            "download_url": download_url,
         }
 
         if rustfs_info:
@@ -520,6 +555,7 @@ def main() -> None:
                         "bucket": rustfs_info["bucket"],
                         "object_name": rustfs_info["object_name"],
                         "presigned_url": rustfs_info["presigned_url"],
+                        "download_url": rustfs_info["download_url"],
                     }
                 }
             )

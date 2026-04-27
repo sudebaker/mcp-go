@@ -226,7 +226,7 @@ All these tools implement URL rewriting to convert internal URLs to public URLs 
 
 ## Dependencies
 
-- Go 1.23+ | `github.com/mark3labs/mcp-go` | `github.com/rs/zerolog` | `gopkg.in/yaml.v3` | `github.com/google/uuid` | `github.com/prometheus/client_golang` | `github.com/redis/go-redis/v9`
+- Go 1.23+ | `github.com/mark3labs/mcp-go` | `github.com/minio/minio-go/v7` | `github.com/rs/zerolog` | `gopkg.in/yaml.v3` | `github.com/google/uuid` | `github.com/prometheus/client_golang` | `github.com/redis/go-redis/v9`
 
 ## Security Mitigations
 

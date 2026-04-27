@@ -1,3 +1,5 @@
+Moved from: ../SECURITY_HARDENING.md 
+
 # SECURITY HARDENING - MCP-Go Orchestrator
 
 **Status**: ✅ Implemented  

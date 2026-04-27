@@ -1,3 +1,5 @@
+Moved from: ../TESTING.md 
+
 # Testing Guide - MCP-Go
 
 Este documento describe como ejecutar y validar pruebas de manera consistente en el proyecto.

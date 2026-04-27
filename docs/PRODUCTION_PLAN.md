@@ -1,3 +1,5 @@
+Moved from: ../PRODUCTION_PLAN.md 
+
 # 🚀 PLAN DE ACCIÓN PRODUCCIÓN - MCP-Go Orchestrator
 
 **Estado Actual**: 8.8/10 (upgraded after Phase 2.5 fixes) ✅  

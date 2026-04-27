@@ -1,3 +1,5 @@
+Moved from: ../TODO.md 
+
  TODO.md - Plan de Mejoras Técnicas - MCP-Go
  📊 Estado Actual del Proyecto
 - **4 archivos Go** en 4 paquetes internos (config, executor, mcp, transport)

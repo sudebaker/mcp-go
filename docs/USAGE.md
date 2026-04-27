@@ -1,3 +1,5 @@
+Moved from: ../USAGE.md 
+
 # Guia de Uso - MCP-Go
 
 ## Descripcion general

@@ -1,3 +1,5 @@
+Moved from: ../LOGGING_QUICKSTART.md 
+
 # HTTP Request Logging - Quick Start
 
 ## 🎯 Resumen

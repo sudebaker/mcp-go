@@ -1,3 +1,5 @@
+Moved from: ../AGENTS.md 
+
 # AGENTS.md - MCP-Go Project Guide
 
 Guidelines for agentic coding agents working on this MCP (Model Context Protocol) Orchestrator.

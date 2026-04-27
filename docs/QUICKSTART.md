@@ -53,20 +53,9 @@ curl -X POST http://localhost:8080/mcp \
 	-d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-## 5. Flujo con OpenWebUI (opcional)
+## 5. Flujo de archivos
 
-Si usas OpenWebUI en tu entorno, puedes trabajar con archivos en:
-
-- `/openwebui-data/uploads/` (solo lectura)
-- `/data/` (lectura/escritura)
-
-Scripts utiles:
-
-- `./tools/list-available-files.sh`
-- `./tools/copy-latest-upload.sh <nombre_destino>`
-- `./tools/clean-workspace.sh [dias]`
-
-Ejemplo de prompt:
+Los archivos se pueden subir usando el parametro `__files__` en las herramientas:
 
 ```text
 Analiza /data/test_productos.xlsx y responde:
@@ -74,6 +63,11 @@ Analiza /data/test_productos.xlsx y responde:
 - Cuantos productos hay por categoria
 - Cual es el producto mas caro
 ```
+
+Rutas disponibles:
+
+- `/data/`: workspace principal (lectura/escritura)
+- `/data/uploads/`: archivos subidos
 
 ## Comandos utiles
 
@@ -86,12 +80,14 @@ docker compose restart mcp-server
 
 # shell en contenedor
 docker exec -it mcp-orchestrator bash
+
+# ver archivos en workspace
+docker exec mcp-orchestrator ls -lh /data/
 ```
 
 ## Referencias
 
 - `README.md`
 - `USAGE.md`
-- `docs/OPENWEBUI_INTEGRATION.md`
 - `docs/DEVELOPMENT.md`
 - `TESTING.md`

@@ -34,7 +34,7 @@ curl -s http://localhost:8080/health
 - `postgres` (`mcp-postgres`): `localhost:5432`
 - `rustfs` (`rustfs`): `http://localhost:9000`
 
-Nota: OpenWebUI y Ollama pueden estar en un stack externo y compartir red Docker.
+Nota: Ollama puede estar en un stack externo y compartir red Docker.
 
 ## Uso por capacidades
 
@@ -49,7 +49,7 @@ Casos tipicos:
 - Responder preguntas sobre tablas
 - Generar salida `text`, `json`, `markdown` o `png`
 
-Ejemplo de prompt en OpenWebUI:
+Ejemplo de prompt:
 
 ```text
 Analiza /data/ventas.xlsx y responde:
@@ -86,7 +86,7 @@ Tipos relevantes de `report_type`:
 Salida esperada:
 
 - PDF en base64
-- ruta de salida/descarga (segun implementacion de la herramienta)
+- URL de descarga (válida 24h por defecto)
 
 ### 4. Knowledge base
 
@@ -112,16 +112,11 @@ Herramientas:
 Rutas principales dentro del contenedor `mcp-orchestrator`:
 
 - `/data/`: lectura y escritura (workspace operativo)
+- `/data/uploads/`: archivos subidos por usuarios
 - `/app/configs`, `/app/tools`, `/app/templates`: montajes de codigo/config
-
-Si integras OpenWebUI con volumen compartido:
-
-- `/openwebui-data/uploads/`: solo lectura
 
 Scripts utiles:
 
-- `tools/list-available-files.sh`
-- `tools/copy-latest-upload.sh <destino>`
 - `tools/clean-workspace.sh [dias]`
 
 ## Ejemplos MCP con curl
@@ -173,4 +168,3 @@ Verifica variables en `configs/config.yaml` o entorno:
 - `TESTING.md`
 - `docs/API.md`
 - `docs/DEVELOPMENT.md`
-- `docs/OPENWEBUI_INTEGRATION.md`

@@ -19,7 +19,7 @@ Servidor MCP (Model Context Protocol) en Go para orquestar herramientas externas
 
 - Go 1.23+
 - Docker y Docker Compose
-- Opcional: OpenWebUI y Ollama en la misma red Docker
+- Opcional: Ollama en la misma red Docker
 
 ## Inicio rapido
 

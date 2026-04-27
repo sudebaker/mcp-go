@@ -29,7 +29,7 @@ services:
       RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?RUSTFS_PUBLIC_URL is required - set to your public IP/hostname}
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-openwebui}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-default}
       DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
 
       # Python settings

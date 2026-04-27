@@ -776,8 +776,8 @@ def main() -> None:
                 return
 
         elif files_list and len(files_list) > 0:
-            # Use __files__ parameter (OpenWebUI integration)
-            emit_chunk("status", {"message": "Downloading file from OpenWebUI"})
+            # Use __files__ parameter (file upload)
+            emit_chunk("status", {"message": "Processing uploaded file"})
 
             # Find first suitable data file
             data_file = None

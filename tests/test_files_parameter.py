@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script for __files__ parameter support in data_analysis tool.
-Simulates OpenWebUI's file upload flow with a mock HTTP server.
+Simulates a file upload flow with a mock HTTP server.
 """
 
 import json
@@ -52,7 +52,7 @@ print(f"Using host IP for Docker container: {HOST_IP}")
 
 
 class MockFileServer(BaseHTTPRequestHandler):
-    """Mock HTTP server simulating OpenWebUI file endpoint"""
+    """Mock HTTP server simulating file endpoint"""
 
     def do_GET(self):
         if self.path == "/api/v1/files/test-file-123/content":

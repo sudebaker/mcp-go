@@ -2,7 +2,7 @@ Moved from: ../DOCUMENTATION_INDEX.md
 
 # Documentation Index - MCP-Go
 
-Actualizado: 16 marzo 2026
+Actualizado: 27 abril 2026
 
 ## Inicio recomendado
 
@@ -38,7 +38,6 @@ Actualizado: 16 marzo 2026
 |---|---|
 | Arrancar el proyecto | `QUICKSTART.md` |
 | Entender arquitectura | `docs/DEVELOPMENT.md` |
-| Integracion OpenWebUI | `docs/OPENWEBUI_INTEGRATION.md` |
 | Ver endpoints MCP | `docs/API.md` |
 | Ejecutar pruebas | `TESTING.md` |
 | Revisar seguridad | `SECURITY_HARDENING.md` |
@@ -60,10 +59,10 @@ Actualizado: 16 marzo 2026
 - `docs/KB_MEMORY_SYSTEM.md`
 - `docs/LOGGING.md`
 - `docs/LOGGING_IMPLEMENTATION.md`
-- `docs/OPENWEBUI_INTEGRATION.md`
 - `docs/plans/`
 
 ## Nota de consistencia
 
-- `Plan.md` ya no existe en raiz.
-- Su equivalente funcional para arquitectura/desarrollo es `docs/DEVELOPMENT.md`.
+- El proyecto es completamente agnóstico de clientes MCP.
+- No requiere integraciones específicas con interfaces de usuario.
+- El servidor MCP expone herramientas via API estándar.

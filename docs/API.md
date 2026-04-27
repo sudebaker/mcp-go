@@ -200,7 +200,7 @@ Analyzes Excel/CSV files using Pandas and LLM-generated code.
 | file_name | string | No | Original filename with extension |
 | question | string | Yes | Natural language question |
 | output_format | string | No | `text`, `json`, `markdown`, `png` |
-| __files__ | array | No | Attached files (OpenWebUI). Each file can include `content` (base64) or `url`. Max size: 100MB per file when using base64 content. |
+| __files__ | array | No | Attached files (base64 or URL). Max size: 100MB per file when using base64 content. |
 
 ---
 
@@ -408,7 +408,7 @@ Interacts with RustFS/S3 storage for file operations.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | operation | string | Yes | `upload`, `download`, `list`, `search`, `delete`, `stat` |
-| bucket | string | No | S3 bucket name (default: openwebui) |
+| bucket | string | No | S3 bucket name (default: default) |
 | key | string | No | Object key (path) in bucket |
 | content | string | No | Base64-encoded content for upload |
 | prefix | string | No | Prefix for list/search operations |
@@ -475,7 +475,7 @@ Interacts with RustFS/S3 storage for file operations.
 | RUSTFS_PUBLIC_URL | **required** | Public URL for external agents (e.g., http://192.168.1.100:9000) |
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
-| S3_BUCKET_NAME | openwebui | Bucket name |
+| S3_BUCKET_NAME | default | Bucket name |
 | SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges |
 | S3_OPERATION_TIMEOUT_SECONDS | 30 | Timeout for S3 read operations (seconds) |
 | RUSTFS_PRESIGNED_TTL_SECONDS | 3600 | Presigned URL validity window (seconds) |
@@ -495,24 +495,24 @@ Interacts with RustFS/S3 storage for file operations.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  OpenWebUI  │────▶│  MCPO Proxy  │────▶│ MCP Server  │
-│  (port 3000)│     │  (port 8001) │     │ (port 8080) │
+│  External   │────▶│  MCP Server  │────▶│  Python     │
+│  Client     │     │  (port 8080) │     │  Tools      │
 └─────────────┘     └──────────────┘     └──────┬──────┘
-                                                 │
-                    ┌────────────┐              │
-                    │  Ollama    │◀─────────────┘
-                    │ (GPU/LLM)  │
-                    └────────────┘
-                                                 │
-┌─────────────┐     ┌──────────────┐              │
-│  RustFS     │◀────│ Python Tools │◀─────────────┘
-│ (S3/MinIO)  │     │              │
-└─────────────┘     └──────────────┘
-                              │
-                    ┌────────┴────────┐
-                    │ PostgreSQL      │
-                    │ (pgvector)      │
-                    └─────────────────┘
+                                                  │
+                     ┌────────────┐              │
+                     │  Ollama    │◀─────────────┘
+                     │ (GPU/LLM)  │
+                     └────────────┘
+                                                  │
+                     ┌──────────────┐              │
+                     │  RustFS     │◀─────────────┘
+                     │ (S3/MinIO)  │
+                     └──────────────┘
+                               │
+                     ┌────────┴────────┐
+                     │ PostgreSQL      │
+                     │ (pgvector)      │
+                     └─────────────────┘
 ```
 
 ---

@@ -37,7 +37,7 @@ class TestPresignedURLHandling(unittest.TestCase):
         mock_client_class.return_value.__enter__.return_value = mock_client
 
         presigned_url = (
-            "http://rustfs:9000/openwebui/file.pdf?"
+            "http://rustfs:9000/default/file.pdf?"
             "X-Amz-Algorithm=AWS4-HMAC-SHA256&"
             "X-Amz-Credential=rustfsadmin%2F20240101%2Fus-east-1%2Fs3%2Faws4_request&"
             "X-Amz-Signature=abc123"
@@ -134,15 +134,15 @@ class TestS3DirectAccess(unittest.TestCase):
             return hostname == rustfs_host
 
         test_urls = [
-            ("http://rustfs:9000/openwebui/file.csv", True),
-            ("http://rustfs:9000/openwebui/file.csv?param=1", True),
+            ("http://rustfs:9000/default/file.csv", True),
+            ("http://rustfs:9000/default/file.csv?param=1", True),
             # This was previously accepted due to substring matching vulnerability
             # Now it's rejected because hostname != rustfs exactly
-            ("http://rustfs-prod/openwebui/file.csv", False),
+            ("http://rustfs-prod/default/file.csv", False),
             ("http://example.com/file.csv", False),
             ("http://localhost:9000/file.csv", False),  # Blocked by SSRF
             # SSRF bypass attempt - would have passed old logic
-            ("http://evilrustfs.com/openwebui/file.csv", False),
+            ("http://evilrustfs.com/default/file.csv", False),
         ]
 
         for url, should_match in test_urls:
@@ -185,13 +185,13 @@ class TestUploadPresignedURL(unittest.TestCase):
         # Simulate the response structure from operation_upload
         response = {
             "success": True,
-            "bucket": "openwebui",
+            "bucket": "default",
             "key": "file.csv",
             "size": 1024,
             "content_type": "text/csv",
             "etag": "etag123",
             "presigned_url": (
-                "http://rustfs:9000/openwebui/file.csv?"
+                "http://rustfs:9000/default/file.csv?"
                 "X-Amz-Algorithm=AWS4-HMAC-SHA256&"
                 "X-Amz-Expires=3600"
             ),
@@ -359,7 +359,7 @@ class TestSecurityFix4_PresignedURLTTL(unittest.TestCase):
         # Simulate response with TTL
         response = {
             "success": True,
-            "presigned_url": "http://rustfs:9000/openwebui/file.csv?X-Amz-Expires=3600",
+            "presigned_url": "http://rustfs:9000/default/file.csv?X-Amz-Expires=3600",
             "expires": 3600,  # TTL in seconds
         }
         

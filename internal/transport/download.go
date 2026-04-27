@@ -170,15 +170,11 @@ func getBaseURL() string {
 
 func getStorageURL(endpoint string) string {
 	protocol := "http"
-	if os.Getenv("RUSTFS_USE_SSL") == "true" {
-		protocol = "https"
-	}
-	if strings.HasPrefix(endpoint, "http://") {
-		return endpoint
-	}
 	if strings.HasPrefix(endpoint, "https://") {
 		protocol = "https"
 		endpoint = strings.TrimPrefix(endpoint, "https://")
+	} else if strings.HasPrefix(endpoint, "http://") {
+		endpoint = strings.TrimPrefix(endpoint, "http://")
 	}
 	return fmt.Sprintf("%s://%s", protocol, endpoint)
 }

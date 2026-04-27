@@ -1,3 +1,5 @@
+Moved from: ../ROADMAP.md 
+
 # 📊 REVISIÓN DE PRODUCCIÓN: MCP-Go Orchestrator
 
 **Fecha de Revisión**: Febrero 2026  

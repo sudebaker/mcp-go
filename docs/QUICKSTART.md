@@ -1,3 +1,5 @@
+Moved from: ../QUICKSTART.md 
+
 # Quick Start - MCP-Go
 
 Guia rapida para levantar el proyecto, validar estado y ejecutar una prueba funcional.

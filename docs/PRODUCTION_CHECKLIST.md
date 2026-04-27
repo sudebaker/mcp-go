@@ -1,3 +1,5 @@
+Moved from: ../PRODUCTION_CHECKLIST.md 
+
 # 📋 PRODUCTION CHECKLIST - MCP-Go Orchestrator
 
 **Quick Reference Guide para llevar el sistema a Producción**

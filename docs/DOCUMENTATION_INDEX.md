@@ -1,3 +1,5 @@
+Moved from: ../DOCUMENTATION_INDEX.md 
+
 # Documentation Index - MCP-Go
 
 Actualizado: 16 marzo 2026

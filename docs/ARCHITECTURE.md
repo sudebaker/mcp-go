@@ -1,3 +1,5 @@
+Moved from: ../README_ARCHITECTURE.md 
+
 # MCP-Go Architecture Documentation
 
 **Project**: MCP-Go Orchestrator Server  

@@ -30,6 +30,7 @@ services:
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-openwebui}
+      DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
 
       # Python settings
       PYTHONUNBUFFERED: "1"

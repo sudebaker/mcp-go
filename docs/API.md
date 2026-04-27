@@ -33,7 +33,8 @@ Returns server information and available endpoints.
     "GET /health/detailed": "Detailed health check",
     "GET /metrics": "Prometheus metrics",
     "POST /mcp": "MCP Streamable HTTP endpoint",
-    "GET /openapi.json": "OpenAPI specification"
+    "GET /openapi.json": "OpenAPI specification",
+    "GET /download/{type}/{path}": "File download proxy (local|rustfs)"
   }
 }
 ```
@@ -114,6 +115,31 @@ Interactive API documentation (Swagger UI).
 
 ---
 
+### GET /download/{type}/{path}
+
+Download files through the MCP server proxy. Supports two storage types:
+
+| Type | Path Format | Description |
+|------|-------------|--------------|
+| `local` | `/download/local/{filename}` | Serve files from `/data/reports` |
+| `rustfs` | `/download/rustfs/{bucket}/{object}` | Redirect to presigned RustFS URL |
+
+**Parameters:**
+- `type`: `local` or `rustfs`
+- `path`: filename (local) or `bucket/object` (rustfs)
+
+**Response:**
+- `307 Temporary Redirect` → Redirects to actual file URL
+- `400 Bad Request` → Invalid path format
+- `404 Not Found` → File not found (local only)
+- `410 Gone` → Download link expired
+
+**Security:**
+- Local downloads: Path traversal prevention, 24h link expiry
+- RustFS downloads: Generates presigned URL with configured expiry
+
+---
+
 ## MCP Methods
 
 ### initialize
@@ -157,7 +183,10 @@ Generates PDF reports from templates. Supports uploading to RustFS/S3 storage.
 | data | object | Yes | Report data object |
 | output_path | string | No | Optional output path |
 
-**Output:** PDF base64 + optional presigned URL (RustFS)
+**Output:**
+- `pdf_base64`: PDF content encoded in base64 (MCP standard)
+- `download_url`: Public URL to download the PDF (valid 24h by default)
+- `storage`: Object with `bucket`, `object_name`, `presigned_url`, `download_url` (if RustFS available)
 
 ---
 
@@ -450,11 +479,13 @@ Interacts with RustFS/S3 storage for file operations.
 | SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges |
 | S3_OPERATION_TIMEOUT_SECONDS | 30 | Timeout for S3 read operations (seconds) |
 | RUSTFS_PRESIGNED_TTL_SECONDS | 3600 | Presigned URL validity window (seconds) |
+| DOWNLOAD_URL_EXPIRY_HOURS | 24 | Download URL validity window (hours) |
 
 **Security Notes:**
 - `SSRF_ALLOWLIST`: Controls which internal hosts can be accessed via `file_url` parameter. Default allows only `rustfs`.
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
+- `DOWNLOAD_URL_EXPIRY_HOURS`: Controls how long `/download/` URLs remain valid (24h default).
 
 **Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram, pdf_reports). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
 

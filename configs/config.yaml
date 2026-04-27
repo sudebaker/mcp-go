@@ -116,7 +116,7 @@ tools:
           description: "How to return results: 'text' (plain), 'json' (structured), 'markdown' (tables), 'png' (chart image)"
         __files__:
           type: array
-          description: "Alternative: attach files directly in OpenWebUI. The tool will download them automatically."
+          description: "Alternative: attach files as __files__ parameter. The tool will download them automatically."
           items:
             type: object
             properties:
@@ -539,7 +539,7 @@ tools:
           description: "Operation to perform"
         bucket:
           type: string
-          default: "openwebui"
+          default: "default"
           description: "S3 bucket name"
         key:
           type: string

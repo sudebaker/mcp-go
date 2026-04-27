@@ -13,7 +13,7 @@ This document describes the security measures implemented for the RustFS/S3 inte
 **Example Attack:** 
 - Configured endpoint: `rustfs:9000`
 - Old vulnerable check: `rustfs_host in hostname` 
-- Attack URL: `http://evilrustfs.com/openwebui/file.csv` would pass (substring "rustfs" found)
+- Attack URL: `http://evilrustfs.com/default/file.csv` would pass (substring "rustfs" found)
 
 **Solution:** 
 - Use `is_internal_url()` from `tools/common/validators.py` for SSRF validation
@@ -241,7 +241,7 @@ python -m pytest tests/test_rustfs_integration.py -v
 # Should succeed (exact match)
 curl http://localhost:8000/api/analyze_data \
   -H "Content-Type: application/json" \
-  -d '{"files": [{"url": "http://rustfs:9000/openwebui/test.csv"}]}'
+  -d '{"files": [{"url": "http://rustfs:9000/default/test.csv"}]}'
 
 # Should fail (SSRF bypass attempt)
 curl http://localhost:8000/api/analyze_data \

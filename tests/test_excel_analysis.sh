@@ -129,21 +129,20 @@ else
 fi
 echo ""
 
-# Verificar archivos en OpenWebUI uploads
-echo "📁 Verificando archivos en OpenWebUI uploads..."
+# Verificar archivos en workspace
+echo "📁 Verificando archivos en workspace..."
 echo "Archivos disponibles:"
-docker exec mcp-orchestrator ls -lh /openwebui-data/uploads/ | tail -n +2
+docker exec mcp-orchestrator ls -lh /data/ | tail -n +2
 echo ""
 
 # Resumen
 echo "======================================="
 echo -e "${GREEN}✅ Pruebas completadas${NC}"
 echo ""
-echo "💡 Para probar desde OpenWebUI:"
-echo "   1. Accede a http://localhost:3000"
+echo "💡 Para probar via MCP:"
+echo "   1. Envia una request a POST /mcp con tools/call"
 echo "   2. Pregunta: 'Analiza el archivo /data/test_productos.xlsx y dime cuál es el precio promedio'"
 echo ""
 echo "📝 Para ver archivos disponibles:"
 echo "   docker exec mcp-orchestrator ls -lh /data/"
-echo "   docker exec mcp-orchestrator ls -lh /openwebui-data/uploads/"
 echo ""

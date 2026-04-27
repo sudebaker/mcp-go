@@ -120,9 +120,9 @@ tools/common/
 ```mermaid
 flowchart TB
     subgraph Clients["AI Clients"]
-        OpenWebUI["OpenWebUI"]
         ClaudeDesktop["Claude Desktop"]
         CustomClient["Custom MCP Client"]
+        ExternalAgent["External Agent"]
     end
 
     subgraph MCPGo["MCP-Go Server"]

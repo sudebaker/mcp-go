@@ -45,6 +45,10 @@ _compiled_domain_patterns = [
     re.compile(p, re.IGNORECASE) for p in INTERNAL_DOMAIN_PATTERNS
 ]
 
+_ssrf_allowlist_cache: tuple[list[ipaddress._BaseNetwork], list[str]] | None = None
+_ssrf_allowlist_cache_time: float = 0.0
+_SSRF_CACHE_TTL_SECONDS: float = 60.0  # Cache allowlist for 60 seconds
+
 
 def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
     """
@@ -52,10 +56,22 @@ def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
 
     Format: comma-separated list of CIDR ranges and/or hostnames.
     Example: SSRF_ALLOWLIST=192.168.1.0/24,10.0.0.0/8,myservice.corp
+
+    Results are cached for 60 seconds to avoid repeated parsing on every call.
     """
+    global _ssrf_allowlist_cache, _ssrf_allowlist_cache_time
+
+    import time as _time
+
+    current_time = _time.monotonic()
+    if _ssrf_allowlist_cache is not None and (current_time - _ssrf_allowlist_cache_time) < _SSR_F_CACHE_TTL_SECONDS:
+        return _ssrf_allowlist_cache
+
     raw = os.environ.get("SSRF_ALLOWLIST", "").strip()
     if not raw:
-        return [], []
+        _ssrf_allowlist_cache = ([], [])
+        _ssrf_allowlist_cache_time = current_time
+        return _ssrf_allowlist_cache
 
     networks: list[ipaddress._BaseNetwork] = []
     hostnames: list[str] = []
@@ -69,7 +85,9 @@ def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
         except ValueError:
             hostnames.append(entry.lower())
 
-    return networks, hostnames
+    _ssrf_allowlist_cache = (networks, hostnames)
+    _ssrf_allowlist_cache_time = current_time
+    return _ssrf_allowlist_cache
 
 
 def _is_allowlisted(host: str) -> bool:

@@ -873,12 +873,204 @@ Fase 4: Calidad de Código (Semanas 7-8)
  - [x] Streaming LLM (internal/executor/subprocess.go + streaming protocol)
  - [x] OpenAPI documentation (internal/transport/docs.go + Swagger UI)
 ---
- 📊 Métricas de Éxito
- | Métrica | Estado Actual | Objetivo |
- |---------|--------------|----------|
- | Cobertura de tests | ~5% | 70%+ |
- | Timeouts de LLM | No medido | < 1% |
- | Latencia promedio | No medido | < 5s |
- | Rate de errores | No medido | < 0.1% |
- | Vulnerabilidades críticas | 1 (sandbox) | 0 |
+📊 Métricas de Éxito
+  | Métrica | Estado Actual | Objetivo |
+  |---------|--------------|----------|
+  | Cobertura de tests | ~5% | 70%+ |
+  | Timeouts de LLM | No medido | < 1% |
+  | Latencia promedio | No medido | < 5s |
+  | Rate de errores | No medido | < 0.1% |
+  | Vulnerabilidades críticas | 1 (sandbox) | 0 |
 ---
+
+## 🔵 NUEVO: Aislamiento de Archivos RustFS + Autenticación
+
+**Fecha de creación:** 28 Abril 2026  
+**Estado:** 📋 Planificado (sin implementación)  
+**Prioridad:** 🟡 Alta (para seguridad multi-tenant)
+
+---
+
+### Contexto
+
+**Problema:**
+- `RUSTFS_PUBLIC_URL` expone RustFS directamente al exterior
+- Cualquier cliente MCP puede acceder a archivos de otros usuarios
+- No existe aislamiento entre workspaces/usuarios
+
+**Objetivos:**
+1. Eliminar `RUSTFS_PUBLIC_URL` - RustFS no debe ser accesible públicamente
+2. Todo acceso a archivos debe ser a través del endpoint `/download/` del MCP Server
+3. Implementar aislamiento: usuario A no puede ver archivos de usuario B
+4. Agregar TTL configurable para archivos almacenados (auto-cleanup)
+
+---
+
+### OPCIÓN A: Workspace Tokens (Pragmática)
+
+**Tiempo estimado de implementación:** 1-2 días
+
+**Arquitectura:**
+```
+Cliente MCP → POST /mcp con Header: X-Workspace-Token: wsp_<id>_<hmac>
+
+MCP Server valida HMAC → extrae workspace_id → herramienta guarda en:
+RustFS: bucket/default/workspace_eng_team/filename.pdf
+```
+
+**Tablas de base de datos:**
+```sql
+CREATE TABLE workspaces (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,  -- SHA256 del token
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,  -- NULL = nunca expira
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE workspace_files (
+    id UUID PRIMARY KEY,
+    workspace_id UUID REFERENCES workspaces(id),
+    bucket VARCHAR(255),
+    object_path VARCHAR(1024),
+    original_filename VARCHAR(255),
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,  -- Para auto-cleanup
+    content_type VARCHAR(255),
+    size_bytes BIGINT
+);
+```
+
+**Flujo:**
+1. Cliente envía `X-Workspace-Token: wsp_eng_team_xxx` en headers
+2. MCP Server valida HMAC → lookup en DB → obtiene `workspace_id`
+3. Tool guarda archivo en `workspace_eng_team/filename.pdf`
+4. Endpoint `/download/rustfs/workspace_eng_team/filename.pdf` valida acceso
+
+**Variables de entorno:**
+```bash
+# Eliminar:
+RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
+
+# Mantener (interno, no expuesto):
+RUSTFS_ENDPOINT=http://rustfs:9000
+RUSTFS_ACCESS_KEY_ID=rustfsadmin
+RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
+
+# Agregar:
+DOCUMENT_TTL_HOURS=168  # 7 días por defecto
+WORKSPACE_SECRET_KEY=<hmac-secret>
+```
+
+**Pros:**
+- ✅ No requiere IdP externo (Keycloak, Auth0)
+- ✅ Stateless (token lleva la firma)
+- ✅ Revocable (expires_at en tabla)
+- ✅ Limpio, simple de implementar
+
+**Cons:**
+- ❌ No SSO/SAML/OAuth
+- ❌ Tokens largos para usuarios
+- ❌ Sin roles/permisos granulares
+- ❌ Sin metadata de auditoría
+
+---
+
+### OPCIÓN B: JWT + IdP Externo (Enterprise)
+
+**Tiempo estimado de implementación:** 3-5 días
+
+**Arquitectura:**
+```
+Cliente MCP → POST /mcp con Header: Authorization: Bearer <jwt>
+
+JWT firmado por Keycloak/Auth0/AWS Cognito
+Claims: { "sub": "user_123", "workspace": "eng_team" }
+```
+
+**Componentes adicionales requeridos:**
+- Keycloak / Auth0 / AWS Cognito (IdP)
+- JWKS endpoint para validación de firmas
+- Opcional: API Gateway (Kong, Traefik, nginx)
+
+**Flujo:**
+1. Usuario se autentica con IdP → obtiene JWT
+2. Cliente MCP envía `Authorization: Bearer <jwt>`
+3. MCP Server valida JWT contra JWKS del IdP
+4. Extrae `workspace` claim → usa como prefijo en RustFS
+
+**Pros:**
+- ✅ SSO/SAML/OAuth/OpenID Connect
+- ✅ Roles y permisos granulares
+- ✅ Estándar industry
+- ✅ Integración con Active Directory/LDAP
+
+**Cons:**
+- ❌ Requiere infra adicional (Keycloak, etc.)
+- ❌ Más complejo de configurar
+- ❌ Overkill para deployments pequeños
+- ❌ Vendor lock-in con IdP específico
+
+---
+
+### Comparación
+
+| Aspecto | Opción A (Tokens) | Opción B (JWT) |
+|---------|-------------------|----------------|
+| Complejidad | Baja | Alta |
+| Requiere IdP | No | Sí |
+| SSO | No | Sí |
+| Tiempo implementación | 1-2 días | 3-5 días |
+| Revocación | Sí (con DB) | Sí |
+| Audit logs | Limitados | Completos |
+| Multi-tenant | ✅ | ✅ |
+
+---
+
+### Recomendación
+
+| Escenario | Opción |
+|-----------|--------|
+| Personal / Home Lab | **Opción A** |
+| Pequeño equipo sin IdP | **Opción A** |
+| Empresa con Keycloak existente | **Opción B** |
+| SaaS multi-tenant público | **Opción B** |
+
+**Estrategia sugerida:** Implementar primero **Opción A** (1-2 días). Si en el futuro necesitas SSO, migrar a **Opción B** es sencillo (misma estructura de carpetas, solo cambia la validación del token).
+
+---
+
+### Archivos a modificar
+
+**Opción A (Tokens):**
+- `docs/plans/TODO.md` - Este plan
+- `internal/mcp/types.go` - Añadir workspace_context
+- `internal/executor/subprocess.go` - Pasar workspace_id a tools
+- `tools/rustfs_storage/main.py` - Prefijar paths con workspace_id
+- `tools/pdf_reports/main.py` - Prefijar paths con workspace_id
+- `tools/canvas_diagram/main.py` - Prefijar paths con workspace_id
+- `deployments/docker-compose.yml` - Eliminar RUSTFS_PUBLIC_URL
+- `.env.example` - Eliminar RUSTFS_PUBLIC_URL, agregar DOCUMENT_TTL_HOURS
+- Crear: `internal/auth/workspace_validator.go`
+- Crear: `migrations/001_workspaces.sql`
+
+**Opción B (JWT):**
+- Todos los de Opción A
+- Más: `internal/auth/jwt_validator.go`
+- Más: integración con IdP (Keycloak/Auth0)
+
+---
+
+### Tareas comunes (Opción A)
+
+1. [ ] Crear migración SQL: `workspaces`, `workspace_files`
+2. [ ] Crear `internal/auth/workspace_validator.go` (HMAC validation)
+3. [ ] Modificar `internal/mcp/types.go` para workspace context
+4. [ ] Modificar `internal/executor/subprocess.go` para pasar workspace_id
+5. [ ] Actualizar todos los tools Python (rustfs_storage, pdf_reports, canvas_diagram)
+6. [ ] Eliminar `RUSTFS_PUBLIC_URL` de docker-compose.yml y .env.example
+7. [ ] Agregar `DOCUMENT_TTL_HOURS` y `WORKSPACE_SECRET_KEY`
+8. [ ] Implementar cleanup job para archivos expirados
+9. [ ] Tests de integración
+10. [ ] Actualizar documentación

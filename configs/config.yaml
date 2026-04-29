@@ -68,6 +68,27 @@ tools:
       required:
         - text
 
+  # DateTime Tool
+  - name: "datetime"
+    description: "Devuelve la fecha y hora actual del sistema. Formatos: iso (default), human_readable, unix_timestamp. Zonas horarias: local (default), utc."
+    command: "python3"
+    args: ["/app/tools/datetime/main.py"]
+    timeout: "5s"
+    input_schema:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: ["iso", "human_readable", "unix_timestamp"]
+          default: "iso"
+          description: "Output format for the datetime"
+        timezone:
+          type: string
+          enum: ["local", "utc"]
+          default: "local"
+          description: "Timezone for the datetime"
+      required: []
+
   # PDF Report Generation
   - name: "generate_report"
     description: "Genera PDFs profesionales. Soporta: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Retorna PDF base64 + download URL."

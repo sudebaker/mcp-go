@@ -49,7 +49,7 @@ class StructuredLogger:
 
     def _ensure_handler(self):
         if not self.logger.handlers:
-            handler = logging.StreamHandler(sys.stdout)
+            handler = logging.StreamHandler(sys.stderr)
             handler.setLevel(self.logger.level)
             handler.setFormatter(self._JSONFormatter(tool_name=self.tool_name))
             self.logger.addHandler(handler)

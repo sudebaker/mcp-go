@@ -14,29 +14,43 @@ import (
 	"github.com/sudebaker/mcp-go/internal/config"
 )
 
+// HealthStatus represents the health state of a component or the overall system.
 type HealthStatus string
 
 const (
-	StatusHealthy   HealthStatus = "healthy"
-	StatusDegraded  HealthStatus = "degraded"
-	StatusUnhealthy HealthStatus = "unhealthy"
+	StatusHealthy   HealthStatus = "healthy"   // Fully operational
+	StatusDegraded  HealthStatus = "degraded"   // Partial functionality, warning
+	StatusUnhealthy HealthStatus = "unhealthy"  // Critical failure
 )
 
+// CheckResult represents a single health check outcome with timing information.
 type CheckResult struct {
-	Name      string        `json:"name"`
-	Status    HealthStatus  `json:"status"`
-	Message   string        `json:"message,omitempty"`
-	Duration  time.Duration `json:"duration_ms"`
-	Timestamp time.Time     `json:"timestamp"`
+	Name      string        `json:"name"`               // Name of the checked component
+	Status    HealthStatus  `json:"status"`            // Health state
+	Message   string        `json:"message,omitempty"` // Human-readable details
+	Duration  time.Duration `json:"duration_ms"`       // Check execution time in ms
+	Timestamp time.Time     `json:"timestamp"`         // When the check ran
 }
 
+// Checker performs health checks against external dependencies and system resources.
+// It validates connectivity to Redis, PostgreSQL, checks memory usage, and verifies
+// configuration integrity. Results are used for monitoring and alerting.
 type Checker struct {
-	cfg         *config.Config
-	redisClient *redis.Client
-	db          *sql.DB
-	httpClient  *http.Client
+	cfg         *config.Config      // Server configuration for tool validation
+	redisClient *redis.Client        // Redis connection for ping check
+	db          *sql.DB              // PostgreSQL connection for ping check
+	httpClient  *http.Client         // HTTP client for LLM endpoint checks
 }
 
+// NewChecker creates a health Checker with dependencies for performing checks.
+//
+// Args:
+//   cfg: Server configuration (used to verify tools are configured)
+//   redisClient: Redis client (nil if Redis is not used)
+//   db: PostgreSQL database connection (nil if PostgreSQL is not used)
+//
+// Returns:
+//   A Checker ready to run health checks
 func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Checker {
 	return &Checker{
 		cfg:         cfg,
@@ -48,6 +62,11 @@ func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Chec
 	}
 }
 
+// RunAllChecks executes all configured health checks and returns their results.
+// Checks run sequentially; a slow check doesn't affect others.
+//
+// Returns:
+//   Slice of CheckResult, one per check. Order: redis, postgres, config, memory
 func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 	checks := []struct {
 		name string
@@ -68,6 +87,16 @@ func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 	return results
 }
 
+// GetOverallStatus determines the aggregate health status from individual check results.
+// Uses worst-case logic: unhealthy > degraded > healthy.
+//
+// Args:
+//   results: Slice of CheckResult from RunAllChecks
+//
+// Returns:
+//   StatusUnhealthy if any check is unhealthy
+//   StatusDegraded if any check is degraded (but none unhealthy)
+//   StatusHealthy otherwise
 func (c *Checker) GetOverallStatus(results []CheckResult) HealthStatus {
 	hasUnhealthy := false
 	hasDegraded := false
@@ -90,6 +119,8 @@ func (c *Checker) GetOverallStatus(results []CheckResult) HealthStatus {
 	return StatusHealthy
 }
 
+// checkRedis validates Redis connectivity with a 2-second timeout.
+// Returns StatusDegraded if client is nil, StatusUnhealthy if ping fails.
 func (c *Checker) checkRedis(ctx context.Context) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -121,6 +152,8 @@ func (c *Checker) checkRedis(ctx context.Context) CheckResult {
 	return result
 }
 
+// checkPostgres validates PostgreSQL connectivity with a 2-second timeout.
+// Returns StatusDegraded if db is nil, StatusUnhealthy if ping fails.
 func (c *Checker) checkPostgres(ctx context.Context) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -152,6 +185,9 @@ func (c *Checker) checkPostgres(ctx context.Context) CheckResult {
 	return result
 }
 
+// checkConfig validates that configuration is present and tools are defined.
+// StatusDegraded if no tools configured (server won't be useful but can start).
+// StatusUnhealthy only if config itself is nil.
 func (c *Checker) checkConfig(ctx context.Context) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -174,6 +210,10 @@ func (c *Checker) checkConfig(ctx context.Context) CheckResult {
 	return result
 }
 
+// checkMemory monitors Go runtime memory usage.
+// StatusHealthy: heap < 250MB
+// StatusDegraded: heap 250-500MB
+// StatusUnhealthy: heap > 500MB
 func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -204,6 +244,7 @@ func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	return result
 }
 
+// checkToolPaths validates configuration of all registered tools.
 func (c *Checker) checkToolPaths(ctx context.Context) []CheckResult {
 	if c.cfg == nil {
 		return nil
@@ -217,6 +258,7 @@ func (c *Checker) checkToolPaths(ctx context.Context) []CheckResult {
 	return results
 }
 
+// checkToolPath validates a single tool's configuration.
 func (c *Checker) checkToolPath(ctx context.Context, tool config.ToolConfig) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -237,6 +279,8 @@ func (c *Checker) checkToolPath(ctx context.Context, tool config.ToolConfig) Che
 	return result
 }
 
+// checkLLMEndpoint verifies LLM API endpoint is reachable via HTTP GET.
+// Returns StatusHealthy if endpoint is empty (optional), StatusDegraded on failure.
 func (c *Checker) checkLLMEndpoint(ctx context.Context, endpoint string) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -281,6 +325,11 @@ func (c *Checker) checkLLMEndpoint(ctx context.Context, endpoint string) CheckRe
 	return result
 }
 
+// GetHealthMetrics returns current Go runtime metrics for monitoring.
+// Includes heap memory, GC statistics, and goroutine count.
+//
+// Returns:
+//   Map of metric name to value (in bytes for memory, ns for GC, count for others)
 func GetHealthMetrics() map[string]float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -302,6 +351,7 @@ func GetHealthMetrics() map[string]float64 {
 	}
 }
 
+// ExportMetrics converts health metrics to Prometheus metric format for scraping.
 func (c *Checker) ExportMetrics() []prometheus.Metric {
 	metrics := make([]prometheus.Metric, 0)
 

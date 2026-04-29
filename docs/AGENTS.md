@@ -165,50 +165,75 @@ This project uses **RustFS** as a local S3-compatible object storage solution. D
 
 ### URL Architecture
 
-To support external agents accessing files while keeping RustFS within the Docker network, we use a dual-URL approach:
+The system uses three distinct URLs for RustFS access:
+
+| URL | Purpose | Who Uses It |
+|-----|---------|--------------|
+| `RUSTFS_ENDPOINT` | Internal MCP→RustFS communication | Python tools, Go download handler |
+| `RUSTFS_PUBLIC_URL` | External agent→RustFS direct download | Clients downloading files directly |
+| `BASE_URL` | MCP server download links | Clients accessing `/download/` endpoint |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Docker Network                            │
-│  ┌──────────────┐         ┌──────────────┐                  │
-│  │  mcp-server  │────────▶│    rustfs    │:9000             │
-│  └──────────────┘         └──────────────┘                  │
-│         │                                                    │
-│         │ RUSTFS_ENDPOINT=http://rustfs:9000                 │
-│         │ (internal communication)                           │
+│  ┌──────────────┐         ┌──────────────┐                │
+│  │  mcp-server   │────────▶│    rustfs    │:9000           │
+│  └──────────────┘         └──────────────┘                │
+│         │  RUSTFS_ENDPOINT=http://rustfs:9000                │
 └─────────┼────────────────────────────────────────────────────┘
           │
-          │ Generates presigned URL with internal endpoint
-          │
-          ▼
-   http://rustfs:9000/bucket/file?signature...
-          │
-          │ URL Rewriting (in Python tools)
+          │ Tool uploads file → generates presigned URL
+          │ Tool rewrites URL: rustfs:9000 → RUSTFS_PUBLIC_URL
           │
           ▼
    http://192.168.1.100:9000/bucket/file?signature...
           │
-          │ RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
-          │ (external access)
+          │ RUSTFS_PUBLIC_URL - external access
           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              External Agents (outside Docker)               │
-│                     Can download files                      │
+│              External Agents (outside Docker)              │
+│         Download directly from RustFS public URL           │
 └─────────────────────────────────────────────────────────────┘
+
+Alternatively, clients download via MCP server proxy:
+
+   Client → GET /download/rustfs/bucket/object → MCP Server → RustFS presigned redirect
+                      ↑
+                BASE_URL
 ```
 
-### Required Environment Variables
+### Configuration Variables
 
+| Variable | Required | Example | Description |
+|----------|-----------|---------|-------------|
+| `RUSTFS_ENDPOINT` | Yes | `http://rustfs:9000` | Internal endpoint for MCP→RustFS communication |
+| `RUSTFS_PUBLIC_URL` | Yes | `http://192.168.1.100:9000` | Public URL for external agents |
+| `BASE_URL` | Yes | `http://mcp.example.com:8080` | MCP server public URL for `/download/` links |
+| `RUSTFS_ACCESS_KEY_ID` | Yes | `rustfsadmin` | RustFS access key |
+| `RUSTFS_SECRET_ACCESS_KEY` | Yes | `rustfsadmin` | RustFS secret key |
+| `DOWNLOAD_URL_EXPIRY_HOURS` | No | `24` | Presigned URL validity (default: 24h) |
+
+### Common Scenarios
+
+**Scenario 1: RustFS in same Docker compose**
 ```bash
-# Internal endpoint (Docker network communication)
-RUSTFS_ENDPOINT=http://rustfs:9000
+RUSTFS_ENDPOINT=http://rustfs:9000          # Docker DNS resolves 'rustfs'
+RUSTFS_PUBLIC_URL=http://192.168.1.100:9000  # Host IP for external access
+BASE_URL=http://192.168.1.100:8080           # MCP server external URL
+```
 
-# Public endpoint (external agents access) - REQUIRED
-RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
+**Scenario 2: Remote RustFS server**
+```bash
+RUSTFS_ENDPOINT=http://192.168.1.100:9000   # Remote RustFS server
+RUSTFS_PUBLIC_URL=http://192.168.1.100:9000  # Same remote server (public)
+BASE_URL=http://mcp.example.com:8080         # MCP server domain
+```
 
-# Credentials
-RUSTFS_ACCESS_KEY_ID=rustfsadmin
-RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
+**Scenario 3: Remote RustFS with HTTPS**
+```bash
+RUSTFS_ENDPOINT=https://storage.example.com:9000  # HTTPS remote
+RUSTFS_PUBLIC_URL=https://storage.example.com:9000
+BASE_URL=https://mcp.example.com:8080
 ```
 
 ### Tools Using RustFS
@@ -222,9 +247,29 @@ All these tools implement URL rewriting to convert internal URLs to public URLs 
 ### Configuration Notes
 
 - If `RUSTFS_PUBLIC_URL` is not configured, tools will fail with an error
+- If `BASE_URL` is not configured, download links will use `http://localhost:8080` (incorrect for external access)
 - The presigned URLs contain signatures that remain valid after URL rewriting
-- External agents must be able to reach the public URL (firewall rules, routing)
+- External agents must be able to reach `RUSTFS_PUBLIC_URL` (firewall rules, routing)
 - For production, consider HTTPS with a reverse proxy
+
+### Quick Reference
+
+```bash
+# .env file for local development
+RUSTFS_ENDPOINT=http://rustfs:9000
+RUSTFS_PUBLIC_URL=http://localhost:9000
+BASE_URL=http://localhost:8080
+
+# .env file for external access (host IP)
+RUSTFS_ENDPOINT=http://rustfs:9000
+RUSTFS_PUBLIC_URL=http://192.168.1.100:9000
+BASE_URL=http://192.168.1.100:8080
+
+# .env file for remote RustFS
+RUSTFS_ENDPOINT=http://remote-rustfs:9000
+RUSTFS_PUBLIC_URL=http://remote-rustfs:9000
+BASE_URL=http://your-mcp-server:8080
+```
 
 ## Dependencies
 

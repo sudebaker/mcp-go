@@ -206,11 +206,13 @@ Analyzes Excel/CSV files using Pandas and LLM-generated code.
 
 ### analyze_image
 
-Analyzes images using OCR and vision models.
+Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/uploads/image.jpg`), HTTP/HTTPS URLs, and PDF files (converted to image).
+
+**Security:** HTTP/HTTPS URLs are validated against `SSRF_BLOCKED_NETWORKS` before download. Cloud metadata endpoints (169.254.x.x) and loopback addresses are always blocked.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| image_path | string | Yes | URL or path to image |
+| image_path | string | Yes | Local path, HTTP/HTTPS URL, or path to PDF file |
 | task | string | Yes | `ocr`, `describe`, `extract_entities`, `answer` |
 | question | string | Conditional | Required for `answer` task |
 
@@ -476,13 +478,15 @@ Interacts with RustFS/S3 storage for file operations.
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
 | S3_BUCKET_NAME | default | Bucket name |
-| SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges |
+| SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges (whitelist) |
+| SSRF_BLOCKED_NETWORKS | 169.254.0.0/16,127.0.0.0/8 | Comma-separated CIDR ranges to block (blacklist) |
 | S3_OPERATION_TIMEOUT_SECONDS | 30 | Timeout for S3 read operations (seconds) |
 | RUSTFS_PRESIGNED_TTL_SECONDS | 3600 | Presigned URL validity window (seconds) |
 | DOWNLOAD_URL_EXPIRY_HOURS | 24 | Download URL validity window (hours) |
 
 **Security Notes:**
 - `SSRF_ALLOWLIST`: Controls which internal hosts can be accessed via `file_url` parameter. Default allows only `rustfs`.
+- `SSRF_BLOCKED_NETWORKS`: Additional CIDR ranges to block (e.g., "192.168.1.0/24"). Default blocks only link-local (169.254.x.x) and loopback ranges. Internal network ranges (10.x, 172.16-31.x, 192.168.x) are allowed by default.
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
 - `DOWNLOAD_URL_EXPIRY_HOURS`: Controls how long `/download/` URLs remain valid (24h default).

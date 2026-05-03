@@ -74,6 +74,23 @@ except ImportError:
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
 
+
+def clean_output(output: str) -> str:
+    """
+    Remove protocol chunks and result markers from output.
+    These are used for streaming but should not appear in final output.
+    """
+    if not output:
+        return output
+    lines = output.split('\n')
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(CHUNK_PREFIX) or stripped.startswith(RESULT_PREFIX):
+            continue
+        cleaned.append(line)
+    return '\n'.join(cleaned)
+
 # Input validation limits
 MAX_QUESTION_LENGTH = 2000
 MAX_FILE_SIZE_MB = 100
@@ -627,9 +644,13 @@ def execute_code_safely(
     }
 
 
-def format_result(result: Any, output_format: str) -> str:
+def format_result(result: Any, output_format: str, stdout: str = "") -> str:
     """Format the result based on requested format."""
     if result is None:
+        # Check if there's output in stdout that should be shown instead
+        cleaned = clean_output(stdout)
+        if cleaned.strip():
+            return cleaned
         return "No result generated."
 
     if isinstance(result, pd.DataFrame):
@@ -973,12 +994,14 @@ def main() -> None:
         emit_chunk("status", {"message": "Formatting results"})
 
         result = exec_result["result"]
-        formatted_result = format_result(result, output_format)
+        formatted_result = format_result(result, output_format, exec_result.get("stdout", ""))
 
         response_text = f"**Question:** {question}\n\n"
         if exec_result["stdout"]:
+            # Clean output of protocol chunks before displaying
+            cleaned_stdout = clean_output(exec_result["stdout"])
             response_text += (
-                f"**Analysis output:**\n```\n{exec_result['stdout']}\n```\n\n"
+                f"**Analysis output:**\n```\n{cleaned_stdout}\n```\n\n"
             )
         response_text += f"**Result:**\n{formatted_result}"
 

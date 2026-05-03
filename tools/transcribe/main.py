@@ -93,7 +93,7 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
 
 
 def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
-    """Decode base64 audio, save to temp file and transcribe."""
+    """Decode base64 audio, save to temp file in /data and transcribe."""
     try:
         if "," in audio_b64:
             audio_b64 = audio_b64.split(",", 1)[1]
@@ -107,7 +107,12 @@ def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = N
         return None, f"Invalid base64 audio: {str(e)}"
 
     suffix = Path(filename).suffix.lower() or ".wav"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+
+    # Create temp file in /data/tmp (within allowed directory for transcription)
+    tmp_dir = Path("/data/tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir)) as tmp:
         tmp.write(audio_bytes)
         tmp_path = tmp.name
 

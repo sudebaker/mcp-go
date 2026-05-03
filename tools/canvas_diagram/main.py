@@ -326,7 +326,8 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
     previous_nodes = []
     node_id_counter = 0
 
-    parts = re.split(r"->|→", dsl)
+    # Better regex to handle arrow with optional spaces
+    parts = re.split(r'\s*->\s*|\s*→\s*', dsl)
 
     for i, part in enumerate(parts):
         part = part.strip()
@@ -341,6 +342,7 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
         current_level_nodes = []
 
         for node_str in branch_nodes:
+            # Extract color suffix first
             color_match = re.search(r"#(\w+)$", node_str)
             color = None
             if color_match:
@@ -350,6 +352,13 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
             node_label = node_str
             node_type = "text"
 
+            # Handle [label] syntax: "A[Usuario]" -> node "A" with label "Usuario"
+            label_match = re.match(r"^(\w+)\[(.+)\]$", node_str)
+            if label_match:
+                node_str = label_match.group(1)
+                node_label = label_match.group(2)
+
+            # Check for (start/end) syntax
             if node_str.startswith("(") and node_str.endswith(")"):
                 node_label = node_str[1:-1]
                 node_type = "start"
@@ -588,12 +597,17 @@ def generate_from_description(
     if llm_api_url:
         prompt = generate_dsl_prompt(description)
         dsl = call_llm(llm_api_url, llm_model, prompt)
+        # Validate that we got a usable DSL (contains at least one arrow or node)
+        if dsl and '->' not in dsl and '→' not in dsl and len(dsl.strip()) < 3:
+            dsl = None  # Fall back to using description directly
 
     if not dsl:
+        # If no LLM or LLM failed, create simple DSL from description
+        # Try to parse natural language arrows like "A -> B -> C"
         dsl = description
 
     if layout == "auto" or not layout:
-        layout = "auto"
+        layout = "horizontal"
 
     canvas_json = parse_dsl_to_canvas(dsl, layout)
     final_layout = canvas_json.get("layout", layout)

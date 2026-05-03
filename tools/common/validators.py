@@ -380,33 +380,100 @@ def validate_write_path(
     return path
 
 
-def list_files(
-    directory: str, readonly_dir: str = "/data/input", pattern: str = "*"
-) -> list[Path]:
+def validate_url_ssrf(url: str) -> tuple[bool, Optional[str]]:
     """
-    Safely list files inside a directory.
+    Validate URL against SSRF protection rules.
 
-    Args:
-        directory: Directory to list (relative to readonly_dir).
-        readonly_dir: Base read-only directory.
-        pattern: Glob pattern to filter files.
+    Blocks only link-local and metadata endpoints that should never be
+    accessible from any context. Range 10.x, 172.16-31.x, 192.168.x are
+    allowed by default (internal network) but can be configured via
+    SSRF_BLOCKED_NETWORKS env var if needed.
+
+    Environment variables:
+        SSRF_BLOCKED_NETWORKS: comma-separated CIDR ranges to block
+                               (e.g., "192.168.1.0/24,10.0.0.0/8")
 
     Returns:
-        Sorted list of Path objects matching the pattern.
-
-    Raises:
-        PathValidationError: If the resolved directory is outside the allowed area.
+        (is_valid, error_message) tuple
     """
     try:
-        allowed = Path(readonly_dir).resolve(strict=True)
-        target_dir = (allowed / directory).resolve()
-    except (OSError, RuntimeError) as e:
-        raise PathValidationError(f"Invalid directory: {directory}") from e
+        from urllib.parse import urlparse
+    except ImportError:
+        return True, None  # Fail open if urllib not available
 
-    if not target_dir.is_relative_to(allowed):
-        raise PathValidationError(f"Directory outside readonly area: {directory}")
+    try:
+        import ipaddress
+    except ImportError:
+        return True, None  # Fail open if ipaddress not available
 
-    if not target_dir.is_dir():
-        raise PathValidationError(f"Not a directory: {directory}")
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
 
-    return sorted(target_dir.glob(pattern))
+    if not hostname:
+        return False, "URL must have a valid hostname"
+
+    # Default blocked: link-local (cloud metadata) and loopback
+    # These should NEVER be accessible regardless of network context
+    DEFAULT_BLOCKED_NETWORKS = [
+        ipaddress.ip_network("169.254.0.0/16"),   # AWS/Azure/GCP metadata
+        ipaddress.ip_network("127.0.0.0/8"),      # IPv4 loopback
+        ipaddress.ip_network("0.0.0.0/8"),        # Current network
+        ipaddress.ip_network("::1/128"),          # IPv6 loopback
+        ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
+        ipaddress.ip_network("fc00::/7"),         # IPv6 unique local
+    ]
+
+    # Load additional blocked networks from environment
+    blocked_networks = DEFAULT_BLOCKED_NETWORKS.copy()
+    env_blocked = os.environ.get("SSRF_BLOCKED_NETWORKS", "").strip()
+    if env_blocked:
+        for cidr in env_blocked.split(","):
+            cidr = cidr.strip()
+            if cidr:
+                try:
+                    blocked_networks.append(ipaddress.ip_network(cidr))
+                except ValueError:
+                    pass  # Skip invalid CIDR, don't fail
+
+    # Resolve hostname to IP address for comparison
+    try:
+        # Check if hostname is already an IP address
+        addr = ipaddress.ip_address(hostname)
+        addr_version = addr.version
+        is_ip = True
+    except ValueError:
+        is_ip = False
+        addr = None
+
+    if is_ip:
+        # Direct IP address provided
+        for network in blocked_networks:
+            if addr in network:
+                return False, f"IP {hostname} is in blocked range {network}"
+        return True, None
+
+    # hostname is a domain - resolve it and check all IPs
+    # For internal networks, we trust DNS resolution but still check against blocked ranges
+    try:
+        import socket
+        # Set timeout to avoid hanging on DNS
+        socket.setdefaulttimeout(3)
+        IPs = socket.getaddrinfo(hostname, None)
+        socket.setdefaulttimeout(None)  # Reset
+
+        for family, _, _, _, sockaddr in IPs:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                for network in blocked_networks:
+                    if ip in network:
+                        return False, f"Hostname {hostname} resolves to blocked IP range {network}"
+            except ValueError:
+                continue  # Skip invalid IPs
+
+    except (socket.gaierror, socket.timeout, OSError):
+        # DNS resolution failed - we cannot validate
+        # Fail open to not block legitimate URLs due to DNS issues
+        return True, None
+
+    return True, None

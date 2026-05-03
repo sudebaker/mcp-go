@@ -82,6 +82,7 @@ pytesseract>=0.3.10
 
 # Knowledge Base
 psycopg2-binary>=2.9.0
+fastembed>=0.4.0
 sentence-transformers>=2.2.0
 transformers>=4.38.0,<5.0.0
 accelerate>=0.26.0
@@ -101,7 +102,12 @@ EOF
 RUN pip install --no-cache-dir torch==2.5.1+cpu torchvision==0.20.1+cpu torchaudio==2.5.1+cpu --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download sentence-transformers model
+# Pre-download and cache embedding models for offline use
+# fastembed stores models in ~/.cache/fastembed/ (ONNX weights)
+# sentence-transformers stores in ~/.cache/huggingface/ (PyTorch weights)
+ENV FASTEMBED_CACHE_PATH=/root/.cache/fastembed
+RUN mkdir -p /root/.cache/fastembed && \
+    python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')"
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Stage 4: Final image
@@ -113,8 +119,9 @@ WORKDIR /app
 COPY --from=python-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 
-# Copy pre-downloaded models
+# Copy pre-downloaded models (both sentence-transformers and fastembed caches)
 COPY --from=python-deps /root/.cache/huggingface /root/.cache/huggingface
+COPY --from=python-deps /root/.cache/fastembed /root/.cache/fastembed
 
 # Copy Go binary
 COPY --from=go-builder /build/mcp-server /app/mcp-server

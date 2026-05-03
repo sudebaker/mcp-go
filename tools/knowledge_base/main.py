@@ -72,9 +72,10 @@ MIN_TOP_K = 1
 # Regex patterns for input validation
 COLLECTION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 # Allow common search characters for natural language queries
-# Permits: letters, numbers, spaces, punctuation, symbols commonly used in search
+# Permits: all printable UTF-8 characters except control chars and backslash
+# Replaced the restrictive whitelist with a blacklist approach for full i18n support
 SAFE_QUERY_PATTERN = re.compile(
-    r"^[\w\s\-.,!?;:()'\"&/\\%#@+=\$\[\]<>~`|]+$", re.UNICODE
+    r"^[^\x00-\x1F\x7F\\]+$", re.UNICODE
 )
 
 

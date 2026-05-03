@@ -25,7 +25,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.doc_extractor import download_and_extract, extract_text_preview
+from common.doc_extractor import download_and_extract, extract_text_preview, extract_inline_file
 from common.structured_logging import get_logger
 from common.llm_cache import call_llm_with_cache
 
@@ -225,20 +225,33 @@ def main() -> None:
 
         for file_info in files_list:
             url = file_info.get("url", "")
-            filename = file_info.get("name", "")
+            filename = file_info.get("name", "") or file_info.get("filename", "")
+            data = file_info.get("data", "")
 
-            if not url or not filename:
+            if not filename:
                 errors.append(
                     {
-                        "filename": filename or "unknown",
-                        "error": "Missing url or name",
+                        "filename": "unknown",
+                        "error": "Missing filename (use 'name' or 'filename' field)",
+                    }
+                )
+                continue
+
+            if not url and not data:
+                errors.append(
+                    {
+                        "filename": filename,
+                        "error": "Missing url or data (provide one)",
                     }
                 )
                 continue
 
             try:
                 logger.info(f"Classifying: {filename}")
-                extraction = download_and_extract(url, filename)
+                if data:
+                    extraction = extract_inline_file(data, filename)
+                else:
+                    extraction = download_and_extract(url, filename)
 
                 classification = classify_document(
                     extraction.text,

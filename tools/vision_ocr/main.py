@@ -77,8 +77,8 @@ def download_image_if_url(image_path: str) -> str:
     local_path = tmp_dir / filename
 
     try:
-        with requests.Client(timeout=60.0) as client:
-            response = client.get(image_path, follow_redirects=False)
+        with requests.Session() as client:
+            response = client.get(image_path, timeout=60.0)
             response.raise_for_status()
             local_path.write_bytes(response.content)
         return str(local_path)

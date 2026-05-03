@@ -459,7 +459,9 @@ def main() -> None:
             output_path = get_default_output_dir() / f"{report_type}_{timestamp}.pdf"
         else:
             output_path_str = output_path
-            validate_output_path(output_path_str, str(get_default_output_dir()))
+            # Allow /tmp for temporary reports, /data for persistent ones
+            allowed_dir = "/tmp" if output_path_str.startswith("/tmp/") else "/data"
+            validate_output_path(output_path_str, allowed_dir)
             output_path = Path(output_path_str)
 
         env = get_template_env()

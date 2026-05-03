@@ -48,7 +48,12 @@ def write_response(response: dict[str, Any]) -> None:
 
 
 def get_rustfs_client() -> Optional[Minio]:
+    """
+    Get MinIO client configured for RustFS.
+    Returns None if credentials are missing or connection fails.
+    """
     if not MINIO_AVAILABLE:
+        logger.error("minio library not installed. Install with: pip install minio")
         return None
 
     endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
@@ -57,13 +62,26 @@ def get_rustfs_client() -> Optional[Minio]:
     use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
 
     if not endpoint:
+        logger.error(
+            "Missing RustFS configuration",
+            extra_data={
+                "hint": "Set RUSTFS_ENDPOINT environment variable",
+                "example": "rustfs:9000 or localhost:9000"
+            },
+        )
         return None
 
     if not access_key or not secret_key:
         logger.error(
             "Missing RustFS credentials",
             extra_data={
-                "hint": "Set RUSTFS_ACCESS_KEY_ID and RUSTFS_SECRET_ACCESS_KEY"
+                "missing": [
+                    k for k, v in {
+                        "RUSTFS_ACCESS_KEY_ID": access_key,
+                        "RUSTFS_SECRET_ACCESS_KEY": secret_key,
+                    }.items() if not v
+                ],
+                "hint": "Set RUSTFS_ACCESS_KEY_ID and RUSTFS_SECRET_ACCESS_KEY environment variables"
             },
         )
         return None
@@ -75,8 +93,18 @@ def get_rustfs_client() -> Optional[Minio]:
             secret_key=secret_key,
             secure=use_ssl,
         )
+        # Verify connection by listing buckets
+        client.list_buckets()
         return client
-    except Exception:
+    except Exception as e:
+        logger.error(
+            "Failed to connect to RustFS",
+            extra_data={
+                "endpoint": endpoint,
+                "error": str(e),
+                "hint": "Check if RustFS service is running and network connectivity"
+            },
+        )
         return None
 
 

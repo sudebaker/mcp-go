@@ -2,6 +2,7 @@
 """
 Vision and OCR Tool.
 Analyzes images using OCR (Tesseract) and vision models (LLaVA via Ollama).
+Supports local paths, HTTP URLs, and PDF files.
 """
 
 import json
@@ -10,13 +11,16 @@ import re
 import sys
 import base64
 import traceback
+import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.validators import validate_file_path
+from common.validators import validate_file_path, PathValidationError
+from common.doc_extractor import download_file
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
 
@@ -50,6 +54,56 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
+
+
+def download_image_if_url(image_path: str) -> str:
+    """
+    Download image if it's a URL, return local path.
+    Saves to /data/tmp for processing.
+    """
+    if not image_path.startswith(('http://', 'https://')):
+        return image_path
+
+    tmp_dir = Path("/data/tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    parsed = urlparse(image_path)
+    filename = Path(parsed.path).name or f"image_{uuid.uuid4().hex[:8]}.jpg"
+    local_path = tmp_dir / filename
+
+    try:
+        with requests.Client(timeout=60.0) as client:
+            response = client.get(image_path, follow_redirects=False)
+            response.raise_for_status()
+            local_path.write_bytes(response.content)
+        return str(local_path)
+    except Exception as e:
+        raise ValueError(f"Failed to download image from URL: {str(e)}")
+
+
+def convert_pdf_page_to_image(pdf_path: str, page: int = 0) -> str:
+    """
+    Convert a PDF page to a temporary image file.
+    Requires pdf2image library.
+    """
+    try:
+        from pdf2image import convert_from_path
+    except ImportError:
+        raise ImportError("pdf2image is required for PDF processing. Install with: pip install pdf2image")
+
+    tmp_dir = Path("/data/tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = tmp_dir / f"pdf_page_{page}_{uuid.uuid4().hex[:8]}.png"
+
+    try:
+        images = convert_from_path(pdf_path, first_page=page + 1, last_page=page + 1, dpi=150)
+        if images:
+            images[0].save(str(output_path), 'PNG')
+            return str(output_path)
+        raise ValueError(f"No page {page} found in PDF")
+    except Exception as e:
+        raise ValueError(f"Failed to convert PDF to image: {str(e)}")
 
 
 def read_request() -> dict[str, Any]:
@@ -279,6 +333,52 @@ def main() -> None:
                 }
             )
             return
+
+        # Handle URLs by downloading to /data/tmp
+        try:
+            image_path = download_image_if_url(image_path)
+        except ValueError as e:
+            write_response(
+                {
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "INVALID_URL",
+                        "message": str(e),
+                    },
+                }
+            )
+            return
+
+        # Handle PDF files by converting to image
+        pdf_page = 0
+        if image_path.lower().endswith('.pdf'):
+            try:
+                image_path = convert_pdf_page_to_image(image_path, pdf_page)
+            except ImportError as e:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "DEPENDENCY_MISSING",
+                            "message": str(e),
+                        },
+                    }
+                )
+                return
+            except ValueError as e:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "PDF_ERROR",
+                            "message": str(e),
+                        },
+                    }
+                )
+                return
 
         try:
             validate_file_path(image_path)

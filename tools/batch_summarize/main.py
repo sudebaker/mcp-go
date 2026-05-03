@@ -260,9 +260,19 @@ def main() -> None:
             "errors": errors,
         }
 
-        response_text = f"Summarized {processed_files} of {len(files_list)} files"
+        response_text = f"Summarized {processed_files} of {len(files_list)} files\n\n"
+
+        if summaries:
+            response_text += "**Individual Summaries:**\n\n"
+            for s in summaries:
+                # Truncate long summaries
+                summary_text = s['summary'][:800] + "..." if len(s['summary']) > 800 else s['summary']
+                response_text += f"**📄 {s['filename']}** ({s['char_count']:,} chars)\n{summary_text}\n\n"
+
         if master_summary:
-            response_text += f" (with master summary)"
+            response_text += f"\n**Master Summary:**\n{master_summary[:1500]}"
+            if len(master_summary) > 1500:
+                response_text += "..."
 
         write_response(
             {

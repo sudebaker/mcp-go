@@ -265,8 +265,26 @@ def main() -> None:
             cat = c.get("category", "other")
             category_counts[cat] = category_counts.get(cat, 0) + 1
 
-        summary = f"Classified {len(classifications)} files. "
-        summary += ", ".join(f"{k}: {v}" for k, v in category_counts.items())
+        summary_lines = [f"Classified {len(classifications)} documents:"]
+        for c in classifications:
+            conf = c.get("confidence", 0)
+            lang = c.get("language", "unknown")
+            just = c.get("justification", "N/A")
+            # Truncate justification if too long
+            if len(just) > 150:
+                just = just[:150] + "..."
+            summary_lines.append(
+                f"\n• **{c.get('filename', 'unknown')}** → {c.get('category', 'other')}"
+                f" | Confidence: {conf:.0%} | Lang: {lang}"
+                f"\n  └ {just}"
+            )
+
+        if errors:
+            summary_lines.append(f"\n**Errors:** {len(errors)} files failed")
+            for err in errors[:3]:  # Show first 3 errors
+                summary_lines.append(f"  - {err.get('filename', 'unknown')}: {err.get('error', 'unknown')}")
+
+        summary = "".join(summary_lines)
 
         structured_content = {
             "classifications": classifications,

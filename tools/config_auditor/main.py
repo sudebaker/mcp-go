@@ -419,14 +419,29 @@ def main() -> None:
         high_count = sum(1 for f in all_findings if f.get("severity") == "high")
         medium_count = sum(1 for f in all_findings if f.get("severity") == "medium")
 
-        summary = f"Scored {score}/100. "
-        if critical_count > 0:
-            summary += f"Found {critical_count} critical, "
-        if high_count > 0:
-            summary += f"{high_count} high, "
-        if medium_count > 0:
-            summary += f"{medium_count} medium "
-        summary += "issues."
+        if all_findings:
+            summary = f"Security Score: {score}/100. "
+            if critical_count > 0:
+                summary += f"CRITICAL: {critical_count}, "
+            if high_count > 0:
+                summary += f"HIGH: {high_count}, "
+            if medium_count > 0:
+                summary += f"MEDIUM: {medium_count}, "
+            summary = summary.rstrip(", ") + " issues found."
+        else:
+            summary = f"Security Score: {score}/100. No issues found."
+
+        # Include top findings in text response
+        top_findings = all_findings[:5] if all_findings else []
+        if top_findings:
+            summary += "\n\n**Top Issues:**\n"
+            for f in top_findings:
+                summary += f"- [{f.get('severity', '?').upper()}] {f.get('description', 'N/A')}\n"
+            if len(all_findings) > 5:
+                summary += f"\n_...and {len(all_findings) - 5} more issues_"
+
+        if severity_filter != "all":
+            summary += f"\n\n_Filtered by: {severity_filter}_"
 
         structured_content = {
             "findings": all_findings,

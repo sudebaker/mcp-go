@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.validators import validate_file_path, PathValidationError
+from common.validators import validate_file_path, PathValidationError, validate_url_ssrf
 from common.doc_extractor import download_file
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
@@ -63,6 +63,11 @@ def download_image_if_url(image_path: str) -> str:
     """
     if not image_path.startswith(('http://', 'https://')):
         return image_path
+
+    # Security: validate URL against SSRF protection rules
+    is_valid, error = validate_url_ssrf(image_path)
+    if not is_valid:
+        raise ValueError(f"URL blocked by security policy: {error}")
 
     tmp_dir = Path("/data/tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)

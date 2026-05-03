@@ -1,15 +1,13 @@
 """
-Thread-safe embedding model cache with security hardening.
-
-Security Features:
-- Proper thread-safe singleton pattern
-- Memory management for large models
-- Model validation and whitelisting
+Thread-safe embedding model cache with fastembed (ONNX) as primary backend.
+Falls back to sentence-transformers (PyTorch) if fastembed is unavailable.
+Optimized for air-gapped, low-latency deployments.
 """
 
 import threading
 import os
 import sys
+import numpy as np
 from typing import Optional
 
 # Add parent directory to path for common imports
@@ -18,15 +16,22 @@ from common.structured_logging import get_logger
 
 logger = get_logger(__name__, "model_cache")
 
+# ── Backend detection ──────────────────────────────────────────────────────
+try:
+    from fastembed import TextEmbedding
+    FASTEMBED_AVAILABLE = True
+except ImportError:
+    FASTEMBED_AVAILABLE = False
+    TextEmbedding = None  # type: ignore
+
 try:
     from sentence_transformers import SentenceTransformer
-
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
     SentenceTransformer = None  # type: ignore
 
-# Security: Whitelist of allowed embedding models
+# ── Security: Whitelist of allowed embedding models ────────────────────────
 ALLOWED_MODELS = {
     "all-MiniLM-L6-v2",
     "all-MiniLM-L12-v2",
@@ -34,110 +39,139 @@ ALLOWED_MODELS = {
     "paraphrase-multilingual-MiniLM-L12-v2",
 }
 
+# fastembed uses HuggingFace-style IDs even when model name is short
+FASTEMBED_MODEL_MAP = {
+    "all-MiniLM-L6-v2": "sentence-transformers/all-MiniLM-L6-v2",
+    "all-MiniLM-L12-v2": "sentence-transformers/all-MiniLM-L12-v2",
+    "paraphrase-MiniLM-L6-v2": "sentence-transformers/paraphrase-MiniLM-L6-v2",
+    "paraphrase-multilingual-MiniLM-L12-v2": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+}
 
-class ModelCache:
-    """
-    Thread-safe singleton cache for embedding models.
 
-    Security: Prevents multiple model loads and validates model names.
-    """
+class _EmbeddingModelWrapper:
+    """Universal wrapper that provides a single .encode() interface."""
 
-    _instance = None
-    _lock = threading.RLock()  # Reentrant lock for better thread safety
-    _model: Optional["SentenceTransformer"] = None
-    _model_name: Optional[str] = None
+    def __init__(self, model, backend: str, model_name: str):
+        self._model = model
+        self._backend = backend
+        self._model_name = model_name
 
-    @classmethod
-    def get_model(cls, model_name: str = "all-MiniLM-L6-v2") -> "SentenceTransformer":
-        """
-        Get or load an embedding model with thread-safe caching.
+    def encode(self, texts: list[str], show_progress_bar: bool = False) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, 384), dtype=np.float32)
 
-        Args:
-            model_name: Name of the model to load (must be in whitelist)
-
-        Returns:
-            Loaded SentenceTransformer model
-
-        Raises:
-            RuntimeError: If sentence-transformers is not available
-            ValueError: If model_name is not in whitelist
-        """
-        if not SENTENCE_TRANSFORMERS_AVAILABLE:
-            raise RuntimeError(
-                "sentence-transformers not available. Install with: pip install sentence-transformers"
+        if self._backend == "fastembed":
+            # fastembed.embed() returns a generator of float lists
+            embeddings = list(self._model.embed(texts))
+            return np.array(embeddings, dtype=np.float32)
+        else:
+            # sentence-transformers
+            return self._model.encode(
+                texts,
+                show_progress_bar=show_progress_bar,
+                convert_to_numpy=True,
             )
 
-        # SECURITY: Validate model name against whitelist
+
+class ModelCache:
+    """Thread-safe singleton cache for embedding models."""
+
+    _instance = None
+    _lock = threading.RLock()
+    _model: Optional[_EmbeddingModelWrapper] = None
+    _model_name: Optional[str] = None
+    _backend_used: str = ""
+
+    @classmethod
+    def get_model(cls, model_name: str = "all-MiniLM-L6-v2") -> _EmbeddingModelWrapper:
         if model_name not in ALLOWED_MODELS:
             raise ValueError(
                 f"Model '{model_name}' is not in the allowed models list. "
                 f"Allowed: {', '.join(ALLOWED_MODELS)}"
             )
 
-        # Thread-safe double-checked locking
         with cls._lock:
-            if cls._model is None or cls._model_name != model_name:
+            if cls._model is not None and cls._model_name == model_name:
+                return cls._model
+
+            # Try fastembed first (ONNX, ~200ms load, low memory)
+            if FASTEMBED_AVAILABLE:
+                fastembed_id = FASTEMBED_MODEL_MAP.get(model_name, model_name)
                 logger.info(
-                    "Loading embedding model",
-                    extra_data={"model_name": model_name, "reload": cls._model is not None},
+                    "Loading embedding model (fastembed/ONNX)",
+                    extra_data={"model_name": model_name, "fastembed_id": fastembed_id},
                 )
-
-                # Clear old model if switching
-                if cls._model is not None and cls._model_name != model_name:
-                    logger.info(
-                        "Clearing old model", extra_data={"old_model": cls._model_name}
-                    )
-                    cls._model = None
-
                 try:
-                    cls._model = SentenceTransformer(model_name)
+                    raw_model = TextEmbedding(model_name=fastembed_id)
+                    cls._model = _EmbeddingModelWrapper(raw_model, "fastembed", model_name)
                     cls._model_name = model_name
+                    cls._backend_used = "fastembed"
                     logger.info(
-                        "Model loaded successfully", extra_data={"model_name": model_name}
+                        "Model loaded successfully (fastembed)",
+                        extra_data={"model_name": model_name},
                     )
+                    return cls._model
+                except Exception as e:
+                    logger.warning(
+                        "fastembed failed, will try sentence-transformers fallback",
+                        extra_data={"error": str(e), "model_name": model_name},
+                    )
+
+            # Fallback to sentence-transformers (PyTorch, ~12s load)
+            if SENTENCE_TRANSFORMERS_AVAILABLE:
+                logger.info(
+                    "Loading embedding model (sentence-transformers/PyTorch) – fallback",
+                    extra_data={"model_name": model_name},
+                )
+                try:
+                    raw_model = SentenceTransformer(model_name)
+                    cls._model = _EmbeddingModelWrapper(raw_model, "sentence-transformers", model_name)
+                    cls._model_name = model_name
+                    cls._backend_used = "sentence-transformers"
+                    logger.info(
+                        "Model loaded successfully (sentence-transformers fallback)",
+                        extra_data={"model_name": model_name},
+                    )
+                    return cls._model
                 except Exception as e:
                     logger.error(
-                        "Failed to load model",
+                        "Failed to load sentence-transformers fallback",
                         extra_data={"model_name": model_name, "error": str(e)},
                     )
                     raise RuntimeError(
                         f"Failed to load model '{model_name}': {str(e)}"
                     ) from e
 
-        return cls._model
+            # Nothing available
+            raise RuntimeError(
+                "No embedding backend available. Install fastembed for fast loading (air-gapped) "
+                "or sentence-transformers for PyTorch fallback."
+            )
 
     @classmethod
-    def clear(cls):
-        """Clear the cached model to free memory."""
+    def clear(cls) -> None:
         with cls._lock:
             if cls._model is not None:
-                logger.info(
-                    "Clearing model cache", extra_data={"model_name": cls._model_name}
-                )
+                logger.info("Clearing model cache", extra_data={"model_name": cls._model_name})
                 cls._model = None
                 cls._model_name = None
+                cls._backend_used = ""
 
     @classmethod
     def is_loaded(cls) -> bool:
-        """Check if a model is currently loaded."""
         with cls._lock:
             return cls._model is not None
 
     @classmethod
     def get_loaded_model_name(cls) -> Optional[str]:
-        """Get the name of the currently loaded model."""
         with cls._lock:
             return cls._model_name
 
+    @classmethod
+    def get_backend(cls) -> str:
+        with cls._lock:
+            return cls._backend_used
 
-def get_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> "SentenceTransformer":
-    """
-    Get an embedding model (convenience wrapper for ModelCache.get_model).
 
-    Args:
-        model_name: Name of the model to load
-
-    Returns:
-        Loaded SentenceTransformer model
-    """
+def get_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> _EmbeddingModelWrapper:
     return ModelCache.get_model(model_name)

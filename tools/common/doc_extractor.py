@@ -345,6 +345,27 @@ def extract_text_from_buffer(
     )
 
 
+def extract_inline_file(data_base64: str, filename: str) -> ExtractionResult:
+    """
+    Extract text from a base64-encoded inline file.
+
+    Args:
+        data_base64: Base64-encoded file content
+        filename: Original filename (used for format detection)
+
+    Returns:
+        ExtractionResult with extracted text
+    """
+    import base64
+    try:
+        decoded = base64.b64decode(data_base64)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 data for {filename}: {e}")
+
+    buffer = io.BytesIO(decoded)
+    return extract_text_from_buffer(buffer, filename)
+
+
 def download_and_extract(url: str, filename: str) -> ExtractionResult:
     """
     Download a file from URL and extract its text content.

@@ -75,6 +75,9 @@ type ExecutionConfig struct {
 	WorkingDir string `yaml:"working_dir"`
 	// Environment is a map of environment variables passed to tool processes
 	Environment map[string]string `yaml:"environment"`
+	// MaxConcurrency limits simultaneous subprocess executions (default: 5)
+	// Prevents fork-bomb under high load. Set to 0 for unlimited (not recommended).
+	MaxConcurrency int `yaml:"max_concurrency"`
 }
 
 // ToolConfig defines a single tool's execution parameters, input schema,
@@ -238,6 +241,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Execution.WorkingDir == "" {
 		cfg.Execution.WorkingDir = "/data"
+	}
+	if cfg.Execution.MaxConcurrency <= 0 {
+		cfg.Execution.MaxConcurrency = 5
 	}
 
 	// Expand environment variables in the environment map

@@ -49,6 +49,7 @@ const (
 type Executor struct {
 	config *config.Config  // Server configuration including tool definitions
 	tracer *tracing.Tracer // For distributed tracing of tool executions
+	sem    chan struct{}    // Semaphore limiting concurrent subprocess executions
 }
 
 // New creates a new Executor with no-op tracing enabled.
@@ -66,6 +67,7 @@ func New(cfg *config.Config) *Executor {
 	return &Executor{
 		config: cfg,
 		tracer: tracing.NoOpTracer(),
+		sem:    make(chan struct{}, cfg.Execution.MaxConcurrency),
 	}
 }
 
@@ -88,6 +90,7 @@ func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
 	return &Executor{
 		config: cfg,
 		tracer: tracer,
+		sem:    make(chan struct{}, cfg.Execution.MaxConcurrency),
 	}
 }
 
@@ -134,6 +137,20 @@ type ExecuteResult struct {
 //   - ErrorCodeTimeout: execution exceeded the configured timeout
 //   - ErrorCodeExecutionFailed: subprocess error, parsing error, or tool error
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	// Acquire semaphore slot for concurrent subprocess execution
+	// Blocks if max concurrency reached (prevents fork-bomb under load)
+	log.Debug().
+		Str("tool", toolName).
+		Int("max_concurrency", cap(e.sem)).
+		Int("available_slots", cap(e.sem)-len(e.sem)).
+		Msg("Acquiring semaphore slot")
+	select {
+	case e.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("execution cancelled while waiting for concurrency slot: %w", ctx.Err())
+	}
+	defer func() { <-e.sem }()
+
 	// Start tracing span for tool execution
 	span, _ := e.tracer.StartSpan(ctx, fmt.Sprintf("execute_tool:%s", toolName))
 	defer span.End()

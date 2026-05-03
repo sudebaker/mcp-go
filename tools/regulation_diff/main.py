@@ -26,7 +26,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.doc_extractor import download_and_extract
+from common.doc_extractor import download_and_extract, extract_inline_file
 from common.structured_logging import get_logger
 from common.llm_cache import call_llm_with_cache
 
@@ -195,17 +195,19 @@ def main() -> None:
 
         old_url = old_file.get("url", "")
         new_url = new_file.get("url", "")
-        old_filename = old_file.get("name", "old_version")
-        new_filename = new_file.get("name", "new_version")
+        old_filename = old_file.get("name", "") or old_file.get("filename", "old_version")
+        new_filename = new_file.get("name", "") or new_file.get("filename", "new_version")
+        old_data = old_file.get("data", "")
+        new_data = new_file.get("data", "")
 
-        if not old_url or not new_url:
+        if not (old_url or old_data) or not (new_url or new_data):
             write_response(
                 {
                     "success": False,
                     "request_id": request_id,
                     "error": {
-                        "code": "MISSING_URL",
-                        "message": "Both files must have url and name",
+                        "code": "MISSING_FILE_DATA",
+                        "message": "Both files must have url or data (base64), plus filename",
                     },
                 }
             )
@@ -213,8 +215,15 @@ def main() -> None:
 
         logger.info(f"Comparing {old_filename} -> {new_filename}")
 
-        old_extraction = download_and_extract(old_url, old_filename)
-        new_extraction = download_and_extract(new_url, new_filename)
+        if old_data:
+            old_extraction = extract_inline_file(old_data, old_filename)
+        else:
+            old_extraction = download_and_extract(old_url, old_filename)
+
+        if new_data:
+            new_extraction = extract_inline_file(new_data, new_filename)
+        else:
+            new_extraction = download_and_extract(new_url, new_filename)
 
         diff_text, sections_changed, additions, deletions = calculate_diff(
             old_extraction.text, new_extraction.text

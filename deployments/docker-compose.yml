@@ -18,6 +18,9 @@ services:
       # Database Configuration
       DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
 
+      # Embedding model cache for air-gapped / offline use
+      FASTEMBED_CACHE_PATH: /root/.cache/fastembed
+
       # RustFS / S3 Configuration (for presigned URL download)
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
       BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}

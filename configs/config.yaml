@@ -23,6 +23,7 @@ server:
 execution:
   default_timeout: "60s"
   working_dir: "/data"
+  max_concurrency: 5
   environment:
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
     LLM_MODEL: "${LLM_MODEL:-llama3}"

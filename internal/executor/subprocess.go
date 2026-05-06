@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
 	"github.com/sudebaker/mcp-go/internal/config"
 	mcptypes "github.com/sudebaker/mcp-go/internal/mcp"
@@ -47,9 +48,12 @@ const (
 // Executor manages the execution of tools as subprocesses.
 // It validates inputs, spawns processes, handles timeouts, and parses responses.
 type Executor struct {
-	config *config.Config  // Server configuration including tool definitions
-	tracer *tracing.Tracer // For distributed tracing of tool executions
-	sem    chan struct{}    // Semaphore limiting concurrent subprocess executions
+	config        *config.Config  // Server configuration including tool definitions
+	tracer        *tracing.Tracer // For distributed tracing of tool executions
+	sem           chan struct{}    // Semaphore limiting concurrent subprocess executions
+	sessionStore  interface {     // Session store for user_id lookup
+		Get(sessionID string) (string, bool)
+	}
 }
 
 // New creates a new Executor with no-op tracing enabled.
@@ -91,6 +95,31 @@ func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
 		config: cfg,
 		tracer: tracer,
 		sem:    make(chan struct{}, cfg.Execution.MaxConcurrency),
+	}
+}
+
+// NewWithTracerAndSessionStore creates a new Executor with custom tracing and session store.
+//
+// Use this constructor when you need to trace tool executions and provide user isolation
+// via session-based user_id lookup.
+//
+// Parameters:
+//   - cfg: the parsed configuration containing tool definitions
+//   - tracer: the tracer instance (if nil, a no-op tracer is used)
+//   - sessionStore: the session store for user_id lookup (if nil, user_id injection is skipped)
+//
+// Returns:
+//
+//	a new Executor instance with the provided tracer and session store
+func NewWithTracerAndSessionStore(cfg *config.Config, tracer *tracing.Tracer, sessionStore interface{ Get(sessionID string) (string, bool) }) *Executor {
+	if tracer == nil {
+		tracer = tracing.NoOpTracer()
+	}
+	return &Executor{
+		config:        cfg,
+		tracer:        tracer,
+		sem:           make(chan struct{}, cfg.Execution.MaxConcurrency),
+		sessionStore:  sessionStore,
 	}
 }
 
@@ -178,6 +207,17 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	span.SetAttribute("request_id", requestID)
 	span.SetAttribute("tool_name", toolName)
 	span.SetAttribute("timeout_seconds", timeout.Seconds())
+
+	userID := ""
+	if e.sessionStore != nil && (toolName == "kb_ingest" || toolName == "kb_search") {
+		if session := server.ClientSessionFromContext(ctx); session != nil {
+			if uid, ok := e.sessionStore.Get(session.SessionID()); ok {
+				userID = uid
+				span.SetAttribute("user_id", userID)
+			}
+		}
+	}
+
 	subprocReq := mcptypes.SubprocessRequest{
 		RequestID: requestID,
 		ToolName:  toolName,
@@ -187,6 +227,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 			LLMModel:    e.config.Execution.Environment["LLM_MODEL"],
 			DatabaseURL: e.config.Execution.Environment["DATABASE_URL"],
 			WorkingDir:  e.config.Execution.WorkingDir,
+			UserID:      userID,
 		},
 	}
 

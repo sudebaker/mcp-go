@@ -14,6 +14,7 @@ type SubprocessContext struct {
 	LLMModel    string `json:"llm_model,omitempty"`
 	DatabaseURL string `json:"database_url,omitempty"`
 	WorkingDir  string `json:"working_dir,omitempty"`
+	UserID      string `json:"user_id,omitempty"`
 }
 
 // SubprocessResponse is the JSON structure received from Python scripts via STDOUT

@@ -17,6 +17,7 @@ import (
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/executor"
 	"github.com/sudebaker/mcp-go/internal/prompts"
+	"github.com/sudebaker/mcp-go/internal/session"
 	"github.com/sudebaker/mcp-go/internal/tracing"
 	"github.com/sudebaker/mcp-go/internal/transport"
 )
@@ -69,8 +70,31 @@ func main() {
 	tracer := tracing.NewTracer(cfg.Server.Name)
 	log.Debug().Msg("Distributed tracing initialized")
 
-	// Create executor
-	exec := executor.NewWithTracer(cfg, tracer)
+	// Initialize session store for user_id tracking
+	sessionStore := session.New()
+
+	// Initialize hooks for session management
+	hooks := &server.Hooks{}
+	hooks.AddOnRegisterSession(func(ctx context.Context, sess server.ClientSession) {
+		log.Debug().Str("session_id", sess.SessionID()).Msg("Session registered")
+	})
+	hooks.AddOnUnregisterSession(func(ctx context.Context, sess server.ClientSession) {
+		sessionStore.Delete(sess.SessionID())
+		log.Debug().Str("session_id", sess.SessionID()).Msg("Session unregistered, user_id removed")
+	})
+	hooks.AddAfterInitialize(func(ctx context.Context, id any, message *mcp.InitializeRequest, result *mcp.InitializeResult) {
+		if experimental, ok := message.Params.Capabilities.Experimental["user_id"]; ok {
+			if userID, ok := experimental.(string); ok {
+				if sess := server.ClientSessionFromContext(ctx); sess != nil {
+					sessionStore.Set(sess.SessionID(), userID)
+					log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with user")
+				}
+			}
+		}
+	})
+
+	// Create executor with session store for user_id injection
+	exec := executor.NewWithTracerAndSessionStore(cfg, tracer, sessionStore)
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -80,6 +104,7 @@ func main() {
 		server.WithPromptCapabilities(true),
 		server.WithLogging(),
 		server.WithRecovery(),
+		server.WithHooks(hooks),
 	)
 
 	// Validate and register tools from configuration

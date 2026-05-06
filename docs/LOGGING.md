@@ -1,6 +1,19 @@
 # HTTP Request Logging
 
-El servidor MCP ahora incluye logging automático de todas las peticiones HTTP que recibe.
+El servidor MCP incluye logging automático de todas las peticiones HTTP que recibe.
+
+## Quick Start
+
+```bash
+# Ver logs en tiempo real
+docker logs -f mcp-orchestrator
+
+# Ver solo peticiones HTTP
+docker logs mcp-orchestrator | grep "Request"
+
+# Ejecutar script de demostración
+./tests/test_logging.sh
+```
 
 ## Formato de Logs
 
@@ -171,10 +184,4 @@ El middleware se aplica a todos los endpoints del servidor en `internal/transpor
 - **Privacy**: Los logs pueden contener IPs de clientes
 - **Debugging**: Invaluable para troubleshooting
 
-## Próximas Mejoras Posibles
-
-- [ ] Logs estructurados adicionales (request body size, headers)
-- [ ] Métricas de Prometheus
-- [ ] Correlación de requests con tool executions
-- [ ] Dashboard de visualización
-- [ ] Alertas automáticas en errores frecuentes
+## Related Documentation

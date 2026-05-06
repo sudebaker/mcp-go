@@ -1,14 +1,30 @@
-# Security Hardening: RustFS/S3 Integration
+# Security Hardening - MCP-Go Orchestrator
 
-## Overview
+**Status**: ✅ Implemented
+**Date**: Mayo 2026
+**Coverage**: Critical vulnerabilities mitigated
 
-This document describes the security measures implemented for the RustFS/S3 integration in the MCP Orchestrator, including SSRF (Server-Side Request Forgery) protection, DoS prevention, and configuration requirements.
+---
 
-## Security Vulnerabilities Fixed
+## Executive Summary
 
-### Fix #1: SSRF Protection via SSRF_ALLOWLIST
+El servidor MCP-Go ha sido fortalecido contra las siguientes técnicas de hacking:
 
-**Vulnerability:** Substring hostname matching in `is_rustfs_url()` allowed SSRF bypass attacks.
+| Vulnerability | Technique | Status | File |
+|---|---|---|---|
+| **SSRF** | Server-Side Request Forgery | ✅ Mitigated | `tools/common/validators.py`, `tools/common/doc_extractor.py` |
+| **SSTI** | Server-Side Template Injection | ✅ Mitigated | `tools/pdf_reports/main.py` |
+| **ReDoS** | Regular Expression Denial of Service | ✅ Mitigated | `tools/config_auditor/main.py` |
+| **YAML Deserialization** | Arbitrary code execution via YAML | ✅ Safe | `internal/config/config.go` |
+| **Prompt Injection** | Indirect prompt injection via web content | ✅ Mitigated | `tools/common/content_sanitizer.py` |
+| **DoS via Base64** | Unlimited base64 file uploads | ✅ Mitigated | `tools/data_analysis/main.py` |
+| **S3 Timeout** | S3 operations blocking indefinitely | ✅ Mitigated | `S3_OPERATION_TIMEOUT_SECONDS` env var |
+
+**Test Coverage**: 31+ security tests, all passing
+
+---
+
+## 1. SSRF Mitigation (Server-Side Request Forgery)
 
 **Example Attack:** 
 - Configured endpoint: `rustfs:9000`
@@ -44,14 +60,9 @@ environment:
 
 ---
 
-### Fix #2: DoS Prevention via Base64 Size Limits
+## 2. DoS Prevention via Base64 Size Limits
 
 **Vulnerability:** Unlimited base64 file uploads could cause Out-Of-Memory (OOM) or DoS.
-
-**Example Attack:**
-- Send 1GB base64-encoded content in `__files__` parameter
-- No validation on decoded content size
-- Application crashes or becomes unresponsive
 
 **Solution:**
 - Validate decoded base64 content size against `MAX_FILE_SIZE_MB` (100MB default)
@@ -76,7 +87,7 @@ MAX_FILE_SIZE_MB = 100  # Limit per file
 
 ---
 
-### Fix #3: S3 Operation Timeouts
+## 3. S3 Operation Timeouts
 
 **Vulnerability:** S3 operations could block indefinitely without timeout protection.
 
@@ -115,7 +126,7 @@ environment:
 
 ---
 
-### Fix #4: Presigned URL TTL Configuration
+## 4. Presigned URL TTL Configuration
 
 **Vulnerability:** Hardcoded 1-hour TTL for presigned URLs not configurable.
 

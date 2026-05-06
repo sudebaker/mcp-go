@@ -70,8 +70,8 @@ Detailed health check with system information.
   "version": "0.1.0",
   "uptime": "2m30s",
   "tools": {
-    "total": 10,
-    "registered": ["echo", "generate_report", "analyze_data", ...]
+    "total": 20,
+    "registered": ["echo", "generate_report", "analyze_data", "analyze_image", "kb_ingest", "kb_search", ...]
   },
   "system": {
     "go_version": "1.21",
@@ -144,7 +144,34 @@ Download files through the MCP server proxy. Supports two storage types:
 
 ### initialize
 
-Initializes the MCP session.
+Initializes the MCP session. The server accepts experimental capabilities for user identity.
+
+**User Identity via `capabilities.experimental.user_id`:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "experimental": {
+        "user_id": "user_abc123"
+      }
+    },
+    "clientInfo": {
+      "name": "my-mcp-client",
+      "version": "1.0.0"
+    }
+  }
+}
+```
+
+**User Isolation:**
+- The `user_id` is stored in a session store mapped to the session ID
+- For KB tools (`kb_ingest`, `kb_search`), the `user_id` is injected into the subprocess context
+- All KB queries are filtered by `user_id`, ensuring complete data isolation
+- Session is cleaned up on disconnect via `OnUnregisterSession` hook
 
 ### ping
 
@@ -220,7 +247,7 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 ### kb_ingest
 
-Stores content in the knowledge base (PostgreSQL + pgvector).
+Stores content in the knowledge base (PostgreSQL + pgvector). **User isolation:** Each user can only access their own documents. User identity is established via the `capabilities.experimental.user_id` field in the MCP `initialize` request.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -228,11 +255,15 @@ Stores content in the knowledge base (PostgreSQL + pgvector).
 | collection | string | No | Collection name (default: `default`) |
 | metadata | object | No | Additional metadata |
 
+**User Isolation:** The `user_id` is automatically extracted from the MCP session and attached to all ingested documents. Documents are filtered by `user_id` on all queries, ensuring complete data isolation between users.
+
+**Deduplication:** Content is deduplicated using SHA256 hash that includes the `user_id`, allowing the same content to exist for different users in different namespaces.
+
 ---
 
 ### kb_search
 
-Searches the knowledge base.
+Searches the knowledge base. **User isolation:** Results are automatically filtered to the current user's documents only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -240,6 +271,13 @@ Searches the knowledge base.
 | collection | string | No | Collection name (default: `default`) |
 | top_k | integer | No | Number of results (default: 5) |
 | search_type | string | No | `semantic`, `keyword`, `hybrid` |
+
+**Search Types:**
+- `semantic`: Vector similarity search using pgvector
+- `keyword`: PostgreSQL full-text search
+- `hybrid`: Combined approach (recommended)
+
+**User Isolation:** Search results are automatically filtered by `user_id` from the session, so users only see their own documents.
 
 ---
 
@@ -523,6 +561,8 @@ Interacts with RustFS/S3 storage for file operations.
 
 ## Related Documentation
 
-- [Logging](LOGGING.md) - HTTP request logging
-- [Development Guide](DEVELOPMENT.md) - Building and testing
-- [Usage Guide](../USAGE.md) - User-facing documentation
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and components
+- [DEVELOPMENT.md](DEVELOPMENT.md) - Building and testing
+- [SECURITY.md](SECURITY.md) - Security hardening and mitigations
+- [LOGGING.md](LOGGING.md) - HTTP request logging
+- [PRODUCTION.md](PRODUCTION.md) - Production deployment and status

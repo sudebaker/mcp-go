@@ -249,6 +249,7 @@ def ensure_schema(conn) -> None:
                 file_path TEXT NOT NULL,
                 collection VARCHAR(255) NOT NULL DEFAULT 'default',
                 metadata JSONB,
+                user_id VARCHAR(255) NOT NULL DEFAULT 'anonymous',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -283,6 +284,10 @@ def ensure_schema(conn) -> None:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_kb_documents_collection
             ON kb_documents(collection)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_kb_documents_user_id
+            ON kb_documents(user_id)
         """)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_kb_chunks_content_tsvector
@@ -365,6 +370,7 @@ def ingest_document(
     content: str,
     collection: str,
     metadata: dict[str, Any] | None,
+    user_id: str = "anonymous",
 ) -> dict[str, Any]:
     """
     Ingest content into the knowledge base.
@@ -377,6 +383,7 @@ def ingest_document(
         content: Text content to ingest
         collection: Collection name (validated)
         metadata: Optional metadata
+        user_id: User ID for isolation (default: anonymous)
 
     Returns:
         Ingestion result dictionary
@@ -384,15 +391,15 @@ def ingest_document(
     Raises:
         ValueError: If validation fails or limits exceeded
     """
-    # Generate source identifier from content hash
-    source_identifier = f"memorized_{hashlib.sha256(content.encode()).hexdigest()[:16]}"
+    # Generate source identifier from content hash (include user_id for uniqueness)
+    source_identifier = f"memorized_{hashlib.sha256((content + user_id).encode()).hexdigest()[:16]}"
 
-    # Compute document hash for deduplication
-    doc_hash = compute_doc_hash(content)
+    # Compute document hash for deduplication (include user_id)
+    doc_hash = hashlib.sha256((content + user_id).encode()).hexdigest()
 
-    # Check if document already exists
+    # Check if document already exists for this user
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM kb_documents WHERE doc_hash = %s", (doc_hash,))
+        cur.execute("SELECT id FROM kb_documents WHERE doc_hash = %s AND user_id = %s", (doc_hash, user_id))
         existing = cur.fetchone()
         if existing:
             return {
@@ -412,11 +419,11 @@ def ingest_document(
         # Insert document
         cur.execute(
             """
-            INSERT INTO kb_documents (doc_hash, file_path, collection, metadata)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO kb_documents (doc_hash, file_path, collection, metadata, user_id)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (doc_hash, source_identifier, collection, json.dumps(metadata or {})),
+            (doc_hash, source_identifier, collection, json.dumps(metadata or {}), user_id),
         )
         doc_id = cur.fetchone()[0]
 
@@ -441,11 +448,12 @@ def ingest_document(
         "chunks_count": len(chunks),
         "source_identifier": source_identifier,
         "collection": collection,
+        "user_id": user_id,
     }
 
 
 def search_semantic(
-    conn, model: SentenceTransformer, query: str, collection: str, top_k: int
+    conn, model: SentenceTransformer, query: str, collection: str, top_k: int, user_id: str = "anonymous"
 ) -> list[dict[str, Any]]:
     """Perform semantic search using vector similarity."""
     query_embedding = model.encode([query], show_progress_bar=False)[0]
@@ -461,11 +469,11 @@ def search_semantic(
                 1 - (c.embedding <=> %s::vector) as similarity
             FROM kb_chunks c
             JOIN kb_documents d ON c.document_id = d.id
-            WHERE d.collection = %s
+            WHERE d.collection = %s AND d.user_id = %s
             ORDER BY c.embedding <=> %s::vector
             LIMIT %s
             """,
-            (query_embedding.tolist(), collection, query_embedding.tolist(), top_k),
+            (query_embedding.tolist(), collection, user_id, query_embedding.tolist(), top_k),
         )
 
         results = []
@@ -484,7 +492,7 @@ def search_semantic(
 
 
 def search_keyword(
-    conn, query: str, collection: str, top_k: int
+    conn, query: str, collection: str, top_k: int, user_id: str = "anonymous"
 ) -> list[dict[str, Any]]:
     """Perform keyword search using PostgreSQL full-text search."""
     with conn.cursor() as cur:
@@ -498,12 +506,12 @@ def search_keyword(
                 ts_rank(to_tsvector('english', c.content), plainto_tsquery('english', %s)) as rank
             FROM kb_chunks c
             JOIN kb_documents d ON c.document_id = d.id
-            WHERE d.collection = %s
+            WHERE d.collection = %s AND d.user_id = %s
               AND to_tsvector('english', c.content) @@ plainto_tsquery('english', %s)
             ORDER BY rank DESC
             LIMIT %s
             """,
-            (query, collection, query, top_k),
+            (query, collection, user_id, query, top_k),
         )
 
         results = []
@@ -522,12 +530,12 @@ def search_keyword(
 
 
 def search_hybrid(
-    conn, model: SentenceTransformer, query: str, collection: str, top_k: int
+    conn, model: SentenceTransformer, query: str, collection: str, top_k: int, user_id: str = "anonymous"
 ) -> list[dict[str, Any]]:
     """Perform hybrid search combining semantic and keyword search."""
     # Get results from both methods
-    semantic_results = search_semantic(conn, model, query, collection, top_k * 2)
-    keyword_results = search_keyword(conn, query, collection, top_k * 2)
+    semantic_results = search_semantic(conn, model, query, collection, top_k * 2, user_id)
+    keyword_results = search_keyword(conn, query, collection, top_k * 2, user_id)
 
     # Combine and deduplicate results
     seen = set()
@@ -584,6 +592,9 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             },
         }
 
+    # Get user_id from context for isolation (default: anonymous)
+    user_id = context.get("user_id", "anonymous")
+
     # Initialize connection pool if not already done
     init_pool(database_url)
 
@@ -594,12 +605,13 @@ def handle_ingest(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
     try:
         with get_connection() as conn:
             ensure_schema(conn)
-            result = ingest_document(conn, model, content, collection, metadata)
+            result = ingest_document(conn, model, content, collection, metadata, user_id)
 
             logger.info(
                 "Content memorized successfully",
                 extra_data={
                     "collection": collection,
+                    "user_id": user_id,
                     "status": result["status"],
                     "chunks_count": result.get("chunks_count", 0),
                 },
@@ -656,6 +668,9 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             },
         }
 
+    # Get user_id from context for isolation (default: anonymous)
+    user_id = context.get("user_id", "anonymous")
+
     # Initialize connection pool if not already done
     init_pool(database_url)
 
@@ -672,18 +687,19 @@ def handle_search(request: dict[str, Any], context: dict[str, Any]) -> dict[str,
             # Use sanitized top_k value
             if search_type == "semantic":
                 results = search_semantic(
-                    conn, model, query, collection, top_k_sanitized
+                    conn, model, query, collection, top_k_sanitized, user_id
                 )
             elif search_type == "keyword":
-                results = search_keyword(conn, query, collection, top_k_sanitized)
+                results = search_keyword(conn, query, collection, top_k_sanitized, user_id)
             else:  # hybrid
-                results = search_hybrid(conn, model, query, collection, top_k_sanitized)
+                results = search_hybrid(conn, model, query, collection, top_k_sanitized, user_id)
 
             logger.info(
                 "Search completed",
                 extra_data={
                     "query_length": len(query),
                     "collection": collection,
+                    "user_id": user_id,
                     "search_type": search_type,
                     "results_count": len(results),
                 },

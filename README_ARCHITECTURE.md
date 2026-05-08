@@ -71,8 +71,6 @@ flowchart TB
     PythonTools --> RustFS
     PythonTools --> Browserless
     PythonTools --> SearXNG
-
-    Transport --> |"/download/"| RustFS
 ```
 
 ---
@@ -192,8 +190,6 @@ __RESULT__:{"success": true, ...}
 | `/mcp` | GET/POST | MCP Streamable HTTP |
 | `/sse` | GET | MCP SSE endpoint |
 | `/message` | POST | MCP SSE message endpoint |
-| `/download/local/{filename}` | GET | Local file download |
-| `/download/rustfs/{bucket}/{object}` | GET | RustFS presigned URL redirect |
 
 **Middleware Chain:** CORS → Rate Limit → Tracing → Logging → MCP Handler
 

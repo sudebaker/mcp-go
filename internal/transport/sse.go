@@ -55,18 +55,17 @@ import (
 // MCPServer wraps the mcp-go Streamable HTTP server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
-	mcpServer       *server.MCPServer            // Core MCP server implementation
-	streamServer    *server.StreamableHTTPServer // Streamable HTTP handler
-	sseServer       *server.SSEServer            // Legacy SSE server
-	httpServer      *http.Server                 // Go HTTP server instance
-	addr            string                       // Listen address (host:port)
-	serverName      string                       // Service name for logging/health
-	version         string                       // Semantic version
-	tools           []config.ToolConfig          // Tool configurations for docs
-	rateLimiter     *RateLimiter                 // Rate limiting middleware (nil if disabled)
-	tracer          *tracing.Tracer              // Distributed tracing
-	allowedOrigins  []string                     // CORS allowed origins (empty = all)
-	downloadHandler *DownloadHandler             // Download URL handler
+	mcpServer      *server.MCPServer            // Core MCP server implementation
+	streamServer   *server.StreamableHTTPServer // Streamable HTTP handler
+	sseServer      *server.SSEServer            // Legacy SSE server
+	httpServer     *http.Server                 // Go HTTP server instance
+	addr           string                       // Listen address (host:port)
+	serverName     string                       // Service name for logging/health
+	version        string                       // Semantic version
+	tools          []config.ToolConfig          // Tool configurations for docs
+	rateLimiter    *RateLimiter                 // Rate limiting middleware (nil if disabled)
+	tracer         *tracing.Tracer              // Distributed tracing
+	allowedOrigins []string                     // CORS allowed origins (empty = all)
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -93,8 +92,6 @@ type MCPConfig struct {
 	AllowedOrigins []string
 	// Tracer is the distributed tracing instance (nil = no-op)
 	Tracer *tracing.Tracer
-	// DownloadExpiryHours is the expiration time for download URLs in hours (default: 24)
-	DownloadExpiryHours int
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -151,23 +148,17 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		tracer = tracing.NoOpTracer()
 	}
 
-	expiryHours := cfg.DownloadExpiryHours
-	if expiryHours <= 0 {
-		expiryHours = 24
-	}
-
 	return &MCPServer{
-		mcpServer:       mcpServer,
-		streamServer:    streamServer,
-		sseServer:       sseServer,
-		addr:            addr,
-		serverName:      cfg.ServerName,
-		version:         cfg.Version,
-		tools:           cfg.Tools,
-		rateLimiter:     rateLimiter,
-		tracer:          tracer,
-		allowedOrigins:  cfg.AllowedOrigins,
-		downloadHandler: NewDownloadHandler(expiryHours),
+		mcpServer:      mcpServer,
+		streamServer:   streamServer,
+		sseServer:      sseServer,
+		addr:           addr,
+		serverName:     cfg.ServerName,
+		version:        cfg.Version,
+		tools:          cfg.Tools,
+		rateLimiter:    rateLimiter,
+		tracer:         tracer,
+		allowedOrigins: cfg.AllowedOrigins,
 	}
 }
 
@@ -242,15 +233,6 @@ func (s *MCPServer) Start() error {
 	// SSE endpoints (legacy 2024 spec)
 	mux.Handle("/sse", sseHandler)
 	mux.Handle("/message", messageHandler)
-
-	// Download endpoint for files (PDFs, reports, etc.)
-	mux.HandleFunc("/download/", s.downloadHandler.HandleDownload)
-
-	// Log download handler status
-	log.Info().
-		Int("download_expiry_hours", s.downloadHandler.defaultExpiryHours).
-		Str("data_dir", s.downloadHandler.dataDir).
-		Msg("Download endpoint enabled at /download/{local|rustfs}/...")
 
 	// Log rate limiting status
 	if s.rateLimiter != nil {

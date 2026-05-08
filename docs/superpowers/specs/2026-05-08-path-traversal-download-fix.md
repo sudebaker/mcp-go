@@ -1,125 +1,109 @@
-# Path Traversal Fix - Download Handler
+# Eliminar Endpoint de Descarga - Path Traversal Fix
 
 **Date:** 2026-05-08
-**Status:** Approved
+**Status:** Draft
 **Author:** MCP-Go Team
 
 ## Problem Statement
 
-Clients using the PDF report generation tool cannot download PDF files due to a path traversal vulnerability in the download handler (`internal/transport/download.go`). Three bugs cause false positive path traversal detection and prevent legitimate file downloads.
+El endpoint `/download/` introduce una vulnerabilidad de path traversal innecesaria. Los PDFs ya se entregan correctamente en base64 por el canal MCP estándar. El endpoint de descarga añade superficie de ataque sin valor real.
 
-## Root Cause Analysis
+## Root Cause
 
-Three bugs identified in `internal/transport/download.go`:
+El endpoint `/download/{type}/{path}` en `internal/transport/download.go` tiene 3 bugs que causan tanto falsos positivos (bloquea descargas legítimas) como falsos negativos (permite bypass de seguridad):
 
 | Bug | Location | Issue | Impact |
 |-----|----------|-------|--------|
-| 1 | Line 207 | `strings.HasPrefix(filePath, h.dataDir)` fails when dataDir is `/data/reports` and filePath is `/data/reports/report.pdf` due to missing separator | Legitimate files rejected |
-| 2 | Line 90 | No URL decoding before path processing | `%2e%2e%2f` can bypass prefix check (attack) |
-| 3 | Line 204 | `filepath.Base()` strips subdirectories | Files in subdirectories not downloadable |
+| 1 | Line 207 | `strings.HasPrefix(filePath, h.dataDir)` sin separador | Downloads legitimas bloqueadas |
+| 2 | Line 90 | Sin URL decode | `%2e%2e%2f` puede evadir validación |
+| 3 | Line 204 | `filepath.Base()` destruye subdirectorios | Archivos en subdirs no accesibles |
 
-## Solution: Approach C - Refactor with filepath.Rel
+## Solución: Eliminar el endpoint completamente
 
-### Changes to `internal/transport/download.go`
+Los clientes MCP ya reciben el PDF en base64 en la respuesta. El endpoint `/download/` es redundante.
 
-#### 1. Add URL Path Unescape (Line ~90)
+### Cambios en Go
 
-Before processing the path, decode URL-encoded characters:
+**1. Eliminar `internal/transport/download.go`**
 
-```go
-import "net/url"
+Todo el archivo se elimina. La función `DownloadFile` no tiene callers activos.
 
-// In HandleDownload:
-rawPath := strings.TrimPrefix(r.URL.Path, "/download/")
-path, err := url.PathUnescape(rawPath)
-if err != nil {
-    http.Error(w, "Invalid path encoding", http.StatusBadRequest)
-    return
-}
-if path == "" || rawPath == r.URL.Path {
-    http.Error(w, "Invalid path", http.StatusBadRequest)
-    return
-}
+**2. Limpiar `internal/transport/sse.go`**
+
+Eliminar:
+- Campo `downloadHandler *DownloadHandler` (línea 69)
+- Inicialización `downloadHandler: NewDownloadHandler(expiryHours)` (línea 170)
+- Registro de ruta `mux.HandleFunc("/download/", ...)` (línea 247)
+- Log de estado del download handler (líneas 250-253)
+
+### Cambios en Python
+
+**3. Limpiar `tools/pdf_reports/main.py`**
+
+Eliminar:
+- Función `generate_download_url()` (líneas 83-96)
+- Referencias a `download_url` en la respuesta (líneas 511, 513, 541, 550, 560)
+- Texto "Download URL" en la respuesta al cliente (línea 541)
+
+Mantener:
+- `pdf_base64` en `structured_content` (ya funciona)
+- El recurso base64 en la respuesta MCP (ya funciona)
+
+### Cambios en Config
+
+**4. Actualizar `configs/config.yaml`**
+
+Línea 95: Cambiar descripción de `generate_report`:
+- De: `"Genera PDFs profesionales. Soporta: ... Retorna PDF base64 + download URL."`
+- A: `"Genera PDFs profesionales. Soporta: ... Retorna PDF base64."`
+
+**5. Actualizar `configs/config-en.yaml`**
+
+Línea 73: Mismo cambio en inglés.
+
+### Cambios en Docs
+
+**6. Actualizar `docs/API.md`**
+
+Eliminar sección `GET /download/{type}/{path}` (líneas 118-139).
+
+**7. Actualizar `docs/DEVELOPMENT.md`**
+
+Eliminar sección `Download Endpoint` (líneas 304-320).
+
+## Impacto en Clientes
+
+Los clientes que usaban `download_url` deben cambiar a decodificar `pdf_base64`:
+
+```python
+# Antes (con download_url):
+response = call_tool("generate_report", ...)
+download_url = response["structured_content"]["download_url"]
+pdf = requests.get(download_url).content
+
+# Después (con base64):
+response = call_tool("generate_report", ...)
+pdf = base64.b64decode(response["structured_content"]["pdf_base64"])
 ```
 
-#### 2. Replace Prefix Check with filepath.Rel (Line ~207)
-
-Replace vulnerable `strings.HasPrefix` with idiomatic Go validation:
-
-```go
-// Old (vulnerable):
-if !strings.HasPrefix(filePath, h.dataDir) {
-    http.Error(w, "Access denied", http.StatusForbidden)
-    return
-}
-
-// New (safe):
-rel, err := filepath.Rel(h.dataDir, filePath)
-if err != nil || strings.HasPrefix(rel, "..") {
-    http.Error(w, "Access denied", http.StatusForbidden)
-    return
-}
-```
-
-#### 3. Remove filepath.Base from Path Construction
-
-The `filepath.Base(filename)` call at line 204 is REMOVED from path construction. Previously it stripped subdirectories, preventing access to files in subdirs. The `filepath.Rel` validation now provides security, making Base redundant for that purpose.
-
-Base is retained only for `Content-Disposition` header (clean filename display), not for security.
-
-### New File: `internal/transport/download_test.go`
-
-Create comprehensive test file covering:
-
-- `TestHandleLocalDownload_PathTraversal` - `../../etc/passwd` → 403
-- `TestHandleLocalDownload_EncodedTraversal` - `%2e%2e%2f%2e%2e%2fetc%2fpasswd` → 403
-- `TestHandleLocalDownload_Subdirectory` - `subdir/report.pdf` → 200 OK
-- `TestHandleLocalDownload_OutsideDataDir` - `reports-secret/file.pdf` → 403
-- `TestHandleLocalDownload_FileNotFound` → 404
-- `TestHandleLocalDownload_ExpiredFile` → 410
-- `TestGenerateLocalURL` - validates URL construction
-
-## Architecture
-
-```
-GET /download/local/subdir/report.pdf
-  ↓
-url.PathUnescape → "subdir/report.pdf"
-  ↓
-filepath.Join("/data/reports", "subdir/report.pdf") → "/data/reports/subdir/report.pdf"
-  ↓
-filepath.Rel("/data/reports", "/data/reports/subdir/report.pdf") → "subdir/report.pdf"
-  ↓
-No starts with ".." → OK
-  ↓
-os.Stat → exists? → yes
-  ↓
-time.Since(modTime) < expiry? → yes
-  ↓
-ServeFile → 200 OK
-```
-
-## Security Properties
-
-1. **Path traversal prevention**: `filepath.Rel` correctly handles all edge cases
-2. **URL encoding bypass prevention**: `url.PathUnescape` normalizes encoded paths before validation
-3. **Subdirectory support**: Files in subdirectories of `dataDir` are now accessible
-4. **Defense in depth**: `filepath.Base` still strips dangerous paths as secondary layer
+Esto es equivalente a cómo los clientes MCP estándar ya manejan los recursos base64.
 
 ## Testing
 
-Run tests with:
 ```bash
-go test ./internal/transport/... -run TestHandleLocalDownload -v
-go test ./internal/transport/... -v  # all transport tests
+go build ./...
+go test ./...
+python -m pytest tests/ -v
 ```
 
 ## Implementation Checklist
 
-- [ ] Add `net/url` import to download.go
-- [ ] Implement URL path unescape in HandleDownload
-- [ ] Replace prefix check with filepath.Rel in handleLocalDownload
-- [ ] Create download_test.go with comprehensive test cases
-- [ ] Run `go fmt ./... && go vet ./...`
-- [ ] Run all tests to verify fix
-- [ ] Verify no regression in existing functionality
+- [ ] Eliminar `internal/transport/download.go`
+- [ ] Limpiar referencias en `internal/transport/sse.go`
+- [ ] Eliminar `generate_download_url` y referencias en `tools/pdf_reports/main.py`
+- [ ] Actualizar `configs/config.yaml`
+- [ ] Actualizar `configs/config-en.yaml`
+- [ ] Actualizar `docs/API.md`
+- [ ] Actualizar `docs/DEVELOPMENT.md`
+- [ ] Ejecutar `go build && go test ./...`
+- [ ] Verificar que no hay referencias residuales a `/download/`

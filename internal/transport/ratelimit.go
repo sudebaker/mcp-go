@@ -17,38 +17,42 @@ import (
 //   - Thread-safe with RWMutex for concurrent access
 //
 // Example configuration:
-//   limiter := NewRateLimiter(10.0, 20) // 10 RPS with burst of 20
+//
+//	limiter := NewRateLimiter(10.0, 20) // 10 RPS with burst of 20
 type RateLimiter struct {
 	limiters      map[string]*tokenBucket // Per-client bucket state
 	mu            sync.RWMutex            // Protects limiters map
-	rps           float64                // Refill rate (tokens per second)
-	burst         int                    // Maximum bucket capacity
-	cleanupTicker *time.Ticker          // Periodic cleanup trigger
-	cleanupStop   chan struct{}          // Cleanup goroutine shutdown signal
-	maxIdleTime   time.Duration          // Inactive client TTL before cleanup
-	stopOnce      sync.Once             // Ensures cleanup goroutine stops only once
+	rps           float64                 // Refill rate (tokens per second)
+	burst         int                     // Maximum bucket capacity
+	cleanupTicker *time.Ticker            // Periodic cleanup trigger
+	cleanupStop   chan struct{}           // Cleanup goroutine shutdown signal
+	maxIdleTime   time.Duration           // Inactive client TTL before cleanup
+	stopOnce      sync.Once               // Ensures cleanup goroutine stops only once
 }
 
 // tokenBucket represents a client's rate limiting state using the token bucket algorithm.
 // Tokens accumulate at 'rate' per second up to 'capacity', consumed by each request.
 type tokenBucket struct {
-	tokens     float64 // Current available tokens (fractional allowed)
+	tokens     float64   // Current available tokens (fractional allowed)
 	lastUpdate time.Time // Last token refill timestamp
-	capacity   float64 // Maximum token storage
-	rate       float64 // Token generation rate per second
+	capacity   float64   // Maximum token storage
+	rate       float64   // Token generation rate per second
 }
 
 // NewRateLimiter creates a rate limiter with specified RPS and burst parameters.
 //
 // Args:
-//   rps: Requests per second allowed (refill rate). Must be > 0.
-//   burst: Maximum burst size (initial/full capacity). Must be > 0.
+//
+//	rps: Requests per second allowed (refill rate). Must be > 0.
+//	burst: Maximum burst size (initial/full capacity). Must be > 0.
 //
 // Returns:
-//   Configured RateLimiter with background cleanup goroutine running.
+//
+//	Configured RateLimiter with background cleanup goroutine running.
 //
 // Example:
-//   limiter := NewRateLimiter(10.0, 20) // 10 req/s sustained, burst up to 20
+//
+//	limiter := NewRateLimiter(10.0, 20) // 10 req/s sustained, burst up to 20
 func NewRateLimiter(rps float64, burst int) *RateLimiter {
 	rl := &RateLimiter{
 		limiters:    make(map[string]*tokenBucket),
@@ -67,10 +71,12 @@ func NewRateLimiter(rps float64, burst int) *RateLimiter {
 // Thread-safe: Yes (uses RWMutex)
 //
 // Args:
-//   clientID: Unique client identifier (typically IP address)
+//
+//	clientID: Unique client identifier (typically IP address)
 //
 // Returns:
-//   Pointer to the client's tokenBucket
+//
+//	Pointer to the client's tokenBucket
 func (rl *RateLimiter) getLimiter(clientID string) *tokenBucket {
 	rl.mu.RLock()
 	limiter, exists := rl.limiters[clientID]
@@ -102,10 +108,12 @@ func (rl *RateLimiter) getLimiter(clientID string) *tokenBucket {
 // Convenience method wrapping allowN(clientID, 1).
 //
 // Args:
-//   clientID: Unique client identifier
+//
+//	clientID: Unique client identifier
 //
 // Returns:
-//   true if the request is allowed, false if rate limited
+//
+//	true if the request is allowed, false if rate limited
 func (rl *RateLimiter) Allow(clientID string) bool {
 	return rl.allowN(clientID, 1) == nil
 }
@@ -113,20 +121,22 @@ func (rl *RateLimiter) Allow(clientID string) bool {
 // allowN checks if n requests from the client should be allowed.
 //
 // Uses the token bucket algorithm:
-//   1. Calculate elapsed time since last update
-//   2. Add tokens based on elapsed time and rate
-//   3. Cap tokens at capacity (no overflow)
-//   4. If n <= tokens, consume tokens and allow
-//   5. Otherwise, reject with retry suggestion
+//  1. Calculate elapsed time since last update
+//  2. Add tokens based on elapsed time and rate
+//  3. Cap tokens at capacity (no overflow)
+//  4. If n <= tokens, consume tokens and allow
+//  5. Otherwise, reject with retry suggestion
 //
 // Thread-safe: Yes
 //
 // Args:
-//   clientID: Unique client identifier
-//   n: Number of tokens to consume (usually 1)
+//
+//	clientID: Unique client identifier
+//	n: Number of tokens to consume (usually 1)
 //
 // Returns:
-//   nil if allowed, or RateLimitExceededError with RetryAfter duration
+//
+//	nil if allowed, or RateLimitExceededError with RetryAfter duration
 func (rl *RateLimiter) allowN(clientID string, n int) error {
 	limiter := rl.getLimiter(clientID)
 
@@ -153,10 +163,12 @@ func (rl *RateLimiter) allowN(clientID string, n int) error {
 // Applied as middleware around the MCP HTTP handlers.
 //
 // Args:
-//   next: The downstream HTTP handler to wrap
+//
+//	next: The downstream HTTP handler to wrap
 //
 // Returns:
-//   HTTP middleware that checks rate limits before passing requests
+//
+//	HTTP middleware that checks rate limits before passing requests
 //
 // Behavior:
 //   - Extracts client ID from X-Forwarded-For header or RemoteAddr
@@ -208,7 +220,8 @@ func (e *RateLimitExceededError) Error() string {
 // Thread-safe: Yes
 //
 // Args:
-//   clientID: The client whose state should be cleared
+//
+//	clientID: The client whose state should be cleared
 func (rl *RateLimiter) Reset(clientID string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()

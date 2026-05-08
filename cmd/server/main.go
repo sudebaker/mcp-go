@@ -185,14 +185,29 @@ func registerTool(mcpServer *server.MCPServer, exec *executor.Executor, toolCfg 
 	// Build input schema for the tool
 	inputSchema := buildInputSchema(toolCfg)
 
-	tool := mcp.NewTool(
-		toolCfg.Name,
+	toolOpts := []mcp.ToolOption{
 		mcp.WithDescription(toolCfg.Description),
 		mcp.WithString(
 			"__raw_arguments",
 			mcp.Description("Raw arguments as JSON (internal use)"),
 		),
-	)
+	}
+
+	// Apply tool annotations if defined in config
+	if toolCfg.ReadOnlyHint != nil {
+		toolOpts = append(toolOpts, mcp.WithReadOnlyHintAnnotation(*toolCfg.ReadOnlyHint))
+	}
+	if toolCfg.DestructiveHint != nil {
+		toolOpts = append(toolOpts, mcp.WithDestructiveHintAnnotation(*toolCfg.DestructiveHint))
+	}
+	if toolCfg.IdempotentHint != nil {
+		toolOpts = append(toolOpts, mcp.WithIdempotentHintAnnotation(*toolCfg.IdempotentHint))
+	}
+	if toolCfg.OpenWorldHint != nil {
+		toolOpts = append(toolOpts, mcp.WithOpenWorldHintAnnotation(*toolCfg.OpenWorldHint))
+	}
+
+	tool := mcp.NewTool(toolCfg.Name, toolOpts...)
 
 	// Apply input schema properties if defined
 	if inputSchema != nil {

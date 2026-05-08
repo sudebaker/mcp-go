@@ -70,7 +70,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Generate professional PDFs. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Returns PDF base64 + download URL."
+    description: "Generate professional PDFs. Supports: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Returns PDF base64."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"

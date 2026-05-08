@@ -19,13 +19,13 @@ type HealthStatus string
 
 const (
 	StatusHealthy   HealthStatus = "healthy"   // Fully operational
-	StatusDegraded  HealthStatus = "degraded"   // Partial functionality, warning
-	StatusUnhealthy HealthStatus = "unhealthy"  // Critical failure
+	StatusDegraded  HealthStatus = "degraded"  // Partial functionality, warning
+	StatusUnhealthy HealthStatus = "unhealthy" // Critical failure
 )
 
 // CheckResult represents a single health check outcome with timing information.
 type CheckResult struct {
-	Name      string        `json:"name"`               // Name of the checked component
+	Name      string        `json:"name"`              // Name of the checked component
 	Status    HealthStatus  `json:"status"`            // Health state
 	Message   string        `json:"message,omitempty"` // Human-readable details
 	Duration  time.Duration `json:"duration_ms"`       // Check execution time in ms
@@ -36,21 +36,23 @@ type CheckResult struct {
 // It validates connectivity to Redis, PostgreSQL, checks memory usage, and verifies
 // configuration integrity. Results are used for monitoring and alerting.
 type Checker struct {
-	cfg         *config.Config      // Server configuration for tool validation
-	redisClient *redis.Client        // Redis connection for ping check
-	db          *sql.DB              // PostgreSQL connection for ping check
-	httpClient  *http.Client         // HTTP client for LLM endpoint checks
+	cfg         *config.Config // Server configuration for tool validation
+	redisClient *redis.Client  // Redis connection for ping check
+	db          *sql.DB        // PostgreSQL connection for ping check
+	httpClient  *http.Client   // HTTP client for LLM endpoint checks
 }
 
 // NewChecker creates a health Checker with dependencies for performing checks.
 //
 // Args:
-//   cfg: Server configuration (used to verify tools are configured)
-//   redisClient: Redis client (nil if Redis is not used)
-//   db: PostgreSQL database connection (nil if PostgreSQL is not used)
+//
+//	cfg: Server configuration (used to verify tools are configured)
+//	redisClient: Redis client (nil if Redis is not used)
+//	db: PostgreSQL database connection (nil if PostgreSQL is not used)
 //
 // Returns:
-//   A Checker ready to run health checks
+//
+//	A Checker ready to run health checks
 func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Checker {
 	return &Checker{
 		cfg:         cfg,
@@ -66,7 +68,8 @@ func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Chec
 // Checks run sequentially; a slow check doesn't affect others.
 //
 // Returns:
-//   Slice of CheckResult, one per check. Order: redis, postgres, config, memory
+//
+//	Slice of CheckResult, one per check. Order: redis, postgres, config, memory
 func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 	checks := []struct {
 		name string
@@ -91,12 +94,14 @@ func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 // Uses worst-case logic: unhealthy > degraded > healthy.
 //
 // Args:
-//   results: Slice of CheckResult from RunAllChecks
+//
+//	results: Slice of CheckResult from RunAllChecks
 //
 // Returns:
-//   StatusUnhealthy if any check is unhealthy
-//   StatusDegraded if any check is degraded (but none unhealthy)
-//   StatusHealthy otherwise
+//
+//	StatusUnhealthy if any check is unhealthy
+//	StatusDegraded if any check is degraded (but none unhealthy)
+//	StatusHealthy otherwise
 func (c *Checker) GetOverallStatus(results []CheckResult) HealthStatus {
 	hasUnhealthy := false
 	hasDegraded := false
@@ -329,7 +334,8 @@ func (c *Checker) checkLLMEndpoint(ctx context.Context, endpoint string) CheckRe
 // Includes heap memory, GC statistics, and goroutine count.
 //
 // Returns:
-//   Map of metric name to value (in bytes for memory, ns for GC, count for others)
+//
+//	Map of metric name to value (in bytes for memory, ns for GC, count for others)
 func GetHealthMetrics() map[string]float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)

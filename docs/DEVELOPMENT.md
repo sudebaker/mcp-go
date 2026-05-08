@@ -301,27 +301,6 @@ docker exec -it mcp-orchestrator bash
 
 ## HTTP Endpoints
 
-### Download Endpoint
-
-The `/download/` endpoint provides a proxy for downloading files from local storage or RustFS:
-
-```bash
-# Download from local storage
-GET /download/local/{filename}
-
-# Download from RustFS (redirects to presigned URL)
-GET /download/rustfs/{bucket}/{object}
-```
-
-**Environment Variables:**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OUTPUT_DIR` | `/data/reports` | Local file storage directory |
-| `DOWNLOAD_URL_EXPIRY_HOURS` | `24` | Download link validity in hours |
-| `BASE_URL` | `http://localhost:8080` | Public URL for generating links |
-
----
-
 ## Running Tests
 
 ### Test Scripts

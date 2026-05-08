@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	maxPromptLength = 100000 // Maximum character count in prompt
+	maxPromptLength = 100000  // Maximum character count in prompt
 	maxPromptBytes  = 1 << 20 // Maximum byte size of prompt (1MB)
 )
 
@@ -34,35 +34,37 @@ type LLMClient struct {
 
 // LLMRequest represents a request payload to the LLM API.
 type LLMRequest struct {
-	Model   string            `json:"model"`    // Model name
-	Prompt  string            `json:"prompt"`   // Input prompt
-	Stream  bool              `json:"stream"`    // Streaming mode (currently always false)
+	Model   string            `json:"model"`             // Model name
+	Prompt  string            `json:"prompt"`            // Input prompt
+	Stream  bool              `json:"stream"`            // Streaming mode (currently always false)
 	Options LLMRequestOptions `json:"options,omitempty"` // Model-specific options
 }
 
 // LLMRequestOptions configures LLM inference behavior.
 type LLMRequestOptions struct {
 	Temperature float64 `json:"temperature,omitempty"` // Sampling temperature (0-2)
-	NumPredict  int     `json:"num_predict,omitempty"`  // Max tokens to generate
-	TopK        int     `json:"top_k,omitempty"`        // Top-K sampling parameter
-	TopP        float64 `json:"top_p,omitempty"`        // Nucleus sampling threshold
+	NumPredict  int     `json:"num_predict,omitempty"` // Max tokens to generate
+	TopK        int     `json:"top_k,omitempty"`       // Top-K sampling parameter
+	TopP        float64 `json:"top_p,omitempty"`       // Nucleus sampling threshold
 }
 
 // LLMResponse represents a response from the LLM API.
 type LLMResponse struct {
-	Response string `json:"response"` // Generated text
+	Response string `json:"response"`        // Generated text
 	Error    string `json:"error,omitempty"` // Error message if failed
 }
 
 // NewLLMClient creates an LLM client with connection pooling for efficiency.
 //
 // Args:
-//   endpoint: Base URL of LLM API (e.g., "http://ollama:11434")
-//   model: Default model name for all Call() requests
-//   timeout: HTTP request timeout duration
+//
+//	endpoint: Base URL of LLM API (e.g., "http://ollama:11434")
+//	model: Default model name for all Call() requests
+//	timeout: HTTP request timeout duration
 //
 // Returns:
-//   Configured LLMClient with 10 max idle connections per host
+//
+//	Configured LLMClient with 10 max idle connections per host
 func NewLLMClient(endpoint string, model string, timeout time.Duration) *LLMClient {
 	return &LLMClient{
 		client: &http.Client{
@@ -81,16 +83,19 @@ func NewLLMClient(endpoint string, model string, timeout time.Duration) *LLMClie
 // Call sends a prompt to the LLM using the default model.
 //
 // Args:
-//   ctx: Context for cancellation and timeout
-//   prompt: Text prompt to send to LLM
+//
+//	ctx: Context for cancellation and timeout
+//	prompt: Text prompt to send to LLM
 //
 // Returns:
-//   Generated text response, or error if validation fails or API returns error
+//
+//	Generated text response, or error if validation fails or API returns error
 //
 // Errors:
-//   ErrPromptTooLong: prompt exceeds 100,000 characters
-//   ErrPromptTooLarge: prompt exceeds 1MB in bytes
-//   ErrInvalidUTF8: prompt contains invalid UTF-8 sequences
+//
+//	ErrPromptTooLong: prompt exceeds 100,000 characters
+//	ErrPromptTooLarge: prompt exceeds 1MB in bytes
+//	ErrInvalidUTF8: prompt contains invalid UTF-8 sequences
 func (c *LLMClient) Call(ctx context.Context, prompt string) (string, error) {
 	if err := validatePrompt(prompt); err != nil {
 		return "", err
@@ -101,15 +106,18 @@ func (c *LLMClient) Call(ctx context.Context, prompt string) (string, error) {
 // CallWithModel sends a prompt to a specific LLM model.
 //
 // Args:
-//   ctx: Context for cancellation and timeout
-//   model: Model name to use (e.g., "llama3", "mistral")
-//   prompt: Text prompt to send
+//
+//	ctx: Context for cancellation and timeout
+//	model: Model name to use (e.g., "llama3", "mistral")
+//	prompt: Text prompt to send
 //
 // Returns:
-//   Generated text response
+//
+//	Generated text response
 //
 // Errors:
-//   Same as Call() plus HTTP errors from the API
+//
+//	Same as Call() plus HTTP errors from the API
 func (c *LLMClient) CallWithModel(ctx context.Context, model string, prompt string) (string, error) {
 	if err := validatePrompt(prompt); err != nil {
 		return "", err
@@ -161,12 +169,14 @@ func (c *LLMClient) CallWithModel(ctx context.Context, model string, prompt stri
 // CallWithOptions sends a prompt with custom inference options.
 //
 // Args:
-//   ctx: Context for cancellation and timeout
-//   prompt: Text prompt to send
-//   opts: Custom inference options (temperature, top_k, top_p, num_predict)
+//
+//	ctx: Context for cancellation and timeout
+//	prompt: Text prompt to send
+//	opts: Custom inference options (temperature, top_k, top_p, num_predict)
 //
 // Returns:
-//   Generated text response
+//
+//	Generated text response
 func (c *LLMClient) CallWithOptions(ctx context.Context, prompt string, opts LLMRequestOptions) (string, error) {
 	if err := validatePrompt(prompt); err != nil {
 		return "", err
@@ -234,10 +244,12 @@ func (c *LLMClient) CloseIdleConnections() {
 // validatePrompt performs safety checks on the input prompt.
 //
 // Args:
-//   prompt: Raw input string to validate
+//
+//	prompt: Raw input string to validate
 //
 // Returns:
-//   nil if valid, or a specific error (ErrPromptTooLong, ErrPromptTooLarge, ErrInvalidUTF8)
+//
+//	nil if valid, or a specific error (ErrPromptTooLong, ErrPromptTooLarge, ErrInvalidUTF8)
 func validatePrompt(prompt string) error {
 	if len(prompt) > maxPromptLength {
 		return ErrPromptTooLong

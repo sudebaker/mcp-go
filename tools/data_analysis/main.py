@@ -11,6 +11,12 @@ Security Features:
 - Memory limits and timeouts
 """
 
+from common.structured_logging import get_logger
+from common.safe_file_ops import SafeFileOperations
+from common.sandbox import execute_in_sandbox, SandboxConfig
+from common.llm_cache import call_llm_with_cache
+from common.validators import validate_read_path, is_internal_url
+from common.retry import call_llm_with_retry
 import json
 import sys
 import re
@@ -24,12 +30,6 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.retry import call_llm_with_retry
-from common.validators import validate_read_path, is_internal_url
-from common.llm_cache import call_llm_with_cache
-from common.sandbox import execute_in_sandbox, SandboxConfig
-from common.safe_file_ops import SafeFileOperations
-from common.structured_logging import get_logger
 
 logger = get_logger(__name__, "data_analysis")
 
@@ -91,6 +91,7 @@ def clean_output(output: str) -> str:
         cleaned.append(line)
     return '\n'.join(cleaned)
 
+
 # Input validation limits
 MAX_QUESTION_LENGTH = 2000
 MAX_FILE_SIZE_MB = 100
@@ -129,21 +130,22 @@ def get_rustfs_s3_client() -> Optional[Minio]:
 def is_rustfs_url(url: str) -> bool:
     """
     Check if URL points to rustfs/S3 endpoint.
-    
+
     Uses SSRF_ALLOWLIST to validate the host is allowed.
     Returns True only if:
     1. URL is not blocked by is_internal_url() SSRF checks
     2. Hostname matches the configured RUSTFS_ENDPOINT (exact match or in SSRF_ALLOWLIST)
-    
+
     This prevents SSRF bypass attacks like evilrustfs.com bypassing substring matching.
     """
     # Check if URL is internal/blocked (returns True for dangerous URLs)
     if is_internal_url(url):
         return False
-    
+
     rustfs_endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
     # Extract hostname from endpoint (e.g., "rustfs:9000" -> "rustfs")
-    rustfs_host = rustfs_endpoint.split(":")[0] if ":" in rustfs_endpoint else rustfs_endpoint
+    rustfs_host = rustfs_endpoint.split(
+        ":")[0] if ":" in rustfs_endpoint else rustfs_endpoint
 
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
@@ -156,12 +158,12 @@ def is_rustfs_url(url: str) -> bool:
 def download_from_s3(url: str, client: Minio) -> BytesIO:
     """
     Download file directly from S3 using minio client with timeout protection.
-    
+
     Prevents indefinite blocking on S3 operations.
     Timeout is configurable via S3_OPERATION_TIMEOUT_SECONDS env var (default: 30s).
     """
     import signal
-    
+
     parsed = urlparse(url)
     # URL format: http://rustfs:9000/bucket/key
     path_parts = parsed.path.lstrip("/").split("/", 1)
@@ -171,18 +173,19 @@ def download_from_s3(url: str, client: Minio) -> BytesIO:
 
     bucket = path_parts[0]
     key = path_parts[1]
-    
+
     # Get timeout from environment, default to 30 seconds
     timeout_seconds = int(os.environ.get("S3_OPERATION_TIMEOUT_SECONDS", "30"))
-    
+
     def timeout_handler(signum, frame):
-        raise TimeoutError(f"S3 operation timed out after {timeout_seconds} seconds")
+        raise TimeoutError(
+            f"S3 operation timed out after {timeout_seconds} seconds")
 
     try:
         # Set signal handler for timeout
         old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout_seconds)
-        
+
         try:
             response = client.get_object(bucket, key)
             # Read with timeout protection
@@ -191,7 +194,7 @@ def download_from_s3(url: str, client: Minio) -> BytesIO:
         finally:
             signal.alarm(0)  # Ensure alarm is cancelled
             signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
-        
+
         return BytesIO(data)
     except TimeoutError as e:
         raise Exception(f"S3 download timed out: {e}") from e
@@ -262,7 +265,8 @@ def validate_request_input(
         )
 
     # Validate file source (file_url, file_path, or __files__ must be provided)
-    has_file_path = file_path and isinstance(file_path, str) and file_path.strip()
+    has_file_path = file_path and isinstance(
+        file_path, str) and file_path.strip()
     has_files_list = files_list and len(files_list) > 0
     has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
@@ -309,7 +313,8 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
     if is_rustfs_url(file_url):
         client = get_rustfs_s3_client()
         if client:
-            emit_chunk("status", {"message": "Downloading file from S3 storage (direct)"})
+            emit_chunk(
+                "status", {"message": "Downloading file from S3 storage (direct)"})
             try:
                 return download_from_s3(file_url, client)
             except Exception as e:
@@ -321,7 +326,8 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
 
     # Fall back to HTTP download (for presigned URLs or regular HTTP)
     if not HTTPX_AVAILABLE:
-        raise ImportError("httpx is not installed. Install with: pip install httpx")
+        raise ImportError(
+            "httpx is not installed. Install with: pip install httpx")
 
     if is_internal_url(file_url):
         raise ValueError(f"Access to internal URLs is not allowed: {file_url}")
@@ -382,7 +388,7 @@ def load_data_from_buffer(buffer: BytesIO, filename: str) -> "pd.DataFrame":
 def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
     """
     Load data from base64-encoded content with size validation.
-    
+
     Prevents DoS attacks via unlimited base64 file uploads.
     Size limit is based on MAX_FILE_SIZE_MB constant (100MB by default).
 
@@ -404,7 +410,7 @@ def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
 
         # Decode base64 content
         content_bytes = base64.b64decode(content)
-        
+
         # Check decoded size against MAX_FILE_SIZE_MB limit
         size_mb = len(content_bytes) / (1024 * 1024)
         if size_mb > MAX_FILE_SIZE_MB:
@@ -467,13 +473,15 @@ def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
 def get_data_summary(df: pd.DataFrame) -> str:
     """Generate a summary of the dataframe for the LLM."""
     summary = []
-    summary.append(f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
+    summary.append(
+        f"DataFrame shape: {df.shape[0]} rows x {df.shape[1]} columns")
     summary.append(f"\nColumns ({len(df.columns)}):")
     for col in df.columns:
         dtype = df[col].dtype
         null_count = df[col].isnull().sum()
         sample = df[col].dropna().head(3).tolist()
-        summary.append(f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
+        summary.append(
+            f"  - {col}: {dtype}, {null_count} nulls, sample: {sample}")
 
     summary.append("\nFirst 5 rows preview:")
     summary.append(df.head().to_string())
@@ -532,7 +540,8 @@ def execute_code_in_sandbox(
     # Get directories from environment
     readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
     writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
-    max_size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
+    max_size_mb = int(os.environ.get(
+        "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
     config = SandboxConfig(
         image="mcp-python-sandbox:latest",
@@ -634,7 +643,8 @@ def execute_code_safely(
                 result = restricted_globals["output"]
 
         except Exception as e:
-            stderr_capture.write(f"Execution error: {str(e)}\n{traceback.format_exc()}")
+            stderr_capture.write(
+                f"Execution error: {str(e)}\n{traceback.format_exc()}")
 
     return {
         "success": stderr_capture.tell() == 0,
@@ -726,7 +736,8 @@ def main() -> None:
         # Initialize safe file operations
         readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
         writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
-        max_size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
+        max_size_mb = int(os.environ.get(
+            "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
         safe_ops = SafeFileOperations(
             readonly_dir=readonly_dir,
@@ -776,7 +787,8 @@ def main() -> None:
                 return
 
             try:
-                buffer = download_file_from_url(file_url_direct, actual_filename)
+                buffer = download_file_from_url(
+                    file_url_direct, actual_filename)
                 df = load_data_from_buffer(buffer, actual_filename)
                 emit_chunk(
                     "data_loaded",
@@ -830,8 +842,10 @@ def main() -> None:
             try:
                 if file_content_base64:
                     # Load from base64 content
-                    emit_chunk("status", {"message": "Loading file from base64 content"})
-                    df = load_data_from_base64(file_content_base64, actual_filename)
+                    emit_chunk(
+                        "status", {"message": "Loading file from base64 content"})
+                    df = load_data_from_base64(
+                        file_content_base64, actual_filename)
                     emit_chunk(
                         "data_loaded",
                         {
@@ -842,12 +856,14 @@ def main() -> None:
                     )
                 elif file_url:
                     # Download file from URL
-                    emit_chunk("status", {"message": "Downloading file from URL"})
+                    emit_chunk(
+                        "status", {"message": "Downloading file from URL"})
                     buffer = download_file_from_url(file_url, actual_filename)
                     df = load_data_from_buffer(buffer, actual_filename)
                     emit_chunk(
                         "data_loaded",
-                        {"rows": df.shape[0], "columns": df.shape[1], "source": "url"},
+                        {"rows": df.shape[0],
+                            "columns": df.shape[1], "source": "url"},
                     )
                 else:
                     # Neither content nor URL provided
@@ -877,12 +893,14 @@ def main() -> None:
 
         elif file_path:
             # Use traditional file_path (legacy support)
-            emit_chunk("status", {"message": "Loading data file", "file": file_path})
+            emit_chunk(
+                "status", {"message": "Loading data file", "file": file_path})
             actual_filename = Path(file_path).name
             df = load_data(file_path, safe_ops)
             emit_chunk(
                 "data_loaded",
-                {"rows": df.shape[0], "columns": df.shape[1], "source": "file_path"},
+                {"rows": df.shape[0], "columns": df.shape[1],
+                    "source": "file_path"},
             )
 
         else:
@@ -974,7 +992,8 @@ def main() -> None:
             emit_chunk("status", {"message": "Executing code in sandbox"})
             exec_result = execute_code_in_sandbox(code, df, request_id)
         else:
-            emit_chunk("warning", {"message": "Using unsafe exec() - sandbox disabled"})
+            emit_chunk(
+                "warning", {"message": "Using unsafe exec() - sandbox disabled"})
             exec_result = execute_code_safely(code, df, request_id)
 
         if not exec_result["success"] and not exec_result["result"]:
@@ -994,7 +1013,8 @@ def main() -> None:
         emit_chunk("status", {"message": "Formatting results"})
 
         result = exec_result["result"]
-        formatted_result = format_result(result, output_format, exec_result.get("stdout", ""))
+        formatted_result = format_result(
+            result, output_format, exec_result.get("stdout", ""))
 
         response_text = f"**Question:** {question}\n\n"
         if exec_result["stdout"]:
@@ -1076,7 +1096,8 @@ def main() -> None:
 
         logger.error(
             "Unhandled exception in data_analysis",
-            extra_data={"error": error_message, "traceback": traceback.format_exc()},
+            extra_data={"error": error_message,
+                        "traceback": traceback.format_exc()},
         )
         write_response(
             {

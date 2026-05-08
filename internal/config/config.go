@@ -95,6 +95,14 @@ type ToolConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// InputSchema defines the expected JSON schema for tool arguments
 	InputSchema map[string]interface{} `yaml:"input_schema"`
+	// ReadOnlyHint indicates the tool does not modify external state
+	ReadOnlyHint *bool `yaml:"read_only_hint,omitempty"`
+	// DestructiveHint indicates the tool may delete or irreversibly modify data
+	DestructiveHint *bool `yaml:"destructive_hint,omitempty"`
+	// IdempotentHint indicates the tool produces the same result on repeated calls
+	IdempotentHint *bool `yaml:"idempotent_hint,omitempty"`
+	// OpenWorldHint indicates results depend on external world state
+	OpenWorldHint *bool `yaml:"open_world_hint,omitempty"`
 }
 
 // PromptArgumentConfig defines an argument for a prompt.

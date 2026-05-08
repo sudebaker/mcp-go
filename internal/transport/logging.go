@@ -14,24 +14,26 @@ import (
 //
 // Thread-safe: No (assumes single-threaded Write/WriteHeader calls)
 type responseWriter struct {
-	http.ResponseWriter        // Embedded writer for delegation
-	statusCode    int         // Captured status code
-	written       int64       // Total bytes written
-	headerWritten bool        // Prevents double WriteHeader calls
+	http.ResponseWriter       // Embedded writer for delegation
+	statusCode          int   // Captured status code
+	written             int64 // Total bytes written
+	headerWritten       bool  // Prevents double WriteHeader calls
 }
 
 // newResponseWriter wraps an http.ResponseWriter with status tracking.
 //
 // Args:
-//   w: The underlying HTTP response writer
+//
+//	w: The underlying HTTP response writer
 //
 // Returns:
-//   A responseWriter that captures status and byte count
+//
+//	A responseWriter that captures status and byte count
 func newResponseWriter(w http.ResponseWriter) *responseWriter {
 	return &responseWriter{
 		ResponseWriter: w,
-		statusCode:    http.StatusOK, // Default to OK before any WriteHeader
-		headerWritten: false,
+		statusCode:     http.StatusOK, // Default to OK before any WriteHeader
+		headerWritten:  false,
 	}
 }
 
@@ -39,7 +41,8 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 // Subsequent calls are no-ops to prevent panics from double headers.
 //
 // Args:
-//   code: HTTP status code
+//
+//	code: HTTP status code
 func (rw *responseWriter) WriteHeader(code int) {
 	if !rw.headerWritten {
 		rw.statusCode = code
@@ -51,10 +54,12 @@ func (rw *responseWriter) WriteHeader(code int) {
 // Write tracks bytes written through the wrapped response writer.
 //
 // Args:
-//   b: Byte slice to write
+//
+//	b: Byte slice to write
 //
 // Returns:
-//   (bytes written, error) from underlying writer
+//
+//	(bytes written, error) from underlying writer
 func (rw *responseWriter) Write(b []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(b)
 	rw.written += int64(n)
@@ -73,10 +78,12 @@ func (rw *responseWriter) Flush() {
 // Logs incoming request details and outgoing response status/duration.
 //
 // Args:
-//   next: The downstream HTTP handler to wrap
+//
+//	next: The downstream HTTP handler to wrap
 //
 // Returns:
-//   HTTP middleware that logs all requests and responses
+//
+//	HTTP middleware that logs all requests and responses
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -111,11 +118,13 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 // Creates spans for each request and attaches HTTP metadata to spans.
 //
 // Args:
-//   tracer: The tracing.Tracer instance for span creation (nil = NoOp)
-//   next: The downstream HTTP handler to wrap
+//
+//	tracer: The tracing.Tracer instance for span creation (nil = NoOp)
+//	next: The downstream HTTP handler to wrap
 //
 // Returns:
-//   HTTP middleware that creates tracing spans for each request
+//
+//	HTTP middleware that creates tracing spans for each request
 func TracingMiddleware(tracer *tracing.Tracer, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Start tracing span for this HTTP request

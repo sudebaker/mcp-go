@@ -48,10 +48,10 @@ const (
 // Executor manages the execution of tools as subprocesses.
 // It validates inputs, spawns processes, handles timeouts, and parses responses.
 type Executor struct {
-	config        *config.Config  // Server configuration including tool definitions
-	tracer        *tracing.Tracer // For distributed tracing of tool executions
-	sem           chan struct{}    // Semaphore limiting concurrent subprocess executions
-	sessionStore  interface {     // Session store for user_id lookup
+	config       *config.Config  // Server configuration including tool definitions
+	tracer       *tracing.Tracer // For distributed tracing of tool executions
+	sem          chan struct{}   // Semaphore limiting concurrent subprocess executions
+	sessionStore interface {     // Session store for user_id lookup
 		Get(sessionID string) (string, bool)
 	}
 }
@@ -111,15 +111,17 @@ func NewWithTracer(cfg *config.Config, tracer *tracing.Tracer) *Executor {
 // Returns:
 //
 //	a new Executor instance with the provided tracer and session store
-func NewWithTracerAndSessionStore(cfg *config.Config, tracer *tracing.Tracer, sessionStore interface{ Get(sessionID string) (string, bool) }) *Executor {
+func NewWithTracerAndSessionStore(cfg *config.Config, tracer *tracing.Tracer, sessionStore interface {
+	Get(sessionID string) (string, bool)
+}) *Executor {
 	if tracer == nil {
 		tracer = tracing.NoOpTracer()
 	}
 	return &Executor{
-		config:        cfg,
-		tracer:        tracer,
-		sem:           make(chan struct{}, cfg.Execution.MaxConcurrency),
-		sessionStore:  sessionStore,
+		config:       cfg,
+		tracer:       tracer,
+		sem:          make(chan struct{}, cfg.Execution.MaxConcurrency),
+		sessionStore: sessionStore,
 	}
 }
 

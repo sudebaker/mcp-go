@@ -80,22 +80,6 @@ def get_base_url() -> str:
     return base_url.rstrip("/")
 
 
-def generate_download_url(filename: str, storage_type: str = "local") -> str:
-    """Generate public download URL through MCP server proxy.
-
-    Args:
-        filename: The filename or object path
-        storage_type: 'local' for files in /data/reports, 'rustfs' for S3 objects
-
-    Returns:
-        URL to download the file through the MCP server proxy
-    """
-    base_url = get_base_url()
-    if storage_type == "rustfs":
-        return f"{base_url}/download/rustfs/{filename}"
-    return f"{base_url}/download/local/{filename}"
-
-
 def read_request() -> dict[str, Any]:
     """Read JSON request from STDIN."""
     input_data = sys.stdin.read()
@@ -223,13 +207,11 @@ def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
         )
 
         public_url = rewrite_to_public_url(presigned_url)
-        download_url = generate_download_url(f"{bucket}/{object_name}", "rustfs")
 
         return {
             "bucket": bucket,
             "object_name": object_name,
             "presigned_url": public_url,
-            "download_url": download_url,
         }
     except S3Error as e:
         logger.error(f"Failed to upload to RustFS: {e}")
@@ -506,12 +488,6 @@ def main() -> None:
 
         rustfs_info = upload_to_rustfs(output_path)
 
-        filename = output_path.name
-        if rustfs_info:
-            download_url = rustfs_info.get("download_url", generate_download_url(filename, "local"))
-        else:
-            download_url = generate_download_url(filename, "local")
-
         response_content = [
             {
                 "type": "text",
@@ -535,19 +511,11 @@ def main() -> None:
                 }
             )
 
-        response_content.append(
-            {
-                "type": "text",
-                "text": f"Download URL (valid for {get_rustfs_expiry_hours()}h): {download_url}",
-            }
-        )
-
         structured_content = {
             "report_type": report_type,
             "output_path": str(output_path),
             "file_size": output_path.stat().st_size if output_path.exists() else 0,
             "pdf_base64": pdf_base64,
-            "download_url": download_url,
         }
 
         if rustfs_info:
@@ -557,7 +525,6 @@ def main() -> None:
                         "bucket": rustfs_info["bucket"],
                         "object_name": rustfs_info["object_name"],
                         "presigned_url": rustfs_info["presigned_url"],
-                        "download_url": rustfs_info["download_url"],
                     }
                 }
             )

@@ -92,7 +92,7 @@ tools:
 
   # PDF Report Generation
   - name: "generate_report"
-    description: "Genera PDFs profesionales. Soporta: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Retorna PDF base64 + download URL."
+    description: "Genera PDFs profesionales. Soporta: incident, meeting, audit, executive_summary, formal_report, corporate_email, llm_response. Retorna PDF base64."
     command: "python3"
     args: ["/app/tools/pdf_reports/main.py"]
     timeout: "120s"
@@ -178,10 +178,13 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Almacena texto en knowledge base para búsqueda semántica futura."
+    description: "Stores text in the knowledge base for future semantic search. Use to memorize facts, preferences, decisions, or any information the user wants the bot to remember across conversations. Returns a confirmation with the stored content ID."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
+    read_only_hint: false
+    destructive_hint: false
+    idempotent_hint: true
     input_schema:
       type: object
       properties:
@@ -200,10 +203,14 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Busca en knowledge base con similaridad semántica."
+    description: "Searches the knowledge base for relevant facts using semantic similarity. Use when the user asks about something previously discussed, their preferences, past decisions, or any memorized information. Returns ranked results with relevance scores."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"
+    read_only_hint: true
+    destructive_hint: false
+    idempotent_hint: true
+    open_world_hint: false
     input_schema:
       type: object
       properties:

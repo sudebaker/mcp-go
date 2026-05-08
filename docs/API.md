@@ -33,8 +33,7 @@ Returns server information and available endpoints.
     "GET /health/detailed": "Detailed health check",
     "GET /metrics": "Prometheus metrics",
     "POST /mcp": "MCP Streamable HTTP endpoint",
-    "GET /openapi.json": "OpenAPI specification",
-    "GET /download/{type}/{path}": "File download proxy (local|rustfs)"
+    "GET /openapi.json": "OpenAPI specification"
   }
 }
 ```
@@ -112,31 +111,6 @@ OpenAPI 3.0 specification for the MCP server.
 ### GET /docs/
 
 Interactive API documentation (Swagger UI).
-
----
-
-### GET /download/{type}/{path}
-
-Download files through the MCP server proxy. Supports two storage types:
-
-| Type | Path Format | Description |
-|------|-------------|--------------|
-| `local` | `/download/local/{filename}` | Serve files from `/data/reports` |
-| `rustfs` | `/download/rustfs/{bucket}/{object}` | Redirect to presigned RustFS URL |
-
-**Parameters:**
-- `type`: `local` or `rustfs`
-- `path`: filename (local) or `bucket/object` (rustfs)
-
-**Response:**
-- `307 Temporary Redirect` → Redirects to actual file URL
-- `400 Bad Request` → Invalid path format
-- `404 Not Found` → File not found (local only)
-- `410 Gone` → Download link expired
-
-**Security:**
-- Local downloads: Path traversal prevention, 24h link expiry
-- RustFS downloads: Generates presigned URL with configured expiry
 
 ---
 
@@ -527,7 +501,6 @@ Interacts with RustFS/S3 storage for file operations.
 - `SSRF_BLOCKED_NETWORKS`: Additional CIDR ranges to block (e.g., "192.168.1.0/24"). Default blocks only link-local (169.254.x.x) and loopback ranges. Internal network ranges (10.x, 172.16-31.x, 192.168.x) are allowed by default.
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
-- `DOWNLOAD_URL_EXPIRY_HOURS`: Controls how long `/download/` URLs remain valid (24h default).
 
 **Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram, pdf_reports). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
 

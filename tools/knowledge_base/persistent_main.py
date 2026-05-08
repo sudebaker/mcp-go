@@ -10,6 +10,8 @@ import json
 import os
 import sys
 
+MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB max request size
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(script_dir, ".."))
 sys.path.insert(0, script_dir)
@@ -53,8 +55,8 @@ def main():
         print(json.dumps(result, default=str), flush=True)
         return
 
-    first_line = sys.stdin.readline()
-    if not first_line:
+    first_line = sys.stdin.readline(MAX_REQUEST_SIZE)
+    if not first_line or len(first_line) >= MAX_REQUEST_SIZE:
         return
 
     try:
@@ -85,7 +87,7 @@ def main():
 
     for line in sys.stdin:
         line = line.strip()
-        if not line:
+        if not line or len(line) > MAX_REQUEST_SIZE:
             continue
         try:
             req = json.loads(line)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -158,15 +159,19 @@ func (p *ProcessPool) tryAcquireIdle(toolName string) *processSlot {
 
 func (p *ProcessPool) tryCreate(ctx context.Context, toolName string) (*processSlot, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if len(p.pool[toolName]) >= p.maxPerTool {
+		p.mu.Unlock()
 		return nil, errPoolFull
 	}
+	// Hold lock while creating to prevent race condition
+	// where two goroutines exceed maxPerTool
 	slot, err := p.startProcess(ctx, toolName)
 	if err != nil {
+		p.mu.Unlock()
 		return nil, err
 	}
 	p.pool[toolName] = append(p.pool[toolName], slot)
+	p.mu.Unlock()
 	return slot, nil
 }
 
@@ -178,9 +183,17 @@ func (p *ProcessPool) startProcess(ctx context.Context, toolName string) (*proce
 	}
 
 	args := make([]string, len(toolCfg.Args))
+	toolsBaseDir := p.config.Execution.WorkingDir
 	for i, a := range toolCfg.Args {
 		if strings.HasSuffix(a, "main.py") {
-			args[i] = strings.TrimSuffix(a, "main.py") + "persistent_main.py"
+			trimmed := strings.TrimSuffix(a, "main.py")
+			normalized := strings.TrimSuffix(strings.TrimSuffix(a, "main.py"), "/")
+			baseName := filepath.Base(normalized)
+			if baseName == "knowledge_base" || strings.HasPrefix(trimmed, toolsBaseDir) {
+				args[i] = trimmed + "persistent_main.py"
+			} else {
+				args[i] = a
+			}
 		} else {
 			args[i] = a
 		}

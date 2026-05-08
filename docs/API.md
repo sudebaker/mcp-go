@@ -184,6 +184,11 @@ Generates PDF reports from templates. Supports uploading to RustFS/S3 storage.
 | data | object | Yes | Report data object |
 | output_path | string | No | Optional output path |
 
+**Report Types:**
+- `formal_report`: Supports a `content` field (markdown) that is rendered as the report body. Falls back to structured `sections`, `recommendations`, etc. if `content` is not provided.
+- `llm_response`: Renders markdown content with corporate styling.
+- Others: Incident, meeting, audit, executive summary, corporate email.
+
 **Output:**
 - `pdf_base64`: PDF content encoded in base64 (MCP standard)
 - `download_url`: Public URL to download the PDF (valid 24h by default)
@@ -223,6 +228,8 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 Stores content in the knowledge base (PostgreSQL + pgvector). **User isolation:** Each user can only access their own documents. User identity is established via the `capabilities.experimental.user_id` field in the MCP `initialize` request.
 
+**Performance:** Uses a persistent process pool (5 processes per tool) to avoid reloading the embedding model and database connections on each call. Expected latency: <1s vs ~7s for cold starts.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | content | string | Yes | Text content to store |
@@ -238,6 +245,8 @@ Stores content in the knowledge base (PostgreSQL + pgvector). **User isolation:*
 ### kb_search
 
 Searches the knowledge base. **User isolation:** Results are automatically filtered to the current user's documents only.
+
+**Performance:** Uses a persistent process pool (5 processes per tool) to avoid reloading the embedding model and database connections on each call. Expected latency: <1s vs ~7s for cold starts.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

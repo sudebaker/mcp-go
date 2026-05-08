@@ -104,6 +104,8 @@ KB tools (`kb_ingest`, `kb_search`) use `context.user_id` for data isolation:
 - Python KB tool receives `user_id` in the `context` object of the request
 - All queries filter by `user_id` - users only see their own documents
 
+**Performance:** KB tools use a persistent process pool (5 processes per tool) to avoid reloading embedding models and database connections on each call. Latency drops from ~7s (cold) to <1s (warm).
+
 ### mcp-go Library Hooks
 Uses `github.com/mark3labs/mcp-go` server hooks:
 ```go

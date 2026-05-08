@@ -94,7 +94,9 @@ func main() {
 	})
 
 	// Create executor with session store for user_id injection
-	exec := executor.NewWithTracerAndSessionStore(cfg, tracer, sessionStore)
+	// and persistent process pool for KB tools (kb_ingest, kb_search).
+	// Pool keeps 5 persistent Python processes per tool, avoiding model reloads.
+	exec := executor.NewWithTracerSessionStoreAndPool(cfg, tracer, sessionStore, 5)
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -172,6 +174,8 @@ func main() {
 	log.Info().
 		Dur("timeout", cfg.Server.ShutdownTimeout).
 		Msg("Shutting down server")
+
+	exec.Close()
 
 	if err := sseServer.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

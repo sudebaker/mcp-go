@@ -325,25 +325,51 @@ def render_formal_report(data: dict[str, Any], env: Environment) -> str:
     """Render formal report with charts template."""
     template = env.get_template("formal_report.html")
 
+    content_markdown = data.get("content", "")
+    
     context = build_base_context(data, "formal_report")
-    context.update(
-        {
-            "logo_url": data.get("logo_url"),
-            "report_id": data.get("report_id", ""),
-            "author": data.get("author", ""),
-            "department": data.get("department", ""),
-            "period_start": data.get("period_start", ""),
-            "period_end": data.get("period_end", ""),
-            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
-            "classification": data.get("classification", ""),
-            "executive_summary": data.get("executive_summary", ""),
-            "sections": data.get("sections", []),
-            "recommendations": data.get("recommendations", []),
-            "conclusion": data.get("conclusion", ""),
-            "appendix": data.get("appendix", []),
-            "confidentiality": data.get("confidentiality", "Confidential Document"),
-        }
-    )
+    
+    if content_markdown:
+        content_html = markdown.markdown(
+            content_markdown, extensions=["tables", "fenced_code", "nl2br"]
+        )
+        context.update(
+            {
+                "logo_url": data.get("logo_url"),
+                "report_id": data.get("report_id", ""),
+                "author": data.get("author", ""),
+                "department": data.get("department", ""),
+                "period_start": data.get("period_start", ""),
+                "period_end": data.get("period_end", ""),
+                "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+                "classification": data.get("classification", ""),
+                "executive_summary": data.get("executive_summary", ""),
+                "sections": [],
+                "recommendations": [],
+                "conclusion": content_html,
+                "appendix": [],
+                "confidentiality": data.get("confidentiality", "Confidential Document"),
+            }
+        )
+    else:
+        context.update(
+            {
+                "logo_url": data.get("logo_url"),
+                "report_id": data.get("report_id", ""),
+                "author": data.get("author", ""),
+                "department": data.get("department", ""),
+                "period_start": data.get("period_start", ""),
+                "period_end": data.get("period_end", ""),
+                "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+                "classification": data.get("classification", ""),
+                "executive_summary": data.get("executive_summary", ""),
+                "sections": data.get("sections", []),
+                "recommendations": data.get("recommendations", []),
+                "conclusion": data.get("conclusion", ""),
+                "appendix": data.get("appendix", []),
+                "confidentiality": data.get("confidentiality", "Confidential Document"),
+            }
+        )
 
     return template.render(**context)
 

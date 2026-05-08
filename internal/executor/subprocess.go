@@ -54,6 +54,7 @@ type Executor struct {
 	sessionStore interface {     // Session store for user_id lookup
 		Get(sessionID string) (string, bool)
 	}
+	pool *ProcessPool // Pool of persistent processes for KB tools
 }
 
 // New creates a new Executor with no-op tracing enabled.
@@ -125,6 +126,24 @@ func NewWithTracerAndSessionStore(cfg *config.Config, tracer *tracing.Tracer, se
 	}
 }
 
+// NewWithTracerSessionStoreAndPool creates an executor with tracing, session store, and process pool.
+// KB tools (kb_ingest, kb_search) use the persistent process pool to avoid reloading
+// embedding models and database connections between invocations.
+func NewWithTracerSessionStoreAndPool(cfg *config.Config, tracer *tracing.Tracer, sessionStore interface {
+	Get(sessionID string) (string, bool)
+}, poolMaxPerTool int) *Executor {
+	if tracer == nil {
+		tracer = tracing.NoOpTracer()
+	}
+	return &Executor{
+		config:       cfg,
+		tracer:       tracer,
+		sem:          make(chan struct{}, cfg.Execution.MaxConcurrency),
+		sessionStore: sessionStore,
+		pool:         NewProcessPool(cfg, tracer, sessionStore, poolMaxPerTool),
+	}
+}
+
 // ExecuteResult contains the outcome of a tool execution.
 // It wraps the tool's response with additional metadata.
 type ExecuteResult struct {
@@ -168,6 +187,11 @@ type ExecuteResult struct {
 //   - ErrorCodeTimeout: execution exceeded the configured timeout
 //   - ErrorCodeExecutionFailed: subprocess error, parsing error, or tool error
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	// Route KB tools through the persistent process pool
+	if e.pool != nil && (toolName == "kb_ingest" || toolName == "kb_search") {
+		return e.pool.Execute(ctx, toolName, arguments)
+	}
+
 	// Acquire semaphore slot for concurrent subprocess execution
 	// Blocks if max concurrency reached (prevents fork-bomb under load)
 	log.Debug().
@@ -339,7 +363,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	chunks := []map[string]interface{}{}
 
 	if strings.HasPrefix(stdoutStr, chunkPrefix) || strings.HasPrefix(stdoutStr, resultPrefix) {
-		chunks, subprocResp = e.parseStreamingOutput(stdoutStr, requestID)
+		chunks, subprocResp = parseStreamingOutput(stdoutStr, requestID)
 	} else {
 		if err := json.Unmarshal([]byte(stdoutStr), &subprocResp); err != nil {
 			span.RecordError(err)
@@ -406,7 +430,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 // Returns:
 //   - chunks: any parsed streaming chunks
 //   - SubprocessResponse: the final response (from __RESULT__ line or last resort)
-func (e *Executor) parseStreamingOutput(output string, requestID string) ([]map[string]interface{}, mcptypes.SubprocessResponse) {
+func parseStreamingOutput(output string, requestID string) ([]map[string]interface{}, mcptypes.SubprocessResponse) {
 	chunks := []map[string]interface{}{}
 	var finalResp mcptypes.SubprocessResponse
 
@@ -645,6 +669,13 @@ func compareValues(a, b interface{}) bool {
 		return ok && av == bv
 	}
 	return false
+}
+
+// Close shuts down the process pool if it exists.
+func (e *Executor) Close() {
+	if e.pool != nil {
+		e.pool.Close()
+	}
 }
 
 // ValidateToolConfig performs static validation on a tool configuration.

@@ -90,6 +90,11 @@ class DocumentChunk:
 
 def read_request() -> dict[str, Any]:
     """Read JSON request from STDIN."""
+    if os.environ.get("MCP_PERSISTENT_PROCESS") == "1":
+        line = sys.stdin.readline()
+        if not line:
+            raise EOFError("stdin closed")
+        return json.loads(line)
     input_data = sys.stdin.read()
     return json.loads(input_data)
 
@@ -791,6 +796,30 @@ def main() -> None:
 
         result["request_id"] = request_id
         write_response(result)
+        sys.stdout.flush()
+
+        # Persistent mode: process requests in a loop, reusing model & connection pool
+        if os.environ.get("MCP_PERSISTENT_PROCESS") == "1":
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    req = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                req_id = req.get("request_id", "")
+                ctx = req.get("context", {})
+
+                if operation == "ingest":
+                    result = handle_ingest(req, ctx)
+                else:
+                    result = handle_search(req, ctx)
+
+                result["request_id"] = req_id
+                write_response(result)
+                sys.stdout.flush()
 
     except ValueError as e:
         # Validation errors

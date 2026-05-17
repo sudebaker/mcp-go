@@ -187,6 +187,12 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize filename
+	originalFilename := sanitizeFilename(header.Filename)
+	if originalFilename == "" {
+		originalFilename = "upload"
+	}
+
 	// SECURITY: Verify magic bytes match declared Content-Type
 	// Read first 512 bytes to detect actual content type
 	buffer := make([]byte, 512)
@@ -196,9 +202,7 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
 		return
 	}
-	// Reset file pointer to beginning
-	file = io.MultiReader(bytes.NewReader(buffer[:n]), file)
-	
+
 	// Detect actual content type from magic bytes
 	detectedType := http.DetectContentType(buffer[:n])
 	if detectedType != contentType {
@@ -217,11 +221,8 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize filename
-	originalFilename := sanitizeFilename(header.Filename)
-	if originalFilename == "" {
-		originalFilename = "upload"
-	}
+	// Combine buffer and remaining file content for writing
+	fileReader := io.MultiReader(bytes.NewReader(buffer[:n]), file)
 
 	// Generate unique filename
 	uniqueName, err := generateRandomFilename(originalFilename)
@@ -280,7 +281,7 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	defer destFile.Close()
 
 	// Copy file content
-	written, err := io.Copy(destFile, file)
+	written, err := io.Copy(destFile, fileReader)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to write file content")
 		os.Remove(destPath) // Clean up partial file

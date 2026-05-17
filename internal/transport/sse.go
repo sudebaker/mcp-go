@@ -250,6 +250,9 @@ func (s *MCPServer) Start() error {
 	// Upload endpoint (POST /upload) - protected with API key auth
 	mux.HandleFunc("/upload", s.authMiddleware(s.handleUpload))
 
+	// Start background TTL cleanup goroutine for uploaded files
+	go s.startUploadCleanup()
+
 	// Prepare middleware chain: CORS -> Rate Limiter -> Handler
 	var streamHandler http.Handler = s.streamServer
 	if s.rateLimiter != nil {

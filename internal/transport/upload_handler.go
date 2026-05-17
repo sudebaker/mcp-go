@@ -255,6 +255,16 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 			}
 			return -1
 		}, collection)
+		// SECURITY: Limit collection name length and reject path separators
+		if len(collection) > 64 || strings.Contains(collection, "..") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(UploadResponse{
+				Success: false,
+				Error:   "Invalid collection name: max 64 chars, no path traversal",
+			})
+			return
+		}
 	}
 
 	// Build upload path
@@ -292,10 +302,17 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Calculate expiration time
 	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
 
-	// Register file for cleanup - store metadata for background cleanup goroutine
-	// TODO: Implement background cleanup goroutine in Start() that scans uploadDir
-	// and removes files older than their expires_at timestamp.
-	// For now, files persist until manual cleanup or disk pressure.
+	// Write expiration metadata as sidecar file for the cleanup goroutine
+	metaPath := destPath + ".meta"
+	metaData := map[string]string{
+		"expires_at": expiresAt.Format(time.RFC3339),
+		"content_type": contentType,
+		"original_name": originalFilename,
+	}
+	metaJSON, _ := json.Marshal(metaData)
+	if err := os.WriteFile(metaPath, metaJSON, 0644); err != nil {
+		log.Warn().Err(err).Str("path", metaPath).Msg("Failed to write upload metadata (file won't be auto-cleaned)")
+	}
 
 	log.Info().
 		Str("path", destPath).
@@ -315,4 +332,123 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		ContentType: contentType,
 		ExpiresAt:   expiresAt.Format(time.RFC3339),
 	})
+}
+
+// startUploadCleanup runs a background goroutine that periodically scans
+// the upload directory and removes files whose TTL has expired.
+func (s *MCPServer) startUploadCleanup() {
+	cfg := s.uploadConfig
+	if cfg.UploadDir == "" {
+		cfg.UploadDir = "/data/uploads"
+	}
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	log.Info().Str("dir", cfg.UploadDir).Msg("Upload TTL cleanup goroutine started")
+
+	for range ticker.C {
+		s.cleanExpiredUploads(cfg.UploadDir)
+	}
+}
+
+// cleanExpiredUploads removes uploaded files and their .meta sidecars whose
+// expiration time has passed.
+func (s *MCPServer) cleanExpiredUploads(uploadDir string) {
+	now := time.Now()
+	removed := 0
+	errors := 0
+
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn().Err(err).Str("dir", uploadDir).Msg("Failed to scan upload directory")
+		}
+		return
+	}
+
+	for _, entry := range entries {
+		// Skip .meta sidecar files (we clean them alongside their parent)
+		if strings.HasSuffix(entry.Name(), ".meta") {
+			continue
+		}
+
+		metaPath := filepath.Join(uploadDir, entry.Name()+".meta")
+		metaBytes, err := os.ReadFile(metaPath)
+		if err != nil {
+			// No .meta file — legacy file without metadata, skip
+			continue
+		}
+
+		var meta map[string]string
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			continue
+		}
+
+		expiresAtStr, ok := meta["expires_at"]
+		if !ok {
+			continue
+		}
+
+		expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+		if err != nil {
+			continue
+		}
+
+		if now.After(expiresAt) {
+			filePath := filepath.Join(uploadDir, entry.Name())
+			if err := os.Remove(filePath); err != nil {
+				errors++
+				log.Warn().Err(err).Str("path", filePath).Msg("Failed to remove expired upload")
+			} else {
+				os.Remove(metaPath) // best-effort sidecar cleanup
+				removed++
+			}
+		}
+	}
+
+	// Recurse into collection subdirectories (depth 1 only)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(uploadDir, entry.Name())
+			subEntries, err := os.ReadDir(subDir)
+			if err != nil {
+				continue
+			}
+			for _, subEntry := range subEntries {
+				if strings.HasSuffix(subEntry.Name(), ".meta") {
+					continue
+				}
+				metaPath := filepath.Join(subDir, subEntry.Name()+".meta")
+				metaBytes, err := os.ReadFile(metaPath)
+				if err != nil {
+					continue
+				}
+				var meta map[string]string
+				if json.Unmarshal(metaBytes, &meta) != nil {
+					continue
+				}
+				expiresAtStr, ok := meta["expires_at"]
+				if !ok {
+					continue
+				}
+				expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+				if err != nil {
+					continue
+				}
+				if now.After(expiresAt) {
+					filePath := filepath.Join(subDir, subEntry.Name())
+					if os.Remove(filePath) == nil {
+						os.Remove(metaPath)
+						removed++
+					} else {
+						errors++
+					}
+				}
+			}
+		}
+	}
+
+	if removed > 0 || errors > 0 {
+		log.Info().Int("removed", removed).Int("errors", errors).Msg("Upload TTL cleanup completed")
+	}
 }

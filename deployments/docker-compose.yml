@@ -35,6 +35,9 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-default}
       DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
 
+      # Upload endpoint API key (auth for POST /upload)
+      MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY:-}
+
       # Python settings
       PYTHONUNBUFFERED: "1"
     volumes:

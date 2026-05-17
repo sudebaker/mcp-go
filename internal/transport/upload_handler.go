@@ -4,6 +4,7 @@
 package transport
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -182,6 +183,36 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(UploadResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Unsupported content type: %s. Allowed: %s", contentType, strings.Join(cfg.AllowedTypes, ", ")),
+		})
+		return
+	}
+
+	// SECURITY: Verify magic bytes match declared Content-Type
+	// Read first 512 bytes to detect actual content type
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		log.Error().Err(err).Msg("Failed to read file header for magic byte detection")
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+	// Reset file pointer to beginning
+	file = io.MultiReader(bytes.NewReader(buffer[:n]), file)
+	
+	// Detect actual content type from magic bytes
+	detectedType := http.DetectContentType(buffer[:n])
+	if detectedType != contentType {
+		log.Warn().
+			Str("declared", contentType).
+			Str("detected", detectedType).
+			Str("filename", originalFilename).
+			Msg("MIME type mismatch - declared type does not match magic bytes")
+		// Reject upload if types don't match - prevents MIME spoofing attacks
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnsupportedMediaType)
+		json.NewEncoder(w).Encode(UploadResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Content type mismatch: declared %s but detected %s", contentType, detectedType),
 		})
 		return
 	}

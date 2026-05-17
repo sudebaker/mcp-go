@@ -52,7 +52,7 @@ import (
 	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
-// MCPServer wraps the mcp-go Streamable HTTP server with additional functionality.
+// MCPServer wraps the mcp-go library server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
 	mcpServer      *server.MCPServer            // Core MCP server implementation
@@ -66,6 +66,7 @@ type MCPServer struct {
 	rateLimiter    *RateLimiter                 // Rate limiting middleware (nil if disabled)
 	tracer         *tracing.Tracer              // Distributed tracing
 	allowedOrigins []string                     // CORS allowed origins (empty = all)
+	uploadConfig   config.UploadConfig          // Upload endpoint configuration
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -92,6 +93,8 @@ type MCPConfig struct {
 	AllowedOrigins []string
 	// Tracer is the distributed tracing instance (nil = no-op)
 	Tracer *tracing.Tracer
+	// Upload is the file upload configuration
+	Upload config.UploadConfig
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -159,6 +162,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		rateLimiter:    rateLimiter,
 		tracer:         tracer,
 		allowedOrigins: cfg.AllowedOrigins,
+		uploadConfig:   cfg.Upload,
 	}
 }
 
@@ -197,6 +201,9 @@ func (s *MCPServer) Start() error {
 
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
+
+	// Upload endpoint (POST /upload)
+	mux.HandleFunc("/upload", s.handleUpload)
 
 	// Prepare middleware chain: CORS -> Rate Limiter -> Handler
 	var streamHandler http.Handler = s.streamServer

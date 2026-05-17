@@ -20,6 +20,27 @@ server:
   #   - "https://lobe-chat.mycompany.com"
   #   - "https://another-client.example.com"
 
+upload:
+  enabled: true
+  max_size_mb: 50
+  allowed_types:
+    - image/jpeg
+    - image/png
+    - image/webp
+    - image/gif
+    - application/pdf
+    - audio/mpeg
+    - audio/wav
+    - audio/ogg
+    - audio/webm
+    - audio/flac
+    - text/csv
+    - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    - application/vnd.ms-excel
+  default_ttl_seconds: 3600
+  max_ttl_seconds: 86400
+  upload_dir: /data/uploads
+
 execution:
   default_timeout: "60s"
   working_dir: "/data"

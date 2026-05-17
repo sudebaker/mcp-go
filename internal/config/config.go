@@ -38,6 +38,8 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	// Execution contains tool execution settings
 	Execution ExecutionConfig `yaml:"execution"`
+	// Upload contains file upload endpoint configuration
+	Upload UploadConfig `yaml:"upload,omitempty"`
 	// Tools is the list of available tools and their configurations
 	Tools []ToolConfig `yaml:"tools"`
 	// Prompts is the list of available prompts
@@ -133,6 +135,22 @@ type PromptConfig struct {
 	Arguments []PromptArgumentConfig `yaml:"arguments,omitempty"`
 	// Messages are the template messages in the prompt
 	Messages []PromptMessageConfig `yaml:"messages"`
+}
+
+// UploadConfig holds configuration for the file upload endpoint.
+type UploadConfig struct {
+	// Enabled indicates if upload endpoint is active (default: true)
+	Enabled bool `yaml:"enabled"`
+	// MaxSizeMB is the maximum file size in megabytes (default: 50)
+	MaxSizeMB int64 `yaml:"max_size_mb"`
+	// AllowedTypes is the whitelist of MIME types
+	AllowedTypes []string `yaml:"allowed_types"`
+	// DefaultTTLSeconds is the default time-to-live for uploaded files (default: 3600)
+	DefaultTTLSeconds int `yaml:"default_ttl_seconds"`
+	// MaxTTLSeconds is the maximum TTL a client can request (default: 86400)
+	MaxTTLSeconds int `yaml:"max_ttl_seconds"`
+	// UploadDir is the base directory for storing uploads (default: /data/uploads)
+	UploadDir string `yaml:"upload_dir"`
 }
 
 // envVarRegex matches ${VAR_NAME} or ${VAR_NAME:-default} patterns for expansion

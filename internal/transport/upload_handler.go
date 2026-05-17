@@ -139,7 +139,10 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(err.Error(), "http: request body too large") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			fmt.Fprintf(w, `{"success":false,"error":"File exceeds maximum size limit (%dMB)"}`, cfg.MaxSizeMB)
+			json.NewEncoder(w).Encode(UploadResponse{
+				Success: false,
+				Error:   fmt.Sprintf("File exceeds maximum size limit (%dMB)", cfg.MaxSizeMB),
+			})
 			return
 		}
 		http.Error(w, "Failed to parse form", http.StatusBadRequest)
@@ -152,7 +155,10 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		if err == http.ErrMissingFile {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"success":false,"error":"Missing required field: file"}`)
+			json.NewEncoder(w).Encode(UploadResponse{
+				Success: false,
+				Error:   "Missing required field: file",
+			})
 			return
 		}
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
@@ -172,7 +178,10 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnsupportedMediaType)
-		fmt.Fprintf(w, `{"success":false,"error":"Unsupported content type: %s. Allowed: %s"}`, contentType, strings.Join(cfg.AllowedTypes, ", "))
+		json.NewEncoder(w).Encode(UploadResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Unsupported content type: %s. Allowed: %s", contentType, strings.Join(cfg.AllowedTypes, ", ")),
+		})
 		return
 	}
 
@@ -265,6 +274,12 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Send success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"success":true,"path":"%s","filename":"%s","size":%d,"content_type":"%s","expires_at":"%s"}`,
-		destPath, originalFilename, written, contentType, expiresAt.Format(time.RFC3339))
+	json.NewEncoder(w).Encode(UploadResponse{
+		Success:     true,
+		Path:        destPath,
+		Filename:    originalFilename,
+		Size:        written,
+		ContentType: contentType,
+		ExpiresAt:   expiresAt.Format(time.RFC3339),
+	})
 }

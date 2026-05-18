@@ -213,7 +213,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
         if provider_lower in ("mac-mini", "tailscale"):
             # Mac Mini Ollama via Tailscale
             api_url = os.environ.get("MAC_MINI_OLLAMA_URL", "http://100.72.34.100:11434")
-            resolved_model = model or "gemma4:e2b"  # Default to gemma4:e2b for Mac Mini
+            resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)
             return api_url, resolved_model
 
         if provider_lower == "openrouter":

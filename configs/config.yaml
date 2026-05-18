@@ -193,6 +193,12 @@ tools:
         question:
           type: string
           description: "Specific question for 'answer' task, or what to extract for 'extract_entities'. Example: 'What product is shown?' or 'Extract all dates and amounts'"
+        provider:
+          type: string
+          description: "Vision model provider: 'ollama' (local/self-hosted), 'openrouter', 'openai', 'anthropic'. Defaults to the LLM_API_URL/LLM_MODEL env vars."
+        model:
+          type: string
+          description: "Model name for the chosen provider. Examples: 'gemma4:e2b', 'llava:13b', 'gpt-4o-mini'. Defaults to LLM_MODEL env var or 'llava'."
       required:
         - image_path
         - task

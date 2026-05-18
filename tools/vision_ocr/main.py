@@ -189,7 +189,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
 
     Supported providers:
         - 'ollama' or 'local': Uses LLM_API_URL env var (default http://localhost:11434)
-        - 'mac-mini' or 'tailscale': Uses Mac Mini Ollama via Tailscale (hardcoded: 100.72.34.100:11434)
+        - 'mac-mini' or 'tailscale': Uses Mac Mini Ollama via MAC_MINI_OLLAMA_URL env var
         - 'openrouter': Uses OpenRouter API (needs OPENROUTER_API_KEY env var)
         - 'openai': Uses OpenAI API (needs OPENAI_API_KEY env var)
         - 'anthropic': Uses Anthropic API (needs ANTHROPIC_API_KEY env var)
@@ -211,8 +211,10 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
             return api_url, resolved_model
 
         if provider_lower in ("mac-mini", "tailscale"):
-            # Mac Mini Ollama via Tailscale
-            api_url = os.environ.get("MAC_MINI_OLLAMA_URL", "http://100.72.34.100:11434")
+            # Mac Mini Ollama via Tailscale — URL configurable via env var
+            api_url = os.environ.get("MAC_MINI_OLLAMA_URL", "")
+            if not api_url:
+                raise ValueError("MAC_MINI_OLLAMA_URL env var not set. Configure it to your Mac Mini's Tailscale URL (e.g. http://<tailscale-ip>:11434)")
             resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)
             return api_url, resolved_model
 

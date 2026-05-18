@@ -33,9 +33,6 @@ def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
 
     if "openrouter.ai" in url_lower or "api.openrouter.ai" in url_lower:
         return "openai", os.environ.get("OPENROUTER_API_KEY")
-    elif "100.72.34.100" in url_lower:
-        # Mac Mini Ollama via Tailscale — use Ollama format
-        return "ollama", None
     elif "api.openai.com" in url_lower:
         return "openai", os.environ.get("OPENAI_API_KEY")
     elif "generativelanguage.googleapis.com" in url_lower:

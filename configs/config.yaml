@@ -47,6 +47,7 @@ execution:
   max_concurrency: 5
   environment:
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
+    MAC_MINI_OLLAMA_URL: "${MAC_MINI_OLLAMA_URL:-}"
     LLM_MODEL: "${LLM_MODEL:-llama3}"
     LLM_API_FORMAT: "${LLM_API_FORMAT:-ollama}"
     OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"

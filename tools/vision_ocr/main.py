@@ -212,9 +212,12 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
 
         if provider_lower in ("mac-mini", "tailscale"):
             # Mac Mini Ollama via Tailscale — URL configurable via env var
+            # Use /v1 endpoint for OpenAI-compatible format (supports vision via multi-part content)
             api_url = os.environ.get("MAC_MINI_OLLAMA_URL", "")
             if not api_url:
                 raise ValueError("MAC_MINI_OLLAMA_URL env var not set. Configure it to your Mac Mini's Tailscale URL (e.g. http://<tailscale-ip>:11434)")
+            # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
+            api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
             resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)
             return api_url, resolved_model
 

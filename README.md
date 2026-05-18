@@ -66,6 +66,42 @@ Definidas en `configs/config.yaml`:
 - Nuevas capacidades: `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier`
 - Utilidades externas: `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `server_status`, `transcribe`, `web_search`, `searxng_search`, `browser_scraper`
 
+## Vision Tool: Provider Override
+
+The `analyze_image` tool supports optional `provider` and `model` parameters to route vision requests to specific LLM backends. This enables private vision analysis without sending images to third-party APIs.
+
+### Supported Providers
+
+| provider | Routes to | Default model | Needs API key |
+|---|---|---|---|
+| `ollama` / `local` | `LLM_API_URL` env var (default `http://localhost:11434`) | `LLM_MODEL` or `llava` | No |
+| `mac-mini` / `tailscale` | `MAC_MINI_OLLAMA_URL` env var | `qwen3.5:9b` (multimodal) | No |
+| `openrouter` | https://openrouter.ai/api/v1 | `google/gemini-2.0-flash-001` | `OPENROUTER_API_KEY` |
+| `openai` | https://api.openai.com/v1 | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| Custom URL | Used directly | `LLM_MODEL` or `llava` | Varies |
+
+### Configuration
+
+Set the `MAC_MINI_OLLAMA_URL` environment variable in your `.env` file (gitignored):
+
+```bash
+# Example: Ollama running on a remote machine via Tailscale/VPN
+MAC_MINI_OLLAMA_URL=http://<your-tailscale-ip>:11434
+```
+
+### Usage Examples
+
+```json
+// Use Mac Mini via Tailscale (private, no third-party)
+analyze_image(image_path="/data/tmp/photo.jpg", task="describe", provider="mac-mini")
+
+// Specify model explicitly
+analyze_image(image_path="/data/tmp/photo.jpg", task="ocr", provider="mac-mini", model="gemma4:34b")
+
+// Use OpenRouter (cloud-based)
+analyze_image(image_path="/data/tmp/photo.jpg", task="answer", provider="openrouter", model="google/gemini-2.0-flash-001")
+```
+
 ## Pruebas
 
 ```bash

@@ -440,6 +440,76 @@ Interacts with RustFS/S3 storage for file operations.
 
 ---
 
+### POST /upload
+
+Uploads a file to the server for temporary storage. Files are stored in `/data/uploads/` with configurable TTL.
+
+**Request:**
+```
+POST /upload
+Content-Type: multipart/form-data
+
+FormData:
+  - file: (required) binary file
+  - ttl: (optional) seconds until expiration (default: 3600, max: 86400)
+  - collection: (optional) subdirectory for organization
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "path": "/data/uploads/vision/abc123def456.jpg",
+  "filename": "screenshot.jpg",
+  "size": 81087,
+  "content_type": "image/jpeg",
+  "expires_at": "2026-05-17T12:00:00Z"
+}
+```
+
+**Response (413 - File too large):**
+```json
+{
+  "success": false,
+  "error": "File exceeds maximum size limit (50MB)"
+}
+```
+
+**Response (415 - Unsupported type):**
+```json
+{
+  "success": false,
+  "error": "Unsupported content type: video/mp4. Allowed: image/jpeg, image/png, ..."
+}
+```
+
+**Allowed MIME types:**
+- Images: `image/jpeg`, `image/png`, `image/webp`, `image/gif`
+- Documents: `application/pdf`, `text/csv`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.ms-excel`
+- Audio: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/webm`, `audio/flac`
+
+**Configuration** (in `configs/config.yaml`):
+```yaml
+upload:
+  enabled: true
+  max_size_mb: 50
+  default_ttl_seconds: 3600
+  max_ttl_seconds: 86400
+  upload_dir: /data/uploads
+  allowed_types:
+    - image/jpeg
+    - image/png
+    # ...
+```
+
+**Security:**
+- Filename sanitization (removes path traversal attempts)
+- Content-Type validation against whitelist
+- Size limit enforcement
+- Unique filename generation (UUID-based)
+
+---
+
 ## Error Responses
 
 ### Tool Execution Error

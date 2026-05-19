@@ -175,9 +175,21 @@ def call_llm_with_retry(
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
+        # Build message content — if images provided, use multi-part content for vision
+        if images:
+            content_parts = [{"type": "text", "text": prompt}]
+            for img_b64 in images:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                })
+            messages = [{"role": "user", "content": content_parts}]
+        else:
+            messages = [{"role": "user", "content": prompt}]
+
         payload = {
             "model": llm_model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": max(0.0, min(2.0, temperature)),
             "max_tokens": max(1, min(4096, max_tokens)),
         }

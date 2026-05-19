@@ -43,6 +43,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -52,7 +54,50 @@ import (
 	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
-// MCPServer wraps the mcp-go Streamable HTTP server with additional functionality.
+// uploadAPIKey is read from MCP_UPLOAD_API_KEY env var for upload endpoint authentication.
+var uploadAPIKey string
+
+func init() {
+	uploadAPIKey = os.Getenv("MCP_UPLOAD_API_KEY")
+}
+
+// authMiddleware wraps a handler with API key authentication.
+// Requires header: Authorization: Bearer <api_key>
+// If MCP_UPLOAD_API_KEY is not set, authentication is skipped (for backward compatibility).
+func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if no key is configured (backward compatibility)
+		if uploadAPIKey == "" {
+			log.Warn().Msg("MCP_UPLOAD_API_KEY not set - /upload endpoint is unprotected")
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		auth := r.Header.Get("Authorization")
+		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "missing or invalid authorization header",
+			})
+			return
+		}
+
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if token != uploadAPIKey {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "invalid API key",
+			})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+}
+
+// MCPServer wraps the mcp-go library server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
 	mcpServer      *server.MCPServer            // Core MCP server implementation
@@ -66,6 +111,7 @@ type MCPServer struct {
 	rateLimiter    *RateLimiter                 // Rate limiting middleware (nil if disabled)
 	tracer         *tracing.Tracer              // Distributed tracing
 	allowedOrigins []string                     // CORS allowed origins (empty = all)
+	uploadConfig   config.UploadConfig          // Upload endpoint configuration
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -92,6 +138,8 @@ type MCPConfig struct {
 	AllowedOrigins []string
 	// Tracer is the distributed tracing instance (nil = no-op)
 	Tracer *tracing.Tracer
+	// Upload is the file upload configuration
+	Upload config.UploadConfig
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -159,6 +207,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		rateLimiter:    rateLimiter,
 		tracer:         tracer,
 		allowedOrigins: cfg.AllowedOrigins,
+		uploadConfig:   cfg.Upload,
 	}
 }
 
@@ -197,6 +246,12 @@ func (s *MCPServer) Start() error {
 
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
+
+	// Upload endpoint (POST /upload) - protected with API key auth
+	mux.HandleFunc("/upload", s.authMiddleware(s.handleUpload))
+
+	// Start background TTL cleanup goroutine for uploaded files
+	go s.startUploadCleanup()
 
 	// Prepare middleware chain: CORS -> Rate Limiter -> Handler
 	var streamHandler http.Handler = s.streamServer

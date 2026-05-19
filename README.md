@@ -1,125 +1,164 @@
-# MCP Orchestrator - Air-Gap Edition
+# MCP Orchestrator
 
-Servidor MCP (Model Context Protocol) en Go para orquestar herramientas externas (principalmente Python) orientadas a analisis de datos, OCR, generacion de reportes y base de conocimiento.
+A Go-based MCP (Model Context Protocol) server that orchestrates external tools — primarily Python — for data analysis, OCR, report generation, knowledge base management, and more. Built for air-gapped and restricted-network deployments.
 
 [![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://www.docker.com/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green?style=flat)](https://modelcontextprotocol.io/)
 
-## Caracteristicas
+## Features
 
-- Orquestador MCP en Go con endpoint principal `POST /mcp`
-- Transporte legacy SSE para compatibilidad (`/sse` y `/message`)
-- Catalogo de herramientas configurables via `configs/config.yaml`
-- Integracion con PostgreSQL + pgvector para knowledge base
-- Integracion con RustFS/S3 para operaciones de ficheros
-- Preparado para despliegues en red restringida
+- Go-based MCP server with primary endpoint `POST /mcp`
+- Legacy SSE transport for backward compatibility (`/sse` and `/message`)
+- Configurable tool catalog via `configs/config.yaml`
+- PostgreSQL + pgvector knowledge base integration
+- RustFS/S3-compatible file storage integration
+- Designed for air-gapped and restricted-network deployments
 
-## Requisitos
+## Requirements
 
 - Go 1.23+
-- Docker y Docker Compose
-- Opcional: Ollama en la misma red Docker
+- Docker and Docker Compose
+- Optional: Ollama on the same Docker network
 
-## Inicio rapido
+## Quick Start
 
 ```bash
 cd deployments
 docker compose up -d
 
-# alternativa si tu entorno usa docker-compose
-# docker-compose up -d
-
 docker compose ps
 ```
 
-Servicios definidos en `deployments/docker-compose.yml`:
+Services defined in `deployments/docker-compose.yml`:
 
-- `mcp-server` -> `http://localhost:8080`
-- `postgres` -> `localhost:5432`
-- `rustfs` -> `http://localhost:9000`
+| Service | URL | Purpose |
+|---------|-----|---------|
+| `mcp-server` | `http://localhost:8080` | MCP server |
+| `postgres` | `localhost:5432` | KB storage (pgvector) |
+| `rustfs` | `http://localhost:9000` | S3-compatible storage |
 
-## Endpoints MCP
+## MCP Endpoints
 
-| Endpoint | Protocolo | Uso |
-|---|---|---|
-| `/mcp` | Streamable HTTP | Endpoint principal recomendado |
-| `/sse` | SSE | Compatibilidad con clientes legacy |
-| `/message` | SSE Message | Envio de mensajes para transporte SSE |
-| `/health` | HTTP | Healthcheck del servidor |
+| Endpoint | Protocol | Description |
+|----------|----------|-------------|
+| `/mcp` | Streamable HTTP | Primary endpoint (recommended) |
+| `/sse` | SSE | Legacy client compatibility |
+| `/message` | SSE Message | Message sender for SSE transport |
+| `/health` | HTTP | Server healthcheck |
 
-Metodos MCP soportados: `initialize`, `ping`, `tools/list`, `tools/call`.
+Supported MCP methods: `initialize`, `ping`, `tools/list`, `tools/call`.
 
-## Herramientas incluidas
+## Included Tools
 
-Definidas en `configs/config.yaml`:
+Defined in `configs/config.yaml`:
 
-> **Nota:** El fichero por defecto (`config.yaml`) tiene descripciones en **español**. Para usar descripciones en **inglés**, renombra `config-en.yaml` a `config.yaml`:
+> **Note:** The default configuration has tool descriptions in **Spanish**. To switch to **English** descriptions, rename the included alternate config:
 > ```bash
 > mv configs/config-en.yaml configs/config.yaml
 > docker compose restart mcp-server
 > ```
 
-- Base: `echo`
-- Analisis y generacion: `analyze_data`, `analyze_image`, `generate_report`
-- Knowledge base: `kb_ingest`, `kb_search`
-- Nuevas capacidades: `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier`
-- Utilidades externas: `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `server_status`, `transcribe`, `web_search`, `searxng_search`, `browser_scraper`
+| Category | Tools |
+|----------|-------|
+| Core | `echo` |
+| Analysis & Generation | `analyze_data`, `analyze_image`, `generate_report` |
+| Knowledge Base | `kb_ingest`, `kb_search` |
+| Document Processing | `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier` |
+| Utilities | `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `server_status`, `transcribe`, `searxng_search`, `browser_scraper` |
 
-## Pruebas
+## Vision Tool: Provider Override
+
+The `analyze_image` tool supports optional `provider` and `model` parameters to route vision requests to specific LLM backends. This enables private vision analysis without sending images to third-party APIs.
+
+### Supported Providers
+
+| Provider | Routes to | Default Model | API Key Required |
+|----------|-----------|---------------|------------------|
+| `ollama` / `local` | `LLM_API_URL` env var (default `http://localhost:11434`) | `LLM_MODEL` or `llava` | No |
+| `remote-ollama` | `REMOTE_OLLAMA_URL` env var | `qwen3.5:9b` (multimodal) | No |
+| `openrouter` | `https://openrouter.ai/api/v1` | `google/gemini-2.0-flash-001` | `OPENROUTER_API_KEY` |
+| `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| Custom URL | Used directly as-is | `LLM_MODEL` or `llava` | Varies |
+
+### Configuration
+
+Set the `REMOTE_OLLAMA_URL` environment variable in your `.env` file (gitignored) to point to a remote Ollama instance (VPN, Tailscale, LAN, etc.):
 
 ```bash
-# Go (unitarias + integracion)
+# Example: Ollama running on a remote machine via VPN/Tailscale
+REMOTE_OLLAMA_URL=http://<your-remote-ollama-host>:11434
+```
+
+### Usage Examples
+
+```json
+// Route to remote Ollama (private, no third-party)
+analyze_image(image_path="/data/tmp/photo.jpg", task="describe", provider="remote-ollama")
+
+// Specify model explicitly
+analyze_image(image_path="/data/tmp/photo.jpg", task="ocr", provider="remote-ollama", model="gemma4:34b")
+
+// Use OpenRouter (cloud-based)
+analyze_image(image_path="/data/tmp/photo.jpg", task="answer", provider="openrouter", model="google/gemini-2.0-flash-001")
+```
+
+## Testing
+
+```bash
+# Go unit + integration tests
 go test ./...
 
-# Pruebas rapidas de entorno
+# Quick environment tests
 ./tests/test_quick.sh
 
-# Suite de integracion destacada
+# Integration test suite
 ./tests/test_excel_analysis.sh
 ```
 
-## Sandbox Docker Image
+## Docker Sandbox
 
-El sandbox Docker (`mcp-python-sandbox:latest`) es usado por `data_analysis` para ejecutar codigo Pandas generado por LLM en aislamiento.
+The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis` to run LLM-generated Pandas code in isolation.
 
 ```bash
-# Build desde la raiz del repositorio
+# Build from the repository root
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
-## Documentacion
+## Documentation
 
-- `QUICKSTART.md`: guia corta de arranque y verificacion
-- `USAGE.md`: uso funcional por herramienta
-- `DOCUMENTATION_INDEX.md`: mapa de documentacion
-- `docs/DEVELOPMENT.md`: guia tecnica y arquitectura
-- `docs/API.md`: referencia API
-- `AGENTS.md`: comandos de build/test y convenciones
+| Document | Description |
+|----------|-------------|
+| `QUICKSTART.md` | Quick start and verification guide |
+| `USAGE.md` | Functional usage per tool |
+| `DOCUMENTATION_INDEX.md` | Documentation map |
+| `docs/DEVELOPMENT.md` | Technical architecture and development guide |
+| `docs/API.md` | API reference |
+| `AGENTS.md` | Build/test commands and conventions |
 
-## Estructura del proyecto
+## Project Structure
 
 ```text
 mcp-go/
 ├── cmd/server/         # Entry point
-├── internal/           # Dominio Go (config, executor, transport, etc.)
-├── tools/              # Herramientas Python
-├── templates/          # Plantillas HTML/CSS para reportes
-├── configs/            # Configuracion YAML
+├── internal/           # Go core (config, executor, transport, etc.)
+├── tools/              # Python tools
+├── templates/          # HTML/CSS report templates
+├── configs/            # YAML configuration
 ├── deployments/        # Dockerfile + compose
-└── tests/              # Tests Go, Python y shell
+└── tests/              # Go, Python, and shell tests
 ```
 
-## Agregar una nueva herramienta
+## Adding a New Tool
 
-1. Crear `tools/mi_herramienta/main.py` con protocolo JSON stdin/stdout.
-2. Registrar la herramienta en `configs/config.yaml`.
-3. Reiniciar el servicio:
+1. Create `tools/my_tool/main.py` implementing the JSON stdin/stdout protocol.
+2. Register the tool in `configs/config.yaml`.
+3. Restart the service:
 
 ```bash
 docker compose restart mcp-server
 ```
 
-## Licencia
+## License
 
-Este proyecto se distribuye bajo `LICENSE`.
+See [LICENSE](LICENSE).

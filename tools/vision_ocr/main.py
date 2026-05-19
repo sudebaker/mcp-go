@@ -182,10 +182,79 @@ def encode_image_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
+def resolve_vision_provider(provider: str | None, model: str | None, context: dict) -> tuple[str, str]:
+    """Resolve vision provider and model from input args or context/env vars.
+
+    Priority: explicit provider/model args > context > env vars > defaults.
+
+    Supported providers:
+        - 'ollama' or 'local': Uses LLM_API_URL env var (default http://localhost:11434)
+        - 'remote-ollama' or 'tailscale': Uses Remote Ollama via REMOTE_OLLAMA_URL env var
+        - 'openrouter': Uses OpenRouter API (needs OPENROUTER_API_KEY env var)
+        - 'openai': Uses OpenAI API (needs OPENAI_API_KEY env var)
+        - 'anthropic': Uses Anthropic API (needs ANTHROPIC_API_KEY env var)
+        - 'deepseek': Uses DeepSeek API (needs DEEPSEEK_API_KEY env var)
+        - A full URL: Used directly as the API base URL
+
+    Returns:
+        Tuple of (api_url, model_name)
+    """
+    # Default model
+    resolved_model = model or context.get("llm_model", os.environ.get("LLM_MODEL", "llava"))
+
+    if provider:
+        provider_lower = provider.lower().strip()
+
+        # Built-in provider mappings
+        if provider_lower in ("ollama", "local"):
+            api_url = os.environ.get("LLM_API_URL", "http://localhost:11434")
+            return api_url, resolved_model
+
+        if provider_lower in ("remote-ollama", "tailscale"):
+            # Remote Ollama via Tailscale — URL configurable via env var
+            # Use /v1 endpoint for OpenAI-compatible format (supports vision via multi-part content)
+            api_url = os.environ.get("REMOTE_OLLAMA_URL", "")
+            if not api_url:
+                raise ValueError("REMOTE_OLLAMA_URL env var not set. Configure it to point to your remote Ollama host (e.g. http://<remote-host>:11434)")
+            # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
+            api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
+            resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)
+            return api_url, resolved_model
+
+        if provider_lower == "openrouter":
+            api_url = "https://openrouter.ai/api/v1"
+            resolved_model = model or "google/gemini-2.0-flash-001"
+            return api_url, resolved_model
+
+        if provider_lower == "openai":
+            api_url = "https://api.openai.com/v1"
+            resolved_model = model or "gpt-4o-mini"
+            return api_url, resolved_model
+
+        if provider_lower == "anthropic":
+            # Anthropic uses a different API format — will need OpenAI-compat proxy
+            # For now, route through OpenRouter which supports Anthropic models
+            api_url = "https://openrouter.ai/api/v1"
+            resolved_model = model or "anthropic/claude-sonnet-4"
+            return api_url, resolved_model
+
+        if provider_lower == "deepseek":
+            api_url = "https://api.deepseek.com/v1"
+            return api_url, resolved_model
+
+        # If it looks like a URL, use it directly
+        if provider_lower.startswith(("http://", "https://")):
+            return provider_lower.rstrip("/"), resolved_model
+
+    # No provider specified — use context/env defaults (backwards compatible)
+    llm_api_url = context.get("llm_api_url") or os.environ.get("LLM_API_URL", "http://localhost:11434")
+    return llm_api_url, resolved_model
+
+
 def call_vision_model(
     llm_api_url: str, llm_model: str, image_path: str, prompt: str
 ) -> str:
-    """Call vision model (LLaVA) via Ollama API."""
+    """Call vision model via Ollama or OpenAI-compatible API."""
     # Encode image
     image_base64 = encode_image_base64(image_path)
 
@@ -417,6 +486,12 @@ def main() -> None:
 
         llm_api_url = context.get("llm_api_url")
         llm_model = context.get("llm_model", "llava")  # Default to llava for vision
+
+        # Allow override via explicit provider/model args
+        provider_arg = arguments.get("provider")
+        model_arg = arguments.get("model")
+        if provider_arg or model_arg:
+            llm_api_url, llm_model = resolve_vision_provider(provider_arg, model_arg, context)
 
         # Get image metadata first
         metadata = get_image_metadata(image_path)

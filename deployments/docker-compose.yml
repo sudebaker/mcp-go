@@ -19,6 +19,13 @@ services:
       # Database Configuration
       DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
 
+      # ACB PostgreSQL (standalone, independent from MCP postgres)
+      ACB_PG_HOST: ${ACB_PG_HOST:-acb-postgres}
+      ACB_PG_PORT: ${ACB_PG_PORT:-5432}
+      ACB_PG_USER: ${ACB_PG_USER:-acb}
+      ACB_PG_PASSWORD: ${ACB_PG_PASSWORD:-}
+      ACB_PG_DATABASE: ${ACB_PG_DATABASE:-acb}
+
       # Embedding model cache for air-gapped / offline use
       FASTEMBED_CACHE_PATH: /root/.cache/fastembed
 

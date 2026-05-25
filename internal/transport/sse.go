@@ -261,12 +261,17 @@ func (s *MCPServer) Start() error {
 	// Start background TTL cleanup goroutine for uploaded files
 	go s.startUploadCleanup()
 
-	// Prepare middleware chain: CORS -> Rate Limiter -> Handler
+	// Prepare middleware chain: CORS -> Rate Limiter -> Path Sanitizer -> Mux Handler
 	var streamHandler http.Handler = s.streamServer
 	if s.rateLimiter != nil {
 		streamHandler = s.rateLimiter.Middleware(streamHandler)
 	}
 	streamHandler = CORSMiddleware(s.allowedOrigins)(streamHandler)
+
+	// Build multi-handler chain: first the custom mux, then the SSE/stream handlers
+	// The mux handles health, metrics, upload, files; streamHandler handles MCP SSE/streamable HTTP
+	// Wrap the entire mux with sanitizePathMiddleware to prevent path normalization attacks
+	sanitizedMux := sanitizePathMiddleware(mux)
 
 	// Prepare SSE handlers with same middleware chain
 	// Cache handlers to avoid allocating new function values per request
@@ -317,8 +322,8 @@ func (s *MCPServer) Start() error {
 	// Log transport activation
 	log.Info().Msg("SSE transport active on /sse (GET) and /message (POST)")
 
-	// Wrap entire mux with tracing and logging middleware
-	var handler http.Handler = mux
+	// Wrap entire mux with sanitize middleware, tracing and logging middleware
+	var handler http.Handler = sanitizedMux
 	handler = TracingMiddleware(s.tracer, handler)
 	handler = LoggingMiddleware(handler)
 
@@ -574,4 +579,23 @@ func (s *MCPServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 
 	log.Info().Str("path", filePath).Str("remote", r.RemoteAddr).Msg("File served via /files/")
+}
+
+// sanitizePathMiddleware intercepts requests with suspicious path patterns
+// before Go's ServeMux normalizes them (which would cause 301 redirects).
+// Go's ServeMux cleans paths like "/foo//bar" → "/foo/bar" and issues a redirect.
+// This middleware prevents the redirect by rejecting the malformed request early.
+//
+// Security: Without this, an attacker could probe for path normalization
+// behavior or force redirects that reveal server internals.
+func sanitizePathMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block double slashes — Go's ServeMux would normalize them,
+		// potentially bypassing path traversal checks in handlers
+		if strings.Contains(r.URL.Path, "//") {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

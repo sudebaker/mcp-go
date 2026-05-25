@@ -46,6 +46,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -114,6 +115,8 @@ type MCPServer struct {
 	allowedOrigins []string                     // CORS allowed origins (empty = all)
 	uploadConfig   config.UploadConfig          // Upload endpoint configuration
 	filesDir       string                       // Directory for serving generated files via /files/
+	stopCh         chan struct{}
+	stopCleanupOnce sync.Once
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -213,6 +216,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		allowedOrigins: cfg.AllowedOrigins,
 		uploadConfig:   cfg.Upload,
 		filesDir:       cfg.FilesDir,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -352,6 +356,11 @@ func (s *MCPServer) Start() error {
 //	error: if shutdown times out or fails
 func (s *MCPServer) Shutdown(ctx context.Context) error {
 	log.Info().Msg("Shutting down MCP server")
+
+	// Stop upload cleanup goroutine
+	s.stopCleanupOnce.Do(func() {
+		close(s.stopCh)
+	})
 
 	// Stop rate limiter cleanup goroutine to prevent memory leak
 	if s.rateLimiter != nil {

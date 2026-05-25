@@ -84,12 +84,13 @@ func main() {
 		log.Debug().Str("session_id", sess.SessionID()).Msg("Session unregistered, user_id removed")
 	})
 	hooks.AddAfterInitialize(func(ctx context.Context, id any, message *mcp.InitializeRequest, result *mcp.InitializeResult) {
-		if experimental, ok := message.Params.Capabilities.Experimental["user_id"]; ok {
-			if userID, ok := experimental.(string); ok {
-				if sess := server.ClientSessionFromContext(ctx); sess != nil {
-					sessionStore.Set(sess.SessionID(), userID)
-					log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with user")
-				}
+		if message == nil || message.Params.Capabilities.Experimental == nil {
+			return
+		}
+		if userID, ok := message.Params.Capabilities.Experimental["user_id"].(string); ok {
+			if sess := server.ClientSessionFromContext(ctx); sess != nil {
+				sessionStore.Set(sess.SessionID(), userID)
+				log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with user")
 			}
 		}
 	})
@@ -129,7 +130,7 @@ func main() {
 		log.Debug().Msg("No prompts configured")
 	}
 
-	log.Info().Msg("Configuration changes require server restart")
+	log.Info().Msg("Server started with static configuration")
 
 	// Create SSE server
 	sseServer := transport.NewSSEServer(mcpServer, transport.SSEConfig{
@@ -154,6 +155,7 @@ func main() {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	// Start server in goroutine
 	go func() {
@@ -178,11 +180,11 @@ func main() {
 		Dur("timeout", cfg.Server.ShutdownTimeout).
 		Msg("Shutting down server")
 
-	exec.Close()
-
 	if err := sseServer.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")
 	}
+
+	exec.Close()
 
 	log.Info().Msg("Server stopped")
 }
@@ -194,10 +196,6 @@ func registerTool(mcpServer *server.MCPServer, exec *executor.Executor, toolCfg 
 
 	toolOpts := []mcp.ToolOption{
 		mcp.WithDescription(toolCfg.Description),
-		mcp.WithString(
-			"__raw_arguments",
-			mcp.Description("Raw arguments as JSON (internal use)"),
-		),
 	}
 
 	// Apply tool annotations if defined in config
@@ -302,12 +300,15 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 		}
 
 		// Handle execution error from subprocess
-		if !result.Success && result.Error != nil {
-			errorMsg := result.Error.Message
-			if result.Error.Details != "" {
-				errorMsg += "\n" + result.Error.Details
+		if !result.Success {
+			if result.Error != nil {
+				errorMsg := result.Error.Message
+				if result.Error.Details != "" {
+					errorMsg += "\n" + result.Error.Details
+				}
+				return mcp.NewToolResultError(errorMsg), nil
 			}
-			return mcp.NewToolResultError(errorMsg), nil
+			return mcp.NewToolResultError("Tool execution failed with no error details"), nil
 		}
 
 		// Convert content items to MCP content
@@ -339,7 +340,7 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 							},
 						}
 						contents = append(contents, resourceContent)
-						log.Info().
+						log.Debug().
 							Str("tool", toolName).
 							Str("uri", item.Resource.URI).
 							Str("mime_type", item.Resource.MIMEType).

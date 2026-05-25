@@ -43,6 +43,7 @@ type ProcessPool struct {
 	stopCh      chan struct{}
 	stopOnce    sync.Once
 	wg          sync.WaitGroup
+	execWg      sync.WaitGroup
 }
 
 // processSlot wraps a running subprocess with its communication pipes.
@@ -241,6 +242,9 @@ func (p *ProcessPool) startProcess(ctx context.Context, toolName string) (*proce
 
 // Execute runs a tool using a pooled subprocess.
 func (p *ProcessPool) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	p.execWg.Add(1)
+	defer p.execWg.Done()
+
 	select {
 	case p.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -373,6 +377,7 @@ func (p *ProcessPool) Close() {
 		close(p.stopCh)
 	})
 	p.wg.Wait()
+	p.execWg.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for name, slots := range p.pool {

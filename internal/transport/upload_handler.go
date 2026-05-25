@@ -38,8 +38,8 @@ type UploadConfig struct {
 // DefaultUploadConfig returns sensible defaults for upload configuration.
 func DefaultUploadConfig() UploadConfig {
 	return UploadConfig{
-		Enabled:           true,
-		MaxSizeMB:         50,
+		Enabled:   true,
+		MaxSizeMB: 50,
 		AllowedTypes: []string{
 			"image/jpeg",
 			"image/png",
@@ -104,13 +104,16 @@ func sanitizeFilename(name string) string {
 //   - Field: collection (optional) - subdirectory for organization
 //
 // Response (200):
-//   {"success": true, "path": "/data/uploads/abc123.jpg", "filename": "...", "size": N, "content_type": "...", "expires_at": "..."}
+//
+//	{"success": true, "path": "/data/uploads/abc123.jpg", "filename": "...", "size": N, "content_type": "...", "expires_at": "..."}
 //
 // Response (413):
-//   {"success": false, "error": "File exceeds maximum size limit (50MB)"}
+//
+//	{"success": false, "error": "File exceeds maximum size limit (50MB)"}
 //
 // Response (415):
-//   {"success": false, "error": "Unsupported content type: ..."}
+//
+//	{"success": false, "error": "Unsupported content type: ..."}
 func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -305,8 +308,8 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Write expiration metadata as sidecar file for the cleanup goroutine
 	metaPath := destPath + ".meta"
 	metaData := map[string]string{
-		"expires_at": expiresAt.Format(time.RFC3339),
-		"content_type": contentType,
+		"expires_at":    expiresAt.Format(time.RFC3339),
+		"content_type":  contentType,
 		"original_name": originalFilename,
 	}
 	metaJSON, _ := json.Marshal(metaData)
@@ -346,8 +349,14 @@ func (s *MCPServer) startUploadCleanup() {
 
 	log.Info().Str("dir", cfg.UploadDir).Msg("Upload TTL cleanup goroutine started")
 
-	for range ticker.C {
-		s.cleanExpiredUploads(cfg.UploadDir)
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanExpiredUploads(cfg.UploadDir)
+		case <-s.stopCh:
+			log.Debug().Msg("Upload cleanup goroutine stopped")
+			return
+		}
 	}
 }
 

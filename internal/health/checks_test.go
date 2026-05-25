@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/sudebaker/mcp-go/internal/config"
 )
 
 func TestHealthStatus(t *testing.T) {
@@ -146,33 +144,5 @@ func TestChecker_CheckMemory(t *testing.T) {
 	}
 	if result.Duration == 0 {
 		t.Error("duration should be set")
-	}
-}
-
-func TestChecker_CheckToolPath_EmptyCommand(t *testing.T) {
-	checker := NewChecker(nil, nil, nil)
-	toolCfg := config.ToolConfig{
-		Name:        "test_tool",
-		Command:     "",
-		Description: "test",
-	}
-	result := checker.checkToolPath(context.Background(), toolCfg)
-
-	if result.Status != StatusDegraded {
-		t.Errorf("expected %s, got %s", StatusDegraded, result.Status)
-	}
-}
-
-func TestChecker_CheckToolPath_ValidCommand(t *testing.T) {
-	checker := NewChecker(nil, nil, nil)
-	toolCfg := config.ToolConfig{
-		Name:        "test_tool",
-		Command:     "python3",
-		Description: "test",
-	}
-	result := checker.checkToolPath(context.Background(), toolCfg)
-
-	if result.Status != StatusHealthy {
-		t.Errorf("expected %s, got %s", StatusHealthy, result.Status)
 	}
 }

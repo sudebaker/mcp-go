@@ -73,42 +73,6 @@ func ValidatePath(path string, allowedDir string) error {
 	return nil
 }
 
-func resolveSymlinksWithDepth(path string, depth int) (string, error) {
-	if depth > maxSymlinkDepth {
-		return "", ErrSymlinkLoop
-	}
-
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-
-	if info.Mode()&os.ModeSymlink == 0 {
-		return filepath.Abs(path)
-	}
-
-	link, err := os.Readlink(path)
-	if err != nil {
-		return "", err
-	}
-
-	if !filepath.IsAbs(link) {
-		link = filepath.Join(filepath.Dir(path), link)
-	}
-
-	resolved, err := resolveSymlinksWithDepth(link, depth+1)
-	if err != nil {
-		return "", err
-	}
-
-	absPath, err := filepath.Abs(resolved)
-	if err != nil {
-		return "", err
-	}
-
-	return absPath, nil
-}
-
 func resolveAllSymlinks(path string) (string, error) {
 	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
 	current := ""

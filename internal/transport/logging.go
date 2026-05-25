@@ -127,7 +127,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 //	HTTP middleware that creates tracing spans for each request
 func TracingMiddleware(tracer *tracing.Tracer, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Start tracing span for this HTTP request
+		if tracer == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		span, ctx := tracer.StartSpan(r.Context(), fmt.Sprintf("http:%s:%s", r.Method, r.URL.Path))
 
 		// Handle nil span (NoOpTracer case)

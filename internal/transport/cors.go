@@ -10,7 +10,7 @@ import (
 // CORSMiddleware returns a middleware that handles CORS preflight requests and adds
 // CORS headers to responses. If an Origin header is present but not in the allowed
 // list, it responds with HTTP 403 Forbidden as required by the MCP spec.
-// If allowed origins is empty, it allows all origins (*).
+// If allowed origins is empty, it reflects the request origin (permissive mode).
 //
 // In restricted mode (non-empty allowed list), disallowed origins are rejected with 403
 // before the inner handler runs, so there is no risk of the handler overwriting CORS

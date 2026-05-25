@@ -102,20 +102,20 @@ func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // MCPServer wraps the mcp-go library server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
-	mcpServer      *server.MCPServer            // Core MCP server implementation
-	streamServer   *server.StreamableHTTPServer // Streamable HTTP handler
-	sseServer      *server.SSEServer            // Legacy SSE server
-	httpServer     *http.Server                 // Go HTTP server instance
-	addr           string                       // Listen address (host:port)
-	serverName     string                       // Service name for logging/health
-	version        string                       // Semantic version
-	tools          []config.ToolConfig          // Tool configurations for docs
-	rateLimiter    *RateLimiter                 // Rate limiting middleware (nil if disabled)
-	tracer         *tracing.Tracer              // Distributed tracing
-	allowedOrigins []string                     // CORS allowed origins (empty = all)
-	uploadConfig   config.UploadConfig          // Upload endpoint configuration
-	filesDir       string                       // Directory for serving generated files via /files/
-	stopCh         chan struct{}
+	mcpServer       *server.MCPServer            // Core MCP server implementation
+	streamServer    *server.StreamableHTTPServer // Streamable HTTP handler
+	sseServer       *server.SSEServer            // Legacy SSE server
+	httpServer      *http.Server                 // Go HTTP server instance
+	addr            string                       // Listen address (host:port)
+	serverName      string                       // Service name for logging/health
+	version         string                       // Semantic version
+	tools           []config.ToolConfig          // Tool configurations for docs
+	rateLimiter     *RateLimiter                 // Rate limiting middleware (nil if disabled)
+	tracer          *tracing.Tracer              // Distributed tracing
+	allowedOrigins  []string                     // CORS allowed origins (empty = all)
+	uploadConfig    config.UploadConfig          // Upload endpoint configuration
+	filesDir        string                       // Directory for serving generated files via /files/
+	stopCh          chan struct{}
 	stopCleanupOnce sync.Once
 }
 

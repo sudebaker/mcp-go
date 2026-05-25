@@ -24,7 +24,7 @@ func (s *MCPServer) handleDocs(w http.ResponseWriter, r *http.Request) {
 		}
 
 		content, err := swaggerAssets.ReadFile("docs/" + filePath)
-		if err != nil {
+		if err != nil || content == nil {
 			http.NotFound(w, r)
 			return
 		}

@@ -283,13 +283,14 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	duration := time.Since(startTime)
 
 	span.SetAttribute("duration_ms", duration.Milliseconds())
-	span.SetAttribute("exit_code", cmd.ProcessState.ExitCode())
+	if cmd.ProcessState != nil {
+		span.SetAttribute("exit_code", cmd.ProcessState.ExitCode())
+	}
 
 	log.Debug().
 		Str("tool", toolName).
 		Str("request_id", requestID).
 		Dur("duration", duration).
-		Int("exit_code", cmd.ProcessState.ExitCode()).
 		Msg("Subprocess completed")
 
 	stderrStr := stderr.String()
@@ -469,6 +470,10 @@ func parseStreamingOutput(output string, requestID string) ([]map[string]interfa
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		log.Warn().Err(err).Msg("Scanner error while parsing streaming output")
+	}
+
 	if finalResp.RequestID == "" {
 		finalResp.RequestID = requestID
 		finalResp.Success = false
@@ -589,21 +594,14 @@ func validateType(value interface{}, schemaType string) bool {
 		_, ok := value.(string)
 		return ok
 	case "number":
-		switch value.(type) {
-		case float64, float32, int, int32, int64:
-			return true
-		}
-		return false
+		_, ok := value.(float64)
+		return ok
 	case "integer":
-		switch value.(type) {
-		case float64: // JSON unmarshals numbers as float64
-			// Check if it's actually an integer
-			f := value.(float64)
-			return f == float64(int64(f))
-		case int, int32, int64:
-			return true
+		f, ok := value.(float64)
+		if !ok {
+			return false
 		}
-		return false
+		return f == float64(int64(f))
 	case "boolean":
 		_, ok := value.(bool)
 		return ok

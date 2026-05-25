@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 var (
@@ -70,7 +71,7 @@ func ValidateToolConfig(tool *ToolConfig) error {
 }
 
 func checkDirectoryWritable(dir string) error {
-	testFile := dir + "/.write_test"
+	testFile := filepath.Join(dir, ".write_test")
 	file, err := os.Create(testFile)
 	if err != nil {
 		return err

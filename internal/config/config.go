@@ -234,7 +234,7 @@ func expandEnvVarsInMap(m map[string]string) map[string]string {
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
 	// Expand environment variables in the raw YAML
@@ -245,7 +245,7 @@ func Load(path string) (*Config, error) {
 	// which prevents deserialization of arbitrary Go objects. No unsafe
 	// deserialization possible.
 	if err := yaml.Unmarshal([]byte(expandedData), &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse config YAML: %w", err)
 	}
 
 	// Apply defaults

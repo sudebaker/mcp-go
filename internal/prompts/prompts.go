@@ -21,6 +21,7 @@ import (
 //   - mcpServer: the MCP server instance
 //   - configs: the list of prompt configurations from YAML
 func RegisterPrompts(mcpServer *server.MCPServer, configs []config.PromptConfig) {
+	registered := 0
 	for _, cfg := range configs {
 		// Validate configuration
 		if cfg.Name == "" {
@@ -60,9 +61,10 @@ func RegisterPrompts(mcpServer *server.MCPServer, configs []config.PromptConfig)
 			Int("arguments", len(cfg.Arguments)).
 			Int("messages", len(cfg.Messages)).
 			Msg("Registered prompt")
+		registered++
 	}
 
-	log.Info().Int("total", len(configs)).Msg("Prompts registered successfully")
+	log.Info().Int("total", registered).Msg("Prompts registered successfully")
 }
 
 // createPromptHandler creates a handler for a specific prompt configuration.
@@ -127,15 +129,14 @@ func createPromptHandler(cfg config.PromptConfig) server.PromptHandlerFunc {
 func interpolateTemplate(template string, args map[string]string) string {
 	result := template
 
-	// Sort keys to ensure deterministic iteration order
-	// (maps in Go have random iteration order which can affect results)
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
 
-	// Replace placeholders in sorted order
 	for _, name := range keys {
 		value := args[name]
 		placeholder := fmt.Sprintf("{{%s}}", name)

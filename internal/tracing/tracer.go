@@ -2,7 +2,6 @@ package tracing
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"time"
 
@@ -39,6 +38,10 @@ func (t *Tracer) StartSpan(ctx context.Context, operationName string) (*Span, co
 	}
 
 	traceID := uuid.New().String()
+	if parentTraceID, ok := ctx.Value(traceIDKey).(string); ok && parentTraceID != "" {
+		traceID = parentTraceID
+	}
+
 	span := &Span{
 		operationName: operationName,
 		startTime:     time.Now(),
@@ -49,7 +52,6 @@ func (t *Tracer) StartSpan(ctx context.Context, operationName string) (*Span, co
 		attributes:    make(map[string]interface{}),
 	}
 
-	// Add IDs to context for downstream propagation
 	ctx = context.WithValue(ctx, spanIDKey, span.SpanID)
 	ctx = context.WithValue(ctx, traceIDKey, traceID)
 
@@ -124,12 +126,7 @@ func (s *Span) End() {
 		}
 	}
 
-	// Add stack depth info
-	_, file, line, _ := runtime.Caller(1)
-	logEvent.
-		Str("caller", file).
-		Int("line", line).
-		Msg("Span completed")
+	logEvent.Msg("Span completed")
 }
 
 // RecordError records an error on the span (thread-safe)

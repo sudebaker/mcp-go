@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"runtime"
 	"time"
 
@@ -39,7 +38,6 @@ type Checker struct {
 	cfg         *config.Config // Server configuration for tool validation
 	redisClient *redis.Client  // Redis connection for ping check
 	db          *sql.DB        // PostgreSQL connection for ping check
-	httpClient  *http.Client   // HTTP client for LLM endpoint checks
 }
 
 // NewChecker creates a health Checker with dependencies for performing checks.
@@ -58,9 +56,6 @@ func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Chec
 		cfg:         cfg,
 		redisClient: redisClient,
 		db:          db,
-		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
-		},
 	}
 }
 
@@ -249,87 +244,6 @@ func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	return result
 }
 
-// checkToolPaths validates configuration of all registered tools.
-func (c *Checker) checkToolPaths(ctx context.Context) []CheckResult {
-	if c.cfg == nil {
-		return nil
-	}
-
-	var results []CheckResult
-	for _, tool := range c.cfg.Tools {
-		result := c.checkToolPath(ctx, tool)
-		results = append(results, result)
-	}
-	return results
-}
-
-// checkToolPath validates a single tool's configuration.
-func (c *Checker) checkToolPath(ctx context.Context, tool config.ToolConfig) CheckResult {
-	start := time.Now()
-	result := CheckResult{
-		Name:      fmt.Sprintf("tool_path:%s", tool.Name),
-		Timestamp: start,
-	}
-
-	if tool.Command == "" {
-		result.Status = StatusDegraded
-		result.Message = "Tool command not configured"
-		result.Duration = time.Since(start)
-		return result
-	}
-
-	result.Status = StatusHealthy
-	result.Message = "Tool path configuration valid"
-	result.Duration = time.Since(start)
-	return result
-}
-
-// checkLLMEndpoint verifies LLM API endpoint is reachable via HTTP GET.
-// Returns StatusHealthy if endpoint is empty (optional), StatusDegraded on failure.
-func (c *Checker) checkLLMEndpoint(ctx context.Context, endpoint string) CheckResult {
-	start := time.Now()
-	result := CheckResult{
-		Name:      fmt.Sprintf("llm:%s", endpoint),
-		Timestamp: start,
-	}
-
-	if endpoint == "" {
-		result.Status = StatusHealthy
-		result.Message = "No LLM endpoint configured (optional)"
-		result.Duration = time.Since(start)
-		return result
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-	if err != nil {
-		result.Status = StatusDegraded
-		result.Message = fmt.Sprintf("Failed to create request: %v", err)
-		result.Duration = time.Since(start)
-		return result
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		result.Status = StatusDegraded
-		result.Message = fmt.Sprintf("LLM endpoint unreachable: %v", err)
-		log.Warn().Err(err).Str("endpoint", endpoint).Msg("LLM health check failed")
-		result.Duration = time.Since(start)
-		return result
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		result.Status = StatusDegraded
-		result.Message = fmt.Sprintf("LLM endpoint returned status %d", resp.StatusCode)
-	} else {
-		result.Status = StatusHealthy
-		result.Message = "LLM endpoint reachable"
-	}
-
-	result.Duration = time.Since(start)
-	return result
-}
-
 // GetHealthMetrics returns current Go runtime metrics for monitoring.
 // Includes heap memory, GC statistics, and goroutine count.
 //
@@ -357,22 +271,27 @@ func GetHealthMetrics() map[string]float64 {
 	}
 }
 
+var healthMetricDescs = map[string]*prometheus.Desc{
+	"heap_alloc_bytes":  prometheus.NewDesc("mcp_health_heap_alloc_bytes", "Health metric for heap_alloc_bytes", nil, nil),
+	"heap_sys_bytes":    prometheus.NewDesc("mcp_health_heap_sys_bytes", "Health metric for heap_sys_bytes", nil, nil),
+	"heap_idle_bytes":   prometheus.NewDesc("mcp_health_heap_idle_bytes", "Health metric for heap_idle_bytes", nil, nil),
+	"heap_inuse_bytes":  prometheus.NewDesc("mcp_health_heap_inuse_bytes", "Health metric for heap_inuse_bytes", nil, nil),
+	"stack_inuse_bytes": prometheus.NewDesc("mcp_health_stack_inuse_bytes", "Health metric for stack_inuse_bytes", nil, nil),
+	"gc_pause_ns":       prometheus.NewDesc("mcp_health_gc_pause_ns", "Health metric for gc_pause_ns", nil, nil),
+	"goroutines":        prometheus.NewDesc("mcp_health_goroutines", "Health metric for goroutines", nil, nil),
+	"num_gc":            prometheus.NewDesc("mcp_health_num_gc", "Health metric for num_gc", nil, nil),
+}
+
 // ExportMetrics converts health metrics to Prometheus metric format for scraping.
 func (c *Checker) ExportMetrics() []prometheus.Metric {
-	metrics := make([]prometheus.Metric, 0)
-
+	metrics := make([]prometheus.Metric, 0, len(healthMetricDescs))
 	healthMetrics := GetHealthMetrics()
 	for name, value := range healthMetrics {
-		metrics = append(metrics, prometheus.MustNewConstMetric(
-			prometheus.NewDesc(
-				fmt.Sprintf("mcp_health_%s", name),
-				fmt.Sprintf("Health metric for %s", name),
-				nil, nil,
-			),
-			prometheus.GaugeValue,
-			value,
-		))
+		desc, ok := healthMetricDescs[name]
+		if !ok {
+			continue
+		}
+		metrics = append(metrics, prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value))
 	}
-
 	return metrics
 }

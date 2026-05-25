@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,6 +34,7 @@ type RateLimiter struct {
 // tokenBucket represents a client's rate limiting state using the token bucket algorithm.
 // Tokens accumulate at 'rate' per second up to 'capacity', consumed by each request.
 type tokenBucket struct {
+	mu         sync.Mutex
 	tokens     float64   // Current available tokens (fractional allowed)
 	lastUpdate time.Time // Last token refill timestamp
 	capacity   float64   // Maximum token storage
@@ -54,6 +56,12 @@ type tokenBucket struct {
 //
 //	limiter := NewRateLimiter(10.0, 20) // 10 req/s sustained, burst up to 20
 func NewRateLimiter(rps float64, burst int) *RateLimiter {
+	if rps <= 0 {
+		rps = 1
+	}
+	if burst <= 0 {
+		burst = 1
+	}
 	rl := &RateLimiter{
 		limiters:    make(map[string]*tokenBucket),
 		rps:         rps,
@@ -140,6 +148,9 @@ func (rl *RateLimiter) Allow(clientID string) bool {
 func (rl *RateLimiter) allowN(clientID string, n int) error {
 	limiter := rl.getLimiter(clientID)
 
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+
 	now := time.Now()
 	elapsed := now.Sub(limiter.lastUpdate).Seconds()
 	limiter.lastUpdate = now
@@ -198,9 +209,11 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 // Uses X-Forwarded-For header if present (for proxied requests),
 // otherwise falls back to RemoteAddr.
 func getClientID(r *http.Request) string {
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		return xff
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
 	}
 	return r.RemoteAddr
 }

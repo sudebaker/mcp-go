@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -230,7 +231,7 @@ type LLMError struct {
 
 func (e *LLMError) Error() string {
 	if e.StatusCode != 0 {
-		return "LLM error: " + e.Message
+		return fmt.Sprintf("LLM error (status %d): %s", e.StatusCode, e.Message)
 	}
 	return "LLM error: " + e.Message
 }
@@ -255,7 +256,7 @@ func validatePrompt(prompt string) error {
 		return ErrPromptTooLong
 	}
 
-	if len([]byte(prompt)) > maxPromptBytes {
+	if len(prompt) > maxPromptBytes {
 		return ErrPromptTooLarge
 	}
 

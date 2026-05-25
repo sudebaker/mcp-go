@@ -44,6 +44,7 @@ upload:
 execution:
   default_timeout: "60s"
   working_dir: "/data"
+  reports_dir: "reports"
   max_concurrency: 5
   environment:
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"

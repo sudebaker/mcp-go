@@ -514,6 +514,16 @@ def main() -> None:
 
         rustfs_info = upload_to_rustfs(output_path)
 
+        # Build download URL for the /files/ endpoint
+        download_url = None
+        default_dir = get_default_output_dir()
+        try:
+            rel_path = output_path.relative_to(default_dir)
+            download_url = f"{get_base_url()}/files/{rel_path}"
+        except ValueError:
+            # output_path is not under default_dir, can't serve via /files/
+            pass
+
         response_content = [
             {
                 "type": "text",
@@ -529,6 +539,12 @@ def main() -> None:
             },
         ]
 
+        if download_url:
+            response_content.append({
+                "type": "text",
+                "text": f"Download URL: {download_url}",
+            })
+
         if rustfs_info:
             response_content.append(
                 {
@@ -543,6 +559,9 @@ def main() -> None:
             "file_size": output_path.stat().st_size if output_path.exists() else 0,
             "pdf_base64": pdf_base64,
         }
+
+        if download_url:
+            structured_content["download_url"] = download_url
 
         if rustfs_info:
             structured_content.update(

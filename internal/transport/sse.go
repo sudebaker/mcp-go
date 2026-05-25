@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -112,6 +113,7 @@ type MCPServer struct {
 	tracer         *tracing.Tracer              // Distributed tracing
 	allowedOrigins []string                     // CORS allowed origins (empty = all)
 	uploadConfig   config.UploadConfig          // Upload endpoint configuration
+	filesDir       string                       // Directory for serving generated files via /files/
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -140,6 +142,8 @@ type MCPConfig struct {
 	Tracer *tracing.Tracer
 	// Upload is the file upload configuration
 	Upload config.UploadConfig
+	// FilesDir is the absolute path to serve generated files from (e.g., /data/reports)
+	FilesDir string
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -208,6 +212,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		tracer:         tracer,
 		allowedOrigins: cfg.AllowedOrigins,
 		uploadConfig:   cfg.Upload,
+		filesDir:       cfg.FilesDir,
 	}
 }
 
@@ -249,6 +254,9 @@ func (s *MCPServer) Start() error {
 
 	// Upload endpoint (POST /upload) - protected with API key auth
 	mux.HandleFunc("/upload", s.authMiddleware(s.handleUpload))
+
+	// Files endpoint (GET /files/{tool}/{filename}) - serve generated files
+	mux.HandleFunc("/files/", s.handleFiles)
 
 	// Start background TTL cleanup goroutine for uploaded files
 	go s.startUploadCleanup()
@@ -510,4 +518,60 @@ type SSEConfig = MCPConfig
 // Deprecated: Use NewMCPServer directly.
 func NewSSEServer(mcpServer *server.MCPServer, cfg SSEConfig) *SSEServer {
 	return NewMCPServer(mcpServer, cfg)
+}
+
+// handleFiles serves generated files via GET /files/{tool}/{filename}.
+// Resolves to {filesDir}/{tool}/{filename} and serves with Content-Type detection.
+// Path traversal is blocked — only paths containing ".." are rejected.
+func (s *MCPServer) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.filesDir == "" {
+		http.Error(w, "Files serving not configured", http.StatusNotFound)
+		return
+	}
+
+	// Extract path after /files/ prefix
+	// r.URL.Path is "/files/reports/filename.pdf" → path = "reports/filename.pdf"
+	path := strings.TrimPrefix(r.URL.Path, "/files/")
+
+	// SECURITY: Block path traversal attempts
+	if strings.Contains(path, "..") {
+		log.Warn().Str("path", path).Str("remote", r.RemoteAddr).Msg("Path traversal blocked in /files/")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// SECURITY: Block paths starting with / to prevent absolute path access
+	if strings.HasPrefix(path, "/") {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// Resolve to absolute path
+	filePath := filepath.Join(s.filesDir, path)
+
+	// Verify the resolved path is within filesDir (double-check against symlink traversal)
+	absFilesDir, _ := filepath.Abs(s.filesDir)
+	absFilePath, _ := filepath.Abs(filePath)
+	if !strings.HasPrefix(absFilePath, absFilesDir) {
+		log.Warn().Str("resolved", absFilePath).Str("allowed", absFilesDir).Msg("Path escape detected in /files/")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// Check file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Serve the file
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(filePath)))
+	http.ServeFile(w, r, filePath)
+
+	log.Info().Str("path", filePath).Str("remote", r.RemoteAddr).Msg("File served via /files/")
 }

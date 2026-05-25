@@ -75,6 +75,8 @@ type ExecutionConfig struct {
 	DefaultTimeout time.Duration `yaml:"default_timeout"`
 	// WorkingDir is the root directory for tool execution (default: "/data")
 	WorkingDir string `yaml:"working_dir"`
+	// ReportsDir is the subdirectory for generated reports under WorkingDir (default: "reports")
+	ReportsDir string `yaml:"reports_dir"`
 	// Environment is a map of environment variables passed to tool processes
 	Environment map[string]string `yaml:"environment"`
 	// MaxConcurrency limits simultaneous subprocess executions (default: 5)
@@ -267,6 +269,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Execution.WorkingDir == "" {
 		cfg.Execution.WorkingDir = "/data"
+	}
+	if cfg.Execution.ReportsDir == "" {
+		cfg.Execution.ReportsDir = "reports"
 	}
 	if cfg.Execution.MaxConcurrency <= 0 {
 		cfg.Execution.MaxConcurrency = 5

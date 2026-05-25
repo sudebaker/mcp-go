@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -143,6 +144,8 @@ func main() {
 		RateLimitBurst:    cfg.Server.RateLimitBurst,
 		AllowedOrigins:    cfg.Server.AllowedOrigins,
 		Tracer:            tracer,
+		Upload:            cfg.Upload,
+		FilesDir:          filepath.Join(cfg.Execution.WorkingDir, cfg.Execution.ReportsDir),
 	})
 
 	// Setup graceful shutdown

@@ -200,7 +200,7 @@ func (p *ProcessPool) startProcess(ctx context.Context, toolName string) (*proce
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, toolCfg.Command, args...)
+	cmd := exec.CommandContext(context.Background(), toolCfg.Command, args...)
 	cmd.Dir = p.config.Execution.WorkingDir
 	env := buildEnvironment(p.config.Execution.Environment)
 	env = append(env, "MCP_PERSISTENT_PROCESS=1")

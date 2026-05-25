@@ -155,14 +155,14 @@ def validate_save_path(path: str) -> tuple[bool, Optional[str]]:
     if not path:
         return False, "Save path is required"
 
+    if ".." in path:
+        return False, "Path traversal not allowed"
+
     abs_path = os.path.abspath(path)
     abs_allowed = os.path.abspath(ALLOWED_OUTPUT_DIR)
 
-    if not abs_path.startswith(abs_allowed):
+    if not abs_path.startswith(abs_allowed + os.sep) and abs_path != abs_allowed:
         return False, f"Path must be within {ALLOWED_OUTPUT_DIR}"
-
-    if ".." in path:
-        return False, "Path traversal not allowed"
 
     return True, None
 

@@ -719,14 +719,6 @@ if __name__ == "__main__":
                     }
                 )
 
-            restricted_globals = {
-                "__builtins__": safe_builtins,
-                "pd": pd,
-                "np": np,
-                "df": df,
-                "emit_chunk": self.emit_chunk,
-            }
-
             self.emit_chunk("status", {"message": "Executing code (restricted mode)"})
 
             exec(code, restricted_globals)

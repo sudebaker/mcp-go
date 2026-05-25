@@ -214,11 +214,6 @@ def call_llm_with_retry(
         endpoint = f"{llm_api_url}/api/generate"
 
     try:
-        jitter = random.uniform(0, 0.1)
-        import time
-
-        time.sleep(jitter)
-
         response = requests.post(
             endpoint,
             json=payload,

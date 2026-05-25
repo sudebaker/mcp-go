@@ -64,7 +64,7 @@ def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
     import time as _time
 
     current_time = _time.monotonic()
-    if _ssrf_allowlist_cache is not None and (current_time - _ssrf_allowlist_cache_time) < _SSR_F_CACHE_TTL_SECONDS:
+    if _ssrf_allowlist_cache is not None and (current_time - _ssrf_allowlist_cache_time) < _SSRF_CACHE_TTL_SECONDS:
         return _ssrf_allowlist_cache
 
     raw = os.environ.get("SSRF_ALLOWLIST", "").strip()

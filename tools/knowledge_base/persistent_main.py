@@ -55,7 +55,7 @@ def main():
         print(json.dumps(result, default=str), flush=True)
         return
 
-    first_line = sys.stdin.readline(MAX_REQUEST_SIZE)
+    first_line = sys.stdin.read(MAX_REQUEST_SIZE)
     if not first_line or len(first_line) >= MAX_REQUEST_SIZE:
         return
 

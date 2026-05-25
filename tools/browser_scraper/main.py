@@ -37,8 +37,6 @@ except ImportError:
 
 BROWSERLESS_URL = os.environ.get("BROWSERLESS_URL", "http://browserless:3000")
 BROWSERLESS_TOKEN = os.environ.get("BROWSERLESS_TOKEN")
-if not BROWSERLESS_TOKEN:
-    raise ValueError("BROWSERLESS_TOKEN environment variable is required")
 DEFAULT_WAIT_MS = 3000
 DEFAULT_TIMEOUT = 60
 MAX_WAIT_MS = 30000
@@ -147,6 +145,9 @@ def fetch_with_browser(url: str, wait_ms: int = DEFAULT_WAIT_MS, selector: Optio
     """Fetch a page using browserless chromium via REST API."""
     if not REQUESTS_AVAILABLE:
         return None, "requests library not available"
+
+    if not BROWSERLESS_TOKEN:
+        return None, "BROWSERLESS_TOKEN environment variable is required"
 
     # Use /content endpoint which returns rendered HTML
     browserless_parsed = urlparse(BROWSERLESS_URL)

@@ -74,8 +74,10 @@ def _load_rate_limit_state() -> dict[str, float]:
 def _save_rate_limit_state(state: dict[str, float]) -> None:
     try:
         os.makedirs(os.path.dirname(RATE_LIMIT_FILE), exist_ok=True)
-        with open(RATE_LIMIT_FILE, "w") as f:
+        tmp_file = RATE_LIMIT_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
             json.dump(state, f)
+        os.replace(tmp_file, RATE_LIMIT_FILE)
     except Exception as exc:
         logger.warning(
             "Failed to save rate-limit state", extra_data={"error": str(exc)}

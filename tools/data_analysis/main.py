@@ -631,6 +631,7 @@ def execute_code_safely(
     stderr_capture = StringIO()
 
     result = None
+    logger.warning("Executing user code in restricted mode (no Docker sandbox)")
     with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
         try:
             exec(code, restricted_globals)

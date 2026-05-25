@@ -806,7 +806,8 @@ def main() -> None:
                     continue
                 try:
                     req = json.loads(line)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    logger.warning("Malformed JSON in persistent mode", extra_data={"error": str(e), "line": line[:200]})
                     continue
 
                 req_id = req.get("request_id", "")

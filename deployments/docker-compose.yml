@@ -193,21 +193,23 @@ services:
           memory: 128M
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: minio/minio:latest
     container_name: rustfs
     ports:
       - "9000:9000"
+      - "9001:9001"
     environment:
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
+      MINIO_ROOT_USER: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
+      MINIO_ROOT_PASSWORD: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
     volumes:
       - rustfs-data:/data
     networks:
       - mcp-network
       - docker_default
     restart: unless-stopped
+    command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:9000/minio/health/live | grep -qE '^(200|403)$'"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 15s
       timeout: 5s
       retries: 5

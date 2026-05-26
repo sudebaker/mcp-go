@@ -322,6 +322,33 @@ def validate_read_path(file_path: str, readonly_dir: str = "/data/input") -> Pat
     return path
 
 
+def list_files(
+    subdir: str = "",
+    base_dir: str = "/data",
+    pattern: str = "*",
+) -> list[Path]:
+    """List files in a subdirectory matching a glob pattern.
+
+    Args:
+        subdir: Subdirectory within base_dir.
+        base_dir: Base directory to search in.
+        pattern: Glob pattern to match files.
+
+    Returns:
+        Sorted list of Path objects matching the pattern.
+
+    Raises:
+        PathValidationError: On path traversal.
+    """
+    base = Path(base_dir).resolve(strict=True)
+    search = (base / subdir).resolve()
+    if not search.is_relative_to(base):
+        raise PathValidationError(f"Path traversal detected: {subdir}")
+    if not search.exists():
+        return []
+    return sorted(search.glob(pattern))
+
+
 def validate_write_path(
     file_path: str,
     writable_dir: str = "/data/output",

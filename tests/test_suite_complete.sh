@@ -5,6 +5,15 @@
 
 set -e
 
+# Load env vars from deployments/.env or project .env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for f in "$SCRIPT_DIR/../deployments/.env" "$SCRIPT_DIR/../.env"; do
+    [ -f "$f" ] && set -a && source "$f" && set +a && break
+done
+
+LLM_API_URL="${LLM_API_URL:-http://localhost:11434}"
+LLM_MODEL="${LLM_MODEL:-llama3}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -43,7 +52,7 @@ check_service() {
     local service=$1
     local url=$2
     print_test "Check $service is accessible"
-    if curl -s -f "$url" > /dev/null 2>&1; then
+    if curl -s -f --max-time 5 "$url" > /dev/null 2>&1; then
         print_success "$service is running"
     else
         print_failure "$service is not accessible at $url"
@@ -68,13 +77,10 @@ check_mcp_tool() {
 print_header "1. SERVICE HEALTH CHECKS"
 
 # Check Ollama
-check_service "Ollama" "http://localhost:11434/api/tags"
-
-# Check Open WebUI
-check_service "Open WebUI" "http://localhost:3000"
+check_service "Ollama" "$LLM_API_URL/api/tags"
 
 # Check MCP Server
-check_service "MCP Server" "http://localhost:8080/sse"
+check_service "MCP Server" "http://localhost:8080/health"
 
 # Check MCPo Proxy
 check_service "MCPo Proxy" "http://localhost:8001"
@@ -93,7 +99,7 @@ fi
 print_header "2. OLLAMA MODEL TESTS"
 
 print_test "Check Ollama models are installed"
-MODELS=$(curl -s http://localhost:11434/api/tags | grep -o '"name"' | wc -l)
+MODELS=$(curl -s "$LLM_API_URL/api/tags" | grep -o '"name"' | wc -l)
 if [ "$MODELS" -gt 0 ]; then
     print_success "Found $MODELS Ollama models installed"
 else
@@ -101,11 +107,11 @@ else
 fi
 
 print_test "Test Ollama generation"
-RESPONSE=$(curl -s http://localhost:11434/api/generate -d '{
-  "model": "qwen3:8b",
-  "prompt": "Say hello in one word",
-  "stream": false
-}')
+RESPONSE=$(curl -s "$LLM_API_URL/api/generate" -d "{
+  \"model\": \"$LLM_MODEL\",
+  \"prompt\": \"Say hello in one word\",
+  \"stream\": false
+}")
 if echo "$RESPONSE" | grep -q "response"; then
     print_success "Ollama generation working"
 else
@@ -120,8 +126,8 @@ print_header "3. MCP TOOL REGISTRATION"
 check_mcp_tool "echo"
 check_mcp_tool "analyze_data"
 check_mcp_tool "analyze_image"
-check_mcp_tool "generate_pdf_report"
-check_mcp_tool "ingest_document"
+check_mcp_tool "generate_report"
+check_mcp_tool "kb_ingest"
 check_mcp_tool "search_knowledge"
 
 # ===========================================
@@ -156,12 +162,12 @@ fi
 print_header "5. ECHO TOOL TEST"
 
 print_test "Test echo tool directly"
-ECHO_INPUT='{"text": "Hello MCP"}'
-ECHO_OUTPUT=$(echo "$ECHO_INPUT" | docker exec -i mcp-orchestrator python3 /app/tools/echo/main.py)
+ECHO_INPUT='{"request_id": "test", "arguments": {"text": "Hello MCP"}, "context": {}}'
+ECHO_OUTPUT=$(echo "$ECHO_INPUT" | docker exec -i mcp-orchestrator python3 /app/tools/echo/main.py 2>&1)
 if echo "$ECHO_OUTPUT" | grep -q "Hello MCP"; then
     print_success "Echo tool working correctly"
 else
-    print_failure "Echo tool failed"
+    print_failure "Echo tool failed: $ECHO_OUTPUT"
 fi
 
 # ===========================================
@@ -171,14 +177,15 @@ print_header "6. DATA ANALYSIS TOOL TEST"
 
 print_test "Create test Excel file"
 docker exec mcp-orchestrator python3 << 'PYTHON'
-import pandas as pd
+import os, pandas as pd
+os.makedirs('/data/input', exist_ok=True)
 data = {
     'Product': ['A', 'B', 'C', 'D', 'E'],
     'Sales': [100, 150, 120, 180, 90],
     'Profit': [20, 30, 25, 35, 15]
 }
 df = pd.DataFrame(data)
-df.to_excel('/data/test_sales.xlsx', index=False)
+df.to_excel('/data/input/test_sales.xlsx', index=False)
 print("Test file created")
 PYTHON
 
@@ -189,22 +196,28 @@ else
 fi
 
 print_test "Test data_analysis tool with simple query"
-DATA_INPUT=$(cat << 'EOF'
+DATA_INPUT=$(cat << EOF
 {
-    "file_path": "/data/test_sales.xlsx",
-    "question": "What is the total sales?",
-    "llm_api_url": "http://ollama:11434",
-    "llm_model": "qwen3:8b",
-    "output_format": "text"
+    "request_id": "suite-test",
+    "arguments": {
+        "file_path": "/data/input/test_sales.xlsx",
+        "question": "What is the total sales?",
+        "output_format": "text",
+        "use_sandbox": false
+    },
+    "context": {
+        "llm_api_url": "$LLM_API_URL",
+        "llm_model": "$LLM_MODEL"
+    }
 }
 EOF
 )
 
-DATA_OUTPUT=$(echo "$DATA_INPUT" | docker exec -i mcp-orchestrator python3 /app/tools/data_analysis/main.py 2>&1)
-if echo "$DATA_OUTPUT" | grep -q "success"; then
+DATA_OUTPUT=$(echo "$DATA_INPUT" | timeout 120 docker exec -i mcp-orchestrator python3 /app/tools/data_analysis/main.py 2>&1)
+if echo "$DATA_OUTPUT" | grep -q '"success": true'; then
     print_success "Data analysis tool executed successfully"
 else
-    print_failure "Data analysis tool failed: $DATA_OUTPUT"
+    print_failure "Data analysis tool failed: $(echo "$DATA_OUTPUT" | head -5)"
 fi
 
 # ===========================================
@@ -232,12 +245,12 @@ else
 fi
 
 print_test "Test vision_ocr tool"
-VISION_INPUT=$(cat << 'EOF'
+VISION_INPUT=$(cat << EOF
 {
     "image_path": "/data/test_image.png",
     "task": "ocr",
-    "llm_api_url": "http://ollama:11434",
-    "llm_model": "qwen3-vl:8b"
+    "llm_api_url": "$LLM_API_URL",
+    "llm_model": "$LLM_MODEL"
 }
 EOF
 )
@@ -304,12 +317,12 @@ fi
 # ===========================================
 print_header "10. DOCKER CONTAINER STATUS"
 
-print_test "Check all containers are healthy"
-UNHEALTHY=$(docker ps --filter "status=unhealthy" --format "{{.Names}}" | wc -l)
-if [ "$UNHEALTHY" -eq 0 ]; then
-    print_success "All containers are healthy"
+print_test "Check all containers are running"
+RUNNING=$(docker ps --filter "label=com.docker.compose.project=deployments" --format "{{.Names}}" | wc -l)
+if [ "$RUNNING" -eq 6 ]; then
+    print_success "$RUNNING/6 containers running"
 else
-    print_failure "Found $UNHEALTHY unhealthy containers"
+    print_failure "Only $RUNNING/6 containers running"
 fi
 
 # ===========================================

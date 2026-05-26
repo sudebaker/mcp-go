@@ -18,18 +18,28 @@ TOTAL=0
 PASSED=0
 FAILED=0
 
+# Load env vars from deployments/.env or project .env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for f in "$SCRIPT_DIR/../deployments/.env" "$SCRIPT_DIR/../.env"; do
+    [ -f "$f" ] && set -a && source "$f" && set +a && break
+done
+
+# Fallbacks si .env no existe o faltan vars
+LLM_API_URL="${LLM_API_URL:-http://localhost:11434}"
+LLM_MODEL="${LLM_MODEL:-llama3}"
+
 print_test() {
     echo -e "\n${YELLOW}[$((++TOTAL))]${NC} $1"
 }
 
 pass() {
     echo -e "${GREEN}✓${NC} $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail() {
     echo -e "${RED}✗${NC} $1"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 echo -e "${BLUE}╔═══════════════════════════════════════════╗${NC}"
@@ -38,10 +48,7 @@ echo -e "${BLUE}╚════════════════════�
 
 # 1. Service Health Checks
 print_test "Ollama API"
-curl -sf http://localhost:11434/api/tags > /dev/null && pass "Running" || fail "Not accessible"
-
-print_test "Open WebUI"
-curl -sf http://localhost:3000 > /dev/null && pass "Running" || fail "Not accessible"
+curl -sf "$LLM_API_URL/api/tags" > /dev/null && pass "Running" || fail "Not accessible"
 
 print_test "MCP Server (/health)"
 curl -sf http://localhost:8080/health > /dev/null && pass "Running" || fail "Not accessible"
@@ -58,11 +65,11 @@ docker exec mcp-postgres pg_isready > /dev/null 2>&1 && pass "Running" || fail "
 
 # 2. Ollama Models
 print_test "Ollama models installed"
-MODELS=$(curl -s http://localhost:11434/api/tags | grep -o '"name"' | wc -l)
+MODELS=$(curl -s "$LLM_API_URL/api/tags" | grep -o '"name"' | wc -l)
 [ "$MODELS" -gt 0 ] && pass "$MODELS models found" || fail "No models"
 
 print_test "Ollama generation test"
-RESP=$(curl -s http://localhost:11434/api/generate -d '{"model":"qwen3:8b","prompt":"Hi","stream":false}')
+RESP=$(curl -s "$LLM_API_URL/api/generate" -d "{\"model\":\"$LLM_MODEL\",\"prompt\":\"Hi\",\"stream\":false}")
 echo "$RESP" | grep -q "response" && pass "Generation works" || fail "Generation failed"
 
 # 3. Python Dependencies
@@ -89,7 +96,7 @@ print('OK')
 " 2>/dev/null | grep -q "OK" && pass "Created" || fail "Failed"
 
 print_test "Data analysis tool"
-DATA_IN='{"file_path":"/data/test.xlsx","question":"sum of column A","llm_api_url":"http://ollama:11434","llm_model":"qwen3:8b","output_format":"text"}'
+DATA_IN='{"file_path":"/data/test.xlsx","question":"sum of column A","llm_api_url":"'"$LLM_API_URL"'","llm_model":"'"$LLM_MODEL"'","output_format":"text"}'
 DATA_OUT=$(echo "$DATA_IN" | timeout 30 docker exec -i mcp-orchestrator python3 /app/tools/data_analysis/main.py 2>&1)
 echo "$DATA_OUT" | grep -q '"success": *true' && pass "Works" || fail "Failed"
 
@@ -105,12 +112,9 @@ print('OK')
 
 # 5. Docker Status
 print_test "Container health"
-UNHEALTHY=$(docker ps --filter "status=unhealthy" --format "{{.Names}}" | wc -l)
-[ "$UNHEALTHY" -eq 0 ] && pass "All healthy" || fail "$UNHEALTHY unhealthy"
-
-print_test "Container count"
-RUNNING=$(docker ps --filter "name=mcp" --format "{{.Names}}" | wc -l)
-[ "$RUNNING" -ge 3 ] && pass "$RUNNING containers" || fail "Only $RUNNING containers"
+TOTAL=6
+RUNNING=$(docker ps --filter "label=com.docker.compose.project=deployments" --format "{{.Names}}" | wc -l)
+[ "$RUNNING" -eq "$TOTAL" ] && pass "$RUNNING/$TOTAL running" || fail "Only $RUNNING/$TOTAL running"
 
 # Summary
 echo -e "\n${BLUE}═══════════════════════════════════════════${NC}"

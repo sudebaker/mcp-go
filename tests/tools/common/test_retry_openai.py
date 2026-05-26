@@ -39,7 +39,7 @@ class TestDetectApiFormatAndKey:
             os.environ.pop(key, None)
 
     def test_default_ollama_format(self):
-        format_result, key = detect_api_format_and_key("http://localhost:11434")
+        format_result, key = detect_api_format_and_key(os.environ.get("LLM_API_URL", "http://localhost:11434"))
         assert format_result == "ollama"
         assert key is None
 
@@ -117,7 +117,7 @@ class TestDetectApiFormatAndKey:
         os.environ["LLM_API_FORMAT"] = "openai"
         os.environ["OPENROUTER_API_KEY"] = "sk-or-v1-env-key"
         format_result, key = detect_api_format_and_key(
-            "http://localhost:11434"
+            os.environ.get("LLM_API_URL", "http://localhost:11434")
         )
         assert format_result == "openai"
         assert key == "sk-or-v1-env-key"
@@ -126,7 +126,7 @@ class TestDetectApiFormatAndKey:
         os.environ["LLM_API_FORMAT"] = "ollama"
         os.environ["OPENROUTER_API_KEY"] = "sk-or-v1-env-key"
         format_result, key = detect_api_format_and_key(
-            "http://localhost:11434"
+            os.environ.get("LLM_API_URL", "http://localhost:11434")
         )
         assert format_result == "ollama"
         assert key is None
@@ -246,7 +246,7 @@ class TestCallLlmWithRetryOllama:
         mock_post.return_value = mock_response
 
         result = call_llm_with_retry(
-            llm_api_url="http://localhost:11434",
+            llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
             llm_model="llama3",
             prompt="Hello world",
             temperature=0.5,
@@ -274,7 +274,7 @@ class TestCallLlmWithRetryOllama:
         mock_post.return_value = mock_response
 
         call_llm_with_retry(
-            llm_api_url="http://localhost:11434",
+            llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
             llm_model="llama3",
             prompt="Test",
         )
@@ -290,7 +290,7 @@ class TestCallLlmWithRetryOllama:
         mock_post.return_value = mock_response
 
         result = call_llm_with_retry(
-            llm_api_url="http://localhost:11434",
+            llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
             llm_model="llava",
             prompt="Describe this image",
             images=["base64image1", "base64image2"],
@@ -312,7 +312,7 @@ class TestCallLlmWithRetryOllama:
 
         with pytest.raises(PermanentError):
             call_llm_with_retry(
-                llm_api_url="http://localhost:11434",
+                llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
                 llm_model="llama3",
                 prompt="Test",
             )
@@ -336,7 +336,7 @@ class TestCallLlmWithRetryValidation:
     def test_empty_model_raises_value_error(self):
         with pytest.raises(ValueError, match="llm_model is required"):
             call_llm_with_retry(
-                llm_api_url="http://localhost:11434",
+                llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
                 llm_model="",
                 prompt="Test",
             )
@@ -344,7 +344,7 @@ class TestCallLlmWithRetryValidation:
     def test_empty_prompt_raises_value_error(self):
         with pytest.raises(ValueError, match="prompt is required"):
             call_llm_with_retry(
-                llm_api_url="http://localhost:11434",
+                llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
                 llm_model="llama3",
                 prompt="",
             )
@@ -353,7 +353,7 @@ class TestCallLlmWithRetryValidation:
         long_prompt = "x" * 100001
         with pytest.raises(ValueError, match="exceeds maximum length"):
             call_llm_with_retry(
-                llm_api_url="http://localhost:11434",
+                llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
                 llm_model="llama3",
                 prompt=long_prompt,
             )
@@ -361,7 +361,7 @@ class TestCallLlmWithRetryValidation:
     def test_too_many_images_raises_value_error(self):
         with pytest.raises(ValueError, match="Maximum 10 images allowed"):
             call_llm_with_retry(
-                llm_api_url="http://localhost:11434",
+                llm_api_url=os.environ.get("LLM_API_URL", "http://localhost:11434"),
                 llm_model="llava",
                 prompt="Describe these",
                 images=["img"] * 11,

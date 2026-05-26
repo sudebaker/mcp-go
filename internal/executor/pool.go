@@ -51,7 +51,7 @@ type processSlot struct {
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
 	stdout   *bufio.Scanner
-	stderr   bytes.Buffer
+	stderr   *bytes.Buffer
 	inUse    bool
 	lastUsed time.Time
 	toolName string
@@ -228,7 +228,7 @@ func (p *ProcessPool) startProcess(ctx context.Context, toolName string) (*proce
 		cmd:      cmd,
 		stdin:    stdin,
 		stdout:   bufio.NewScanner(stdout),
-		stderr:   stderr,
+		stderr:   &stderr,
 		inUse:    true,
 		lastUsed: time.Now(),
 		toolName: toolName,

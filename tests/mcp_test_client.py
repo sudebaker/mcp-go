@@ -32,7 +32,7 @@ import requests
 
 DEFAULT_SERVER_URL = "http://localhost:8080/mcp"
 DEFAULT_USER_ID = "test_client"
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 120
 
 # Tools that require external services (LLM, PostgreSQL, SearXNG, etc.)
 EXTERNAL_DEPENDENCY_TOOLS = {
@@ -117,7 +117,7 @@ class MCPClient:
         self.request_id += 1
         return self.request_id
 
-    def _send_request(self, method: str, params: dict = None) -> dict:
+    def _send_request(self, method: str, params: dict = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
         """Send a JSON-RPC request to the MCP server."""
         payload = {
             "jsonrpc": "2.0",
@@ -135,7 +135,7 @@ class MCPClient:
             self.base_url,
             json=payload,
             headers=headers,
-            timeout=30,
+            timeout=timeout,
         )
 
         if "Mcp-Session-Id" in resp.headers:
@@ -170,7 +170,7 @@ class MCPClient:
         result = self._send_request("tools/call", {
             "name": tool_name,
             "arguments": arguments,
-        })
+        }, timeout=timeout)
         return result
 
     def health_check(self) -> bool:

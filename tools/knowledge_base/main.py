@@ -259,6 +259,13 @@ def ensure_schema(conn) -> None:
             )
         """)
 
+        # Migration: add user_id column if it doesn't exist (added after initial schema)
+        # This ensures backward compatibility with tables created before user_id was added
+        cur.execute("""
+            ALTER TABLE kb_documents
+            ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) NOT NULL DEFAULT 'anonymous'
+        """)
+
         # Create chunks table with vector column
         # SECURITY: EMBEDDING_DIM is a validated constant, safe to interpolate
         if (

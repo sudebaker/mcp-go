@@ -1,0 +1,28 @@
+name: canvas_diagram
+description: Crea diagramas (flowcharts, mind maps) en formato Obsidian Canvas (.canvas).
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    description:
+      type: string
+      description: Text description or DSL of the diagram to create. E.g., 'Usuario
+        -> Verificar Email -> Login -> Dashboard'
+    layout:
+      type: string
+      enum:
+      - horizontal
+      - vertical
+      - radial
+      - auto
+      default: auto
+      description: 'Layout direction: horizontal, vertical, radial, or auto (automatic
+        selection)'
+    save_path:
+      type: string
+      description: Optional custom path to save the .canvas file
+  required:
+  - description

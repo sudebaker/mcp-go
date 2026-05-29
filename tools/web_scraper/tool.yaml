@@ -1,0 +1,26 @@
+name: web_scraper
+description: Extrae texto, links o imágenes de páginas web. Soporta selector CSS opcional.
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: URL to scrape (must start with http:// or https://)
+    selector:
+      type: string
+      description: Optional CSS selector to extract specific content
+    extract_type:
+      type: string
+      enum:
+      - text
+      - html
+      - links
+      - images
+      default: text
+      description: 'What to extract: text (default), html, links, images'
+  required:
+  - url

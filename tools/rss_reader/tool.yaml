@@ -1,0 +1,29 @@
+name: rss_reader
+description: Lee feeds RSS. Retorna title, link, date y source. Extrae titles, content
+  o full.
+command: python3
+args:
+- main.py
+timeout: 180s
+input_schema:
+  type: object
+  properties:
+    limit:
+      type: integer
+      default: 10
+      description: Maximum number of items to return per feed
+    feeds:
+      type: array
+      items:
+        type: string
+      description: 'Optional: filter by feed names (e.g. [''TechCrunch'', ''BBC News'']).
+        If omitted, fetches all feeds.'
+    extract:
+      type: string
+      enum:
+      - titles
+      - content
+      - full
+      default: titles
+      description: 'What to extract: titles (default), content (summaries), full (full
+        content if available)'

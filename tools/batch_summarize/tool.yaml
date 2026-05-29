@@ -1,0 +1,37 @@
+name: batch_summarize
+description: 'Resume múltiples documentos. Input: __files__, summary_type (individual/master/both).
+  Output: summaries + master summary opcional.'
+command: python3
+args:
+- main.py
+timeout: 300s
+input_schema:
+  type: object
+  properties:
+    __files__:
+      type: array
+      description: Files to summarize
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          name:
+            type: string
+    summary_type:
+      type: string
+      enum:
+      - individual
+      - master
+      - both
+      default: both
+      description: Type of summary to generate
+    focus:
+      type: string
+      description: Optional focus area for summaries
+    max_length:
+      type: integer
+      default: 500
+      description: Maximum length of summary in characters
+  required:
+  - __files__

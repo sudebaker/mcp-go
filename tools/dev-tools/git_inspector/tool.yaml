@@ -1,0 +1,29 @@
+name: "git_inspector"
+description: "Estadisticas git sin ejecutar git manualmente. Ops: blame, log_stats, branch_comparison, file_history."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    repo_path:
+      type: string
+    operation:
+      type: string
+      enum: ["blame_summary", "recent_changes", "branch_comparison", "file_history"]
+    file_path:
+      type: string
+    days:
+      type: integer
+      default: 30
+    branch_a:
+      type: string
+      default: "main"
+    branch_b:
+      type: string
+    max_commits:
+      type: integer
+      default: 20
+  required:
+    - repo_path
+    - operation

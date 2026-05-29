@@ -1,0 +1,21 @@
+name: weather_forecast
+description: Pronóstico meteorológico por ciudad (Open-Meteo). Temperatura, lluvia,
+  viento, UV. Geocodificación automática.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  required:
+  - locations
+  properties:
+    locations:
+      type: array
+      description: Array of city names (e.g., ['Madrid', 'Barcelona', 'Valencia'])
+      items:
+        type: string
+    max_days:
+      type: integer
+      default: 3
+      description: Number of forecast days (1-7, default 3)

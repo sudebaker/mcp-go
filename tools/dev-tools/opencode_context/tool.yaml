@@ -1,0 +1,25 @@
+name: "opencode_context"
+description: "Genera listado de archivos optimo para OpenCode. Analiza el repo, extrae keywords de la tarea y devuelve archivos priorizados + el comando -f completo. 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+      description: "Ruta absoluta al repositorio"
+    task_description:
+      type: string
+      description: "Descripcion de la tarea en lenguaje natural"
+    max_files:
+      type: integer
+      default: 15
+      description: "Maximo de archivos a sugerir"
+    include_tests:
+      type: boolean
+      default: true
+      description: "Incluir archivos de test"
+  required:
+    - project_root
+    - task_description

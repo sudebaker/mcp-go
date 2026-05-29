@@ -1,0 +1,19 @@
+name: "security_lint"
+description: "Deteccion heuristica de patrones inseguros. eval/exec, innerHTML sin sanitizar, SQL concatenation, hardcoded secrets, etc. Sin tokens."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+    severity_filter:
+      type: string
+      enum: ["all", "critical", "high", "medium", "low"]
+      default: "all"
+    max_findings:
+      type: integer
+      default: 100
+  required:
+    - project_root

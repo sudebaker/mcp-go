@@ -1,0 +1,50 @@
+name: analyze_data
+description: 'Analiza archivos Excel/CSV con Pandas. Retorna: text, JSON, markdown
+  tables o PNG charts.'
+command: python3
+args:
+- main.py
+timeout: 180s
+input_schema:
+  type: object
+  properties:
+    file_url:
+      type: string
+      description: HTTP URL to the data file (presigned S3 URL or direct download
+        link). Supports .xlsx, .xls, .csv
+    file_name:
+      type: string
+      description: Original filename with extension (e.g., sales.xlsx) - required
+        to determine file format
+    question:
+      type: string
+      description: 'What to do with the data: ''calculate total sales'', ''average
+        price by category'', ''show top 10 products'', ''create bar chart of monthly
+        revenue'''
+    output_format:
+      type: string
+      enum:
+      - text
+      - json
+      - markdown
+      - png
+      default: text
+      description: 'How to return results: ''text'' (plain), ''json'' (structured),
+        ''markdown'' (tables), ''png'' (chart image)'
+    __files__:
+      type: array
+      description: 'Alternative: attach files as __files__ parameter. The tool will
+        download them automatically.'
+      items:
+        type: object
+        properties:
+          type:
+            type: string
+          url:
+            type: string
+          name:
+            type: string
+          id:
+            type: string
+  required:
+  - question

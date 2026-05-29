@@ -1,0 +1,23 @@
+name: transcribe
+description: Transcripción de audio on-premise con Whisper AI. Soporta mp3, wav, ogg,
+  m4a, webm, flac.
+command: python3
+args:
+- main.py
+timeout: 180s
+input_schema:
+  type: object
+  properties:
+    file_path:
+      type: string
+      description: Absolute path to the audio file on the server (e.g. /data/recording.mp3)
+    audio_base64:
+      type: string
+      description: Base64-encoded audio content (alternative to file_path)
+    filename:
+      type: string
+      description: Filename with extension when using audio_base64 (e.g. recording.ogg)
+    language:
+      type: string
+      description: Optional language code (es, en, fr...). Auto-detected if omitted.
+  required: []

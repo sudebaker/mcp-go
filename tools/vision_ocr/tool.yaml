@@ -1,0 +1,39 @@
+name: analyze_image
+description: 'OCR e interpretación de imágenes. Tareas: ocr, describe, extract_entities,
+  answer. Soporta JPEG, PNG, WebP, PDF.'
+command: python3
+args:
+- main.py
+timeout: 120s
+input_schema:
+  type: object
+  properties:
+    image_path:
+      type: string
+      description: URL or path to the image file. Supports JPEG, PNG, WebP, PDF pages
+    task:
+      type: string
+      enum:
+      - ocr
+      - describe
+      - extract_entities
+      - answer
+      description: 'Task type: ''ocr'' (extract all text), ''describe'' (natural language
+        description), ''extract_entities'' (detect specific items like names, dates,
+        amounts), ''answer'' (answer a specific question about the image)'
+    question:
+      type: string
+      description: 'Specific question for ''answer'' task, or what to extract for
+        ''extract_entities''. Example: ''What product is shown?'' or ''Extract all
+        dates and amounts'''
+    provider:
+      type: string
+      description: 'Vision model provider: ''ollama'' (local/self-hosted), ''openrouter'',
+        ''openai'', ''anthropic''. Defaults to the LLM_API_URL/LLM_MODEL env vars.'
+    model:
+      type: string
+      description: 'Model name for the chosen provider. Examples: ''gemma4:e2b'',
+        ''llava:13b'', ''gpt-4o-mini''. Defaults to LLM_MODEL env var or ''llava''.'
+  required:
+  - image_path
+  - task

@@ -1,0 +1,15 @@
+name: echo
+description: Repite el texto exacto. Solo para debugging o repetición explícita, NO
+  para memorizar información.
+command: python3
+args:
+- main.py
+timeout: 10s
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: Text to echo back
+  required:
+  - text

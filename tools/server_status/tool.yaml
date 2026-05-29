@@ -1,0 +1,10 @@
+name: server_status
+description: 'Estado del servidor: CPU, RAM, disco, uptime y contenedores Docker.'
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties: {}
+  required: []

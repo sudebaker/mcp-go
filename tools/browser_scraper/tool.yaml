@@ -1,0 +1,33 @@
+name: browser_scraper
+description: Scraping con headless browser para páginas JS-heavy o anti-bot. Usar
+  si web_scraper falla.
+command: python3
+args:
+- main.py
+timeout: 90s
+input_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: URL to scrape (must start with http:// or https://)
+    selector:
+      type: string
+      description: Optional CSS selector to wait for and extract specific content
+    extract_type:
+      type: string
+      enum:
+      - text
+      - html
+      default: text
+      description: 'What to extract: text (default) or raw html'
+    wait_ms:
+      type: integer
+      default: 3000
+      description: Milliseconds to wait for JS rendering (default 3000)
+    max_chars:
+      type: integer
+      default: 5000
+      description: Maximum characters to return (default 5000)
+  required:
+  - url

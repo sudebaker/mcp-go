@@ -1,0 +1,32 @@
+name: generate_report
+description: 'Genera PDFs profesionales. Soporta: incident, meeting, audit, executive_summary,
+  formal_report, corporate_email, llm_response. Retorna PDF base64.'
+command: python3
+args:
+- main.py
+timeout: 120s
+input_schema:
+  type: object
+  properties:
+    report_type:
+      type: string
+      enum:
+      - incident
+      - meeting
+      - audit
+      - executive_summary
+      - formal_report
+      - corporate_email
+      - llm_response
+      description: Type of report. Use 'llm_response' for AI-generated markdown content,
+        'executive_summary' for business summaries, 'formal_report' for formal documents.
+    data:
+      type: object
+      description: 'Report data object. For llm_response: {title, content (markdown),
+        author, logo_url}. For others: see tool documentation.'
+    output_path:
+      type: string
+      description: Optional output path for the PDF file
+  required:
+  - report_type
+  - data

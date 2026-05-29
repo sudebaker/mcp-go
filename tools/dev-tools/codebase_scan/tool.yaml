@@ -1,0 +1,21 @@
+name: "codebase_scan"
+description: "Analisis estatico del repo. Sub-ops: dead_code, test_gaps, import_graph, hotspots, dependency_drift. 0 tokens LLM, solo AST + git."
+command: "python3"
+args: ["main.py"]
+timeout: "120s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+    scan_type:
+      type: string
+      enum: ["dead_code", "test_gaps", "import_graph", "hotspots", "dependency_drift"]
+    exclude_patterns:
+      type: array
+      items:
+        type: string
+      default: [".git", ".venv", "node_modules", "__pycache__"]
+  required:
+    - project_root
+    - scan_type

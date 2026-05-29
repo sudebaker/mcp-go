@@ -1,0 +1,35 @@
+name: document_classifier
+description: 'Clasifica documentos (contrato, factura, informe, regulación, etc.).
+  Detecta idioma auto. Output: classification + confidence + keywords.'
+command: python3
+args:
+- main.py
+timeout: 180s
+input_schema:
+  type: object
+  properties:
+    __files__:
+      type: array
+      description: Documents to classify
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          name:
+            type: string
+    categories:
+      type: array
+      items:
+        type: string
+      description: 'Custom categories (default: predefined list)'
+    language:
+      type: string
+      enum:
+      - auto
+      - es
+      - en
+      default: auto
+      description: Document language detection
+  required:
+  - __files__

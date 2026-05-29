@@ -1,0 +1,34 @@
+name: kb_search
+description: Searches the knowledge base for relevant facts using semantic similarity.
+  Use when the user asks about something previously discussed, their preferences,
+  past decisions, or any memorized information. Returns ranked results with relevance
+  scores.
+command: python3
+args:
+- main.py
+- search
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Search query
+    collection:
+      type: string
+      default: default
+      description: Collection to search in
+    top_k:
+      type: integer
+      default: 5
+      description: Number of results to return
+    search_type:
+      type: string
+      enum:
+      - semantic
+      - keyword
+      - hybrid
+      default: hybrid
+      description: Type of search to perform
+  required:
+  - query

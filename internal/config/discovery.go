@@ -15,6 +15,10 @@ import (
 // manifestFileName is the expected manifest file inside each tool subdirectory.
 const manifestFileName = "tool.yaml"
 
+// maxDiscoveredTools limits the number of tools loaded from a single directory
+// to prevent startup denial of service from a directory with too many entries.
+const maxDiscoveredTools = 500
+
 // DiscoverToolsFromDirectory scans a single directory level for tool subdirectories
 // containing a tool.yaml manifest. It returns a slice of ToolConfig values with
 // absolute args paths resolved and validated.
@@ -37,6 +41,16 @@ func DiscoverToolsFromDirectory(toolsDir string) ([]ToolConfig, error) {
 		if !entry.IsDir() {
 			continue
 		}
+		
+		// DoS protection: hard cap on discovered tools
+		if len(result) >= maxDiscoveredTools {
+			log.Warn().
+				Int("limit", maxDiscoveredTools).
+				Str("toolsDir", absDir).
+				Msg("Too many tool directories; truncating discovery")
+			break
+		}
+		
 		manifestPath := filepath.Join(absDir, entry.Name(), manifestFileName)
 		info, err := os.Stat(manifestPath)
 		if err != nil || info.IsDir() {

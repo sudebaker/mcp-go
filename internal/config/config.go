@@ -82,6 +82,14 @@ type ExecutionConfig struct {
 	// MaxConcurrency limits simultaneous subprocess executions (default: 5)
 	// Prevents fork-bomb under high load. Set to 0 for unlimited (not recommended).
 	MaxConcurrency int `yaml:"max_concurrency"`
+	// ToolsDir is the directory to scan for tool manifests when discovery is enabled
+	ToolsDir string `yaml:"tools_dir"`
+	// ToolsDiscovery controls automatic tool discovery: "none" (default) or "manifest"
+	ToolsDiscovery string `yaml:"tools_discovery"`
+	// ToolsAppend determines merge behavior when discovery finds tools with the same name as config tools.
+	// "false" (default): discovered tools override config tools.
+	// "true": config tools take precedence; discovered tools are appended only if not present.
+	ToolsAppend string `yaml:"tools_append"`
 }
 
 // ToolConfig defines a single tool's execution parameters, input schema,
@@ -289,7 +297,78 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Tool discovery: scan directory for manifest-based tools if enabled
+	if cfg.Execution.ToolsDiscovery == "manifest" {
+		if cfg.Execution.ToolsDir == "" {
+			return nil, fmt.Errorf("tools_discovery is 'manifest' but tools_dir is empty")
+		}
+		discovered, err := DiscoverToolsFromDirectory(cfg.Execution.ToolsDir)
+		if err != nil {
+			return nil, fmt.Errorf("tool discovery failed for %s: %w", cfg.Execution.ToolsDir, err)
+		}
+		for i := range discovered {
+			if discovered[i].Timeout == 0 {
+				discovered[i].Timeout = cfg.Execution.DefaultTimeout
+			}
+		}
+		cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
+	}
+
 	return &cfg, nil
+}
+
+// mergeTools merges discovered tools with configured tools.
+// resolvedAppend is the string value from config; it is considered true only if it equals "true".
+// If false, discovered tools override config tools (discovered first, then remaining config).
+// If true, config tools take precedence and discovered tools are added only for new names.
+func mergeTools(configured, discovered []ToolConfig, appendRaw string) []ToolConfig {
+	appendMode := appendRaw == "true"
+	nameSet := make(map[string]bool, len(configured)+len(discovered))
+	for _, t := range configured {
+		nameSet[t.Name] = true
+	}
+	for _, t := range discovered {
+		nameSet[t.Name] = true
+	}
+
+	// Pre-allocate ordered result slice preserving deterministic order.
+	result := make([]ToolConfig, 0, len(nameSet))
+
+	if appendMode {
+		// Config tools first (they win), then discovered tools that are new.
+		for _, t := range configured {
+			result = append(result, t)
+		}
+		for _, t := range discovered {
+			if !nameSet[t.Name] {
+				// impossible since nameSet includes discovered, but keep logic explicit.
+				continue
+			}
+			found := false
+			for _, existing := range configured {
+				if existing.Name == t.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, t)
+			}
+		}
+	} else {
+		// Discovered tools override config tools: discovered first, then config tools not overridden.
+		overridden := make(map[string]bool, len(discovered))
+		for _, t := range discovered {
+			result = append(result, t)
+			overridden[t.Name] = true
+		}
+		for _, t := range configured {
+			if !overridden[t.Name] {
+				result = append(result, t)
+			}
+		}
+	}
+	return result
 }
 
 // GetToolByName finds a tool configuration by its unique name.

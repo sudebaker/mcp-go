@@ -46,6 +46,9 @@ execution:
   working_dir: "/data"
   reports_dir: "reports"
   max_concurrency: 5
+  tools_dir: "${TOOLS_DIR:-/app/tools}"
+  tools_discovery: "${TOOLS_DISCOVERY:-none}"   # none | manifest
+  tools_append: "${TOOLS_APPEND:-false}"         # false | true
   environment:
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
     REMOTE_OLLAMA_URL: "${REMOTE_OLLAMA_URL:-}"

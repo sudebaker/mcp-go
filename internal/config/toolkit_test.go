@@ -66,14 +66,16 @@ func TestFilterToolsByToolkit_EmptyToolkit(t *testing.T) {
 		{Name: "datetime"},
 	}
 
+	// nil toolkit → no filtering (backward compat)
 	result := filterToolsByToolkit(tools, nil)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 tools with nil toolkit, got %d", len(result))
 	}
 
+	// empty toolkit → 0 tools (intentional sandbox/minimal mode)
 	result = filterToolsByToolkit(tools, &ToolkitConfig{Tools: []string{}})
-	if len(result) != 2 {
-		t.Fatalf("expected 2 tools with empty toolkit, got %d", len(result))
+	if len(result) != 0 {
+		t.Fatalf("expected 0 tools with empty toolkit, got %d", len(result))
 	}
 }
 

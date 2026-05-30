@@ -47,10 +47,14 @@ func loadToolkit(name string) (*ToolkitConfig, error) {
 }
 
 // filterToolsByToolkit keeps only tools whose name appears in the toolkit.
-// If the toolkit is nil or has an empty tools list, returns the original slice unchanged.
+// If the toolkit is nil, returns the original slice unchanged (no filtering).
+// If the toolkit has an empty tools list, returns an empty slice (intentional empty toolkit).
 func filterToolsByToolkit(tools []ToolConfig, tk *ToolkitConfig) []ToolConfig {
-	if tk == nil || len(tk.Tools) == 0 {
+	if tk == nil {
 		return tools
+	}
+	if len(tk.Tools) == 0 {
+		return []ToolConfig{}
 	}
 
 	allowed := make(map[string]bool, len(tk.Tools))

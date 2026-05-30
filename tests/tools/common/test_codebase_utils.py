@@ -18,6 +18,9 @@ from common.codebase_utils import (
     parse_imports,
     read_config_files,
     extract_keywords,
+    ScanCache,
+    MAX_FILES_TO_SCAN,
+    _load_gitignore,
 )
 
 
@@ -105,6 +108,75 @@ def test_extract_keywords():
     assert "autenticación" in kws or "autenticacion" in kws
     assert "seguridad" in kws
     assert "el" not in kws  # stopword
+
+
+def test_max_files_to_scan_constant():
+    assert MAX_FILES_TO_SCAN == 5000
+
+
+def test_scan_cache_set_get():
+    with tempfile.TemporaryDirectory() as td:
+        cache = ScanCache(cache_dir=Path(td) / "cache")
+        cache.set("/tmp", "test_op", {"key": "value"})
+        result = cache.get("/tmp", "test_op")
+        assert result == {"key": "value"}
+
+
+def test_scan_cache_get_miss():
+    with tempfile.TemporaryDirectory() as td:
+        cache = ScanCache(cache_dir=Path(td) / "cache")
+        result = cache.get("/nonexistent", "miss")
+        assert result is None
+
+
+def test_scan_cache_ttl_expiry():
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        cache = ScanCache(cache_dir=Path(td) / "cache")
+        cache.ttl_seconds = 0  # Expire immediately
+        cache.set("/tmp", "expire_op", {"key": "value"})
+        time.sleep(0.01)
+        result = cache.get("/tmp", "expire_op")
+        assert result is None
+
+
+def test_load_gitignore():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / ".gitignore").write_text("*.pyc\n__pycache__\ndist/\n")
+        patterns = _load_gitignore(root)
+        assert any("pyc" in p for p in patterns)
+        assert any("pycache" in p for p in patterns)
+        assert any("dist" in p for p in patterns)
+
+
+def test_load_gitignore_no_file():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        patterns = _load_gitignore(root)
+        assert patterns == []
+
+
+def test_safe_walk_max_files():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for i in range(20):
+            (root / f"file_{i}.py").write_text("")
+        files = list(safe_walk(root, max_files=5))
+        assert len(files) == 5
+
+
+def test_safe_walk_gitignore_loaded():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / ".gitignore").write_text("ignored_dir/\n")
+        (root / "ignored_dir").mkdir()
+        (root / "ignored_dir" / "x.py").write_text("")
+        (root / "src").mkdir()
+        (root / "src" / "a.py").write_text("")
+        files = list(safe_walk(root))
+        assert all("ignored_dir" not in str(f) for f in files)
+        assert any("a.py" in str(f) for f in files)
 
 
 if __name__ == "__main__":

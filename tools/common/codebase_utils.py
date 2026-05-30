@@ -61,7 +61,7 @@ CONFIG_FILES = {
     "go": ["go.mod", "go.sum"],
 }
 
-# Límite global para prevenir timeouts en repos enormes
+# Global limit to prevent timeouts on huge repos
 MAX_FILES_TO_SCAN = 5000
 
 
@@ -82,8 +82,8 @@ class ScanCache:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"git rev-parse failed for {root}: {e}")
         return "no-git"
 
     def _cache_key(self, root: str, operation: str) -> str:
@@ -100,8 +100,8 @@ class ScanCache:
             data = json.loads(cache_file.read_text())
             if time.time() - data.get("timestamp", 0) < self.ttl_seconds:
                 return data.get("result")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Cache read failed for {cache_file}: {e}")
         return None
 
     def set(self, root: str, operation: str, result: dict[str, Any]) -> None:
@@ -112,8 +112,8 @@ class ScanCache:
                 "timestamp": time.time(),
                 "result": result
             }, default=str))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Cache write failed for {cache_file}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +256,8 @@ def _load_gitignore(root: Path) -> list[str]:
     for line in gitignore.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
-            # Convertir patrón gitignore simple a regex
-            pattern = line.replace(".", r"\.").replace("*", ".*").replace("?", ".")
+            # Simple gitignore-to-regex conversion (lossy but covers common patterns)
+            pattern = line.rstrip("/").replace(".", r"\.").replace("*", ".*").replace("?", ".")
             patterns.append(pattern)
     return patterns
 
@@ -265,6 +265,7 @@ def _load_gitignore(root: Path) -> list[str]:
 def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None, max_files: int = MAX_FILES_TO_SCAN) -> Iterator[Path]:
     """Yield files under *root*, skipping directories that match any regex in *exclude_patterns*.
     Respects max_files limit and loads .gitignore patterns.
+    No path traversal outside *root* is possible (uses Path.resolve()).
     """
     root_path = Path(root).resolve()
     exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS

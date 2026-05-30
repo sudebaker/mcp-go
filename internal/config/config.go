@@ -314,6 +314,16 @@ func Load(path string) (*Config, error) {
 		cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
 	}
 
+	// Apply toolkit filtering if MCP_TOOLKIT is set.
+	// The server can be started with different tool subsets without code changes.
+	if toolkitName := os.Getenv("MCP_TOOLKIT"); toolkitName != "" {
+		tk, err := loadToolkit(toolkitName)
+		if err != nil {
+			return nil, fmt.Errorf("toolkit loading failed for %q: %w", toolkitName, err)
+		}
+		cfg.Tools = filterToolsByToolkit(cfg.Tools, tk)
+	}
+
 	return &cfg, nil
 }
 

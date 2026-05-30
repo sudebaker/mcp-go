@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -498,8 +499,22 @@ func parseStreamingOutput(output string, requestID string) ([]map[string]interfa
 //
 //	a slice of "KEY=value" strings suitable for cmd.Env
 func buildEnvironment(envMap map[string]string) []string {
-	env := make([]string, 0, len(envMap))
+	merged := make(map[string]string)
+
+	// Inherit all env vars from the parent process
+	for _, pair := range os.Environ() {
+		if k, v, ok := strings.Cut(pair, "="); ok {
+			merged[k] = v
+		}
+	}
+
+	// Override with configured env vars
 	for k, v := range envMap {
+		merged[k] = v
+	}
+
+	env := make([]string, 0, len(merged))
+	for k, v := range merged {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env

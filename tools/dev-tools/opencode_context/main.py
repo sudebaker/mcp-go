@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from common.structured_logging import get_logger
 from common.validators import validate_read_path
 from common.codebase_utils import (
+    ScanCache,
     discover_project,
     safe_walk,
     parse_imports,
@@ -223,6 +224,19 @@ def main():
         except Exception as e:
             logger.warning(f"Path validation warning for {root_path}: {e}")
 
+        # Check cache
+        cache = ScanCache()
+        cache_op = f"opencode_context:{task_description[:100]}:{max_files}:{include_tests}"
+        cached = cache.get(project_root, cache_op)
+        if cached:
+            write_response({
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": cached.get("summary", "")}],
+                "structured_content": cached,
+            })
+            return
+
         keywords = extract_keywords(task_description)
         if not keywords:
             keywords = [task_description.lower().replace(" ", "_")]
@@ -259,6 +273,9 @@ def main():
             "recommended_files": recommended,
             "opencode_command": opencode_command,
         }
+
+        # Store in cache
+        cache.set(project_root, cache_op, structured_content)
 
         write_response(
             {

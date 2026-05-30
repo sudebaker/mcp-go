@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     # General utilities
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 3: Install Python dependencies
@@ -56,6 +57,7 @@ requests>=2.31.0
 httpx>=0.27.0
 tenacity>=8.2.0
 validators>=0.20.0
+gitpython>=3.1.40
 
 # RSS Reader
 feedparser>=6.0.0

@@ -239,6 +239,7 @@ def main():
     try:
         project_root = arguments.get("project_root", "")
         check_type = arguments.get("check_type", "unused")
+        fail_fast = arguments.get("fail_fast", False)
 
         if not project_root:
             write_response(
@@ -261,44 +262,82 @@ def main():
             )
             return
 
-        declared = {**_declared_python_deps(root), **_declared_js_deps(root)}
-        actual = _actual_imports(root)
+        partial = {"configs": False, "dependencies": False, "checks": False}
 
-        check_type = check_type.lower()
-        if check_type == "unused":
-            findings = _check_unused(declared, actual)
-            summary = f"{len(findings)} declared dependencies appear unused"
-            structured = {"findings": findings, "check_type": check_type}
-        elif check_type == "missing":
-            findings = _check_missing(declared, actual)
-            summary = f"{len(findings)} imports appear undeclared"
-            structured = {"findings": findings, "check_type": check_type}
-        elif check_type == "outdated":
-            findings = _check_outdated(declared)
-            summary = f"{len(findings)} dependencies may be outdated"
-            structured = {"findings": findings, "check_type": check_type}
-        elif check_type == "security":
-            findings = _check_security(declared)
-            summary = f"{len(findings)} security advisories found"
-            structured = {"findings": findings, "check_type": check_type}
-        else:
+        # Step 1: collect configs
+        try:
+            declared = {**_declared_python_deps(root), **_declared_js_deps(root)}
+            partial["configs"] = True
+        except Exception as e:
+            if fail_fast:
+                raise
+            logger.warning("Config collection failed: %s", e)
+            declared = {}
+
+        # Step 2: scan dependencies
+        try:
+            actual = _actual_imports(root)
+            partial["dependencies"] = True
+        except Exception as e:
+            if fail_fast:
+                raise
+            logger.warning("Import scanning failed: %s", e)
+            actual = set()
+
+        # Step 3: run check
+        try:
+            check_type = check_type.lower()
+            if check_type == "unused":
+                findings = _check_unused(declared, actual)
+                summary = f"{len(findings)} declared dependencies appear unused"
+                structured = {"findings": findings, "check_type": check_type}
+            elif check_type == "missing":
+                findings = _check_missing(declared, actual)
+                summary = f"{len(findings)} imports appear undeclared"
+                structured = {"findings": findings, "check_type": check_type}
+            elif check_type == "outdated":
+                findings = _check_outdated(declared)
+                summary = f"{len(findings)} dependencies may be outdated"
+                structured = {"findings": findings, "check_type": check_type}
+            elif check_type == "security":
+                findings = _check_security(declared)
+                summary = f"{len(findings)} security advisories found"
+                structured = {"findings": findings, "check_type": check_type}
+            else:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "INVALID_INPUT", "message": f"Unknown check_type: {check_type}"},
+                    }
+                )
+                return
+            partial["checks"] = True
+        except Exception as e:
+            if fail_fast:
+                raise
+            logger.warning("Check execution failed: %s", e)
+            partial_result = partial if not all(partial.values()) else None
             write_response(
                 {
                     "success": False,
                     "request_id": request_id,
-                    "error": {"code": "INVALID_INPUT", "message": f"Unknown check_type: {check_type}"},
+                    "error": {"code": "CHECK_FAILED", "message": str(e)},
+                    "partial_result": partial_result,
                 }
             )
             return
 
-        write_response(
-            {
-                "success": True,
-                "request_id": request_id,
-                "content": [{"type": "text", "text": summary}],
-                "structured_content": structured,
-            }
-        )
+        partial_result = partial if not all(partial.values()) else None
+        response = {
+            "success": True,
+            "request_id": request_id,
+            "content": [{"type": "text", "text": summary}],
+            "structured_content": structured,
+        }
+        if partial_result:
+            response["partial_result"] = partial_result
+        write_response(response)
 
     except Exception as e:
         logger.error(

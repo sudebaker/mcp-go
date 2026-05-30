@@ -1,0 +1,24 @@
+name: "doc_generator"
+description: "Genera documentacion desde docstrings. Soporta Python (AST). Output markdown con funciones, clases, parametros. 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "120s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+      description: "Ruta absoluta al proyecto"
+    modules:
+      type: array
+      items:
+        type: string
+      default: ["."]
+      description: "Directorios/modulos a documentar"
+    output_format:
+      type: string
+      enum: ["markdown"]
+      default: "markdown"
+      description: "Formato de salida"
+  required:
+    - project_root

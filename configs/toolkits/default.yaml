@@ -1,0 +1,19 @@
+# Toolkit por defecto: herramientas de productividad general
+name: "default"
+description: "Toolkit general para usuarios finales"
+tools:
+  - echo
+  - datetime
+  - generate_report
+  - analyze_data
+  - analyze_image
+  - kb_ingest
+  - kb_search
+  - weather_forecast
+  - web_scraper
+  - searxng_search
+  - browser_scraper
+  - rss_reader
+  - canvas_diagram
+  - rustfs_storage
+  - transcribe

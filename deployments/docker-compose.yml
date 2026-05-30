@@ -48,6 +48,9 @@ services:
 
       # Python settings
       PYTHONUNBUFFERED: "1"
+
+      # Toolkit filtering (none, default, development)
+      MCP_TOOLKIT: ${MCP_TOOLKIT:-default}
     volumes:
       # Configuration (read-only)
       - ../configs:/app/configs:ro

@@ -125,6 +125,75 @@ The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
+## Toolkit Filtering
+
+The server can expose different subsets of tools without code changes, using **toolkits** defined in `configs/toolkits/`.
+
+### Available Toolkits
+
+| Toolkit | Tools | Use Case |
+|---------|-------|----------|
+| `default` | 14 general-purpose tools (echo, weather, kb, web, etc.) | End users, general assistance |
+| `development` | 10 dev tools + core (opencode_context, codebase_scan, git_inspector, etc.) | Developers, coding agents |
+| *(unset)* | All available tools | Backward compatible, everything exposed |
+
+### Usage
+
+Set the `MCP_TOOLKIT` environment variable in your `.env` file:
+
+```bash
+# .env — only expose general-purpose tools
+MCP_TOOLKIT=default
+
+# .env — expose development tools
+MCP_TOOLKIT=development
+
+# .env — omit to expose all tools (default behavior)
+# (no MCP_TOOLKIT set)
+```
+
+Or with Docker directly:
+
+```bash
+# General toolkit
+docker run -e MCP_TOOLKIT=default -p 8080:8080 sudebaker/mcp-go
+
+# Development toolkit
+docker run -e MCP_TOOLKIT=development -p 8080:8080 sudebaker/mcp-go
+
+# All tools (backward compatible)
+docker run -p 8080:8080 sudebaker/mcp-go
+```
+
+### How It Works
+
+1. The server loads all available tools from `configs/config.yaml` and auto-discovery.
+2. If `MCP_TOOLKIT` is set, it loads the corresponding toolkit YAML from `configs/toolkits/<name>.yaml`.
+3. The server filters the loaded tools to only those listed in the toolkit.
+4. The client (Hermes, Claude Desktop, etc.) receives only the filtered tools via `tools/list`.
+
+The client **does not need to know** about toolkits. The filtering happens entirely on the server side.
+
+### Adding Custom Toolkits
+
+Create a new file in `configs/toolkits/`:
+
+```yaml
+# configs/toolkits/my-team.yaml
+name: "my-team"
+description: "Custom toolkit for my team"
+tools:
+  - echo
+  - datetime
+  - kb_search
+```
+
+Then run with:
+
+```bash
+MCP_TOOLKIT=my-team docker compose up -d mcp-server
+```
+
 ## Documentation
 
 | Document | Description |

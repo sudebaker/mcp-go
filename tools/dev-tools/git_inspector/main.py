@@ -62,7 +62,9 @@ def _gitpython_blame(repo_path: str, file_path: str, days: int) -> dict[str, Any
         raise RuntimeError("gitpython not available")
 
     repo = git.Repo(repo_path, search_parent_directories=True)
-    full_path = Path(repo_path) / file_path
+    full_path = (Path(repo_path) / file_path).resolve()
+    if not str(full_path).startswith(str(Path(repo_path).resolve()) + os.sep):
+        raise ValueError(f"file_path escapes repository: {file_path}")
     if not full_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 

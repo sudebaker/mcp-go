@@ -5,6 +5,10 @@ test_runner tool — ejecuta tests y parsea resultados.
 Soporta: pytest, go test, jest.
 Input: project_root, framework (auto|pytest|go|jest), target, extra_args.
 Output: summary con passed/failed/skipped, duración, y failures detallados.
+
+Note: pytest output parsing uses regex that assumes English locale.
+Non-English pytest output or custom plugins may cause miscounts.
+For production use, consider --json-report or --junitxml alternatives.
 """
 import json
 import os

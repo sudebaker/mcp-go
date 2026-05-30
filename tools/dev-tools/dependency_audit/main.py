@@ -159,22 +159,30 @@ def _check_missing(declared: dict[str, str], actual: set[str]) -> list[dict[str,
     return missing
 
 
-def _check_outdated(declared: dict[str, str]) -> list[dict[str, Any]]:
-    """Best-effort version lookup via PyPI / npm registry (no auth)."""
+def _check_outdated(python_deps: dict[str, str], js_deps: dict[str, str]) -> list[dict[str, Any]]:
+    """Best-effort version lookup via PyPI / npm registry (no auth).
+    Uses language context to route packages to the correct registry."""
     outdated: list[dict[str, Any]] = []
-    for name, spec in declared.items():
+    for name, spec in python_deps.items():
         if not spec:
             continue
-        latest = None
         try:
-            if "." in name or name.startswith("@"):
-                # Likely scoped JS package
-                latest = _npm_latest(name)
-            else:
-                # Try PyPI first, then npm
-                latest = _pypi_latest(name) or _npm_latest(name)
+            latest = _pypi_latest(name)
         except Exception as e:
-            logger.debug(f"Version lookup failed for {name}: {e}")
+            logger.debug(f"PyPI lookup failed for {name}: {e}")
+            continue
+        if latest and latest != spec.strip("=~^><"):
+            outdated.append({
+                "package": name, "declared": spec, "latest": latest,
+                "reason": f"latest ({latest}) differs from declared ({spec})",
+            })
+    for name, spec in js_deps.items():
+        if not spec:
+            continue
+        try:
+            latest = _npm_latest(name)
+        except Exception as e:
+            logger.debug(f"npm lookup failed for {name}: {e}")
             continue
 
         if latest and latest != spec.strip("=~^><"):
@@ -264,14 +272,18 @@ def main():
 
         partial = {"configs": False, "dependencies": False, "checks": False}
 
-        # Step 1: collect configs
+        # Step 1: collect configs (keep separate for accurate registry routing)
         try:
-            declared = {**_declared_python_deps(root), **_declared_js_deps(root)}
+            python_declared = _declared_python_deps(root)
+            js_declared = _declared_js_deps(root)
+            declared = {**python_declared, **js_declared}
             partial["configs"] = True
         except Exception as e:
             if fail_fast:
                 raise
             logger.warning("Config collection failed: %s", e)
+            python_declared = {}
+            js_declared = {}
             declared = {}
 
         # Step 2: scan dependencies
@@ -296,7 +308,7 @@ def main():
                 summary = f"{len(findings)} imports appear undeclared"
                 structured = {"findings": findings, "check_type": check_type}
             elif check_type == "outdated":
-                findings = _check_outdated(declared)
+                findings = _check_outdated(python_declared, js_declared)
                 summary = f"{len(findings)} dependencies may be outdated"
                 structured = {"findings": findings, "check_type": check_type}
             elif check_type == "security":

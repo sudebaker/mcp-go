@@ -340,10 +340,6 @@ func mergeTools(configured, discovered []ToolConfig, appendRaw string) []ToolCon
 			result = append(result, t)
 		}
 		for _, t := range discovered {
-			if !nameSet[t.Name] {
-				// impossible since nameSet includes discovered, but keep logic explicit.
-				continue
-			}
 			found := false
 			for _, existing := range configured {
 				if existing.Name == t.Name {

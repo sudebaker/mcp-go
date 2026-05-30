@@ -32,6 +32,10 @@ def load_spec(spec_path: str) -> dict[str, Any]:
     if path.exists():
         content = path.read_text(encoding="utf-8", errors="ignore")
     else:
+        from common.validators import validate_url_ssrf
+        is_valid, error = validate_url_ssrf(spec_path)
+        if not is_valid:
+            raise ValueError(f"URL rejected by SSRF protection: {error}")
         import urllib.request
         with urllib.request.urlopen(spec_path, timeout=30) as resp:
             content = resp.read().decode("utf-8")

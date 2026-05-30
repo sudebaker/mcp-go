@@ -271,12 +271,20 @@ def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None, max_f
     exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
     gitignore_patterns = _load_gitignore(root_path)
     all_excludes = exclude_patterns + gitignore_patterns
-    compiled = [re.compile(p) for p in all_excludes]
+    compiled = []
+    for p in all_excludes:
+        try:
+            compiled.append(re.compile(p))
+        except re.error:
+            logger.warning("Skipping invalid regex pattern %r", p)
 
+    root_str = str(root_path)
+    root_with_sep = root_str + os.sep
     count = 0
     for current_dir, dirnames, filenames in os.walk(root_path, topdown=True):
         current_dir_path = Path(current_dir).resolve()
-        if not str(current_dir_path).startswith(str(root_path)):
+        cur_str = str(current_dir_path)
+        if cur_str != root_str and not cur_str.startswith(root_with_sep):
             dirnames[:] = []
             continue
 
@@ -288,7 +296,8 @@ def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None, max_f
 
         for filename in filenames:
             file_path = (current_dir_path / filename).resolve()
-            if str(file_path).startswith(str(root_path)):
+            fp_str = str(file_path)
+            if fp_str == root_str or fp_str.startswith(root_with_sep):
                 if count >= max_files:
                     logger.warning(f"Reached max_files limit ({max_files}) in {root}")
                     return

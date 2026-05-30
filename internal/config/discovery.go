@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
@@ -41,7 +40,7 @@ func DiscoverToolsFromDirectory(toolsDir string) ([]ToolConfig, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		// DoS protection: hard cap on discovered tools
 		if len(result) >= maxDiscoveredTools {
 			log.Warn().
@@ -50,7 +49,7 @@ func DiscoverToolsFromDirectory(toolsDir string) ([]ToolConfig, error) {
 				Msg("Too many tool directories; truncating discovery")
 			break
 		}
-		
+
 		manifestPath := filepath.Join(absDir, entry.Name(), manifestFileName)
 		info, err := os.Stat(manifestPath)
 		if err != nil || info.IsDir() {

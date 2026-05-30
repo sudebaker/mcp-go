@@ -1,0 +1,28 @@
+name: "changelog_generator"
+description: "Genera changelog desde commits git convencionales. Agrupa por tipo (feat, fix, docs, refactor, etc). 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    repo_path:
+      type: string
+      description: "Ruta absoluta al repositorio git"
+    from_tag:
+      type: string
+      description: "Tag o commit inicial (opcional, si se omite usa HEAD~30)"
+    to_tag:
+      type: string
+      description: "Tag o commit final (opcional, si se omite usa HEAD)"
+    format:
+      type: string
+      enum: ["markdown", "json"]
+      default: "markdown"
+      description: "Formato de salida"
+    max_commits:
+      type: integer
+      default: 50
+      description: "Maximo de commits a incluir"
+  required:
+    - repo_path

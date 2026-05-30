@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from common.structured_logging import get_logger
 from common.codebase_utils import (
+    ScanCache,
     discover_project,
     safe_walk,
     parse_imports,
@@ -376,6 +377,20 @@ def main():
             return
 
         scan_type = scan_type.lower()
+
+        # Check cache
+        cache = ScanCache()
+        cache_op = f"codebase_scan:{scan_type}"
+        cached = cache.get(project_root, cache_op)
+        if cached:
+            write_response({
+                "success": True,
+                "request_id": request_id,
+                "content": [{"type": "text", "text": cached.get("summary", "")}],
+                "structured_content": cached,
+            })
+            return
+
         if scan_type == "dead_code":
             findings = _scan_dead_code(root_path, exclude_patterns)
             summary = f"Found {len(findings)} potentially dead symbols"
@@ -405,6 +420,9 @@ def main():
                 }
             )
             return
+
+        # Store in cache
+        cache.set(project_root, cache_op, structured)
 
         write_response(
             {

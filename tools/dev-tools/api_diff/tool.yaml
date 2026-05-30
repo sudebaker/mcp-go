@@ -1,0 +1,17 @@
+name: "api_diff"
+description: "Compara dos OpenAPI specs (JSON/YAML, local o URL) y detecta breaking changes: endpoints nuevos/eliminados, parametros, responses. 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    old_spec:
+      type: string
+      description: "Path local o URL de la spec antigua"
+    new_spec:
+      type: string
+      description: "Path local o URL de la spec nueva"
+  required:
+    - old_spec
+    - new_spec

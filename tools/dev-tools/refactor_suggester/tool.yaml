@@ -1,0 +1,32 @@
+name: "refactor_suggester"
+description: "Detecta codigo duplicado y funciones complejas en Python (AST). Checks: duplication, complexity, long_functions. 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "120s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+      description: "Ruta absoluta al proyecto"
+    checks:
+      type: array
+      items:
+        type: string
+        enum: ["complexity", "long_functions", "duplication"]
+      default: ["complexity", "long_functions"]
+      description: "Tipos de analisis a realizar"
+    complexity_threshold:
+      type: integer
+      default: 10
+      description: "Complejidad ciclomatica maxima"
+    lines_threshold:
+      type: integer
+      default: 50
+      description: "Lineas maximas por funcion"
+    min_duplicate_lines:
+      type: integer
+      default: 5
+      description: "Lineas minimas para detectar duplicacion"
+  required:
+    - project_root

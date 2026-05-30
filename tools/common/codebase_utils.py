@@ -14,6 +14,9 @@ import os
 import re
 import sys
 from pathlib import Path
+
+import hashlib
+import time
 from typing import Any, Iterator
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -57,6 +60,61 @@ CONFIG_FILES = {
     "javascript": ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"],
     "go": ["go.mod", "go.sum"],
 }
+
+# Límite global para prevenir timeouts en repos enormes
+MAX_FILES_TO_SCAN = 5000
+
+
+class ScanCache:
+    """Cache simple basado en git HEAD + timestamp. Evita re-escanear todo el repo."""
+
+    def __init__(self, cache_dir: Path | None = None):
+        self.cache_dir = cache_dir or Path("/tmp/mcp_scan_cache")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.ttl_seconds = 300  # 5 minutos
+
+    def _get_git_head(self, root: str) -> str:
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "-C", root, "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return "no-git"
+
+    def _cache_key(self, root: str, operation: str) -> str:
+        head = self._get_git_head(root)
+        content = f"{root}:{operation}:{head}"
+        return hashlib.sha256(content.encode()).hexdigest()
+
+    def get(self, root: str, operation: str) -> dict[str, Any] | None:
+        key = self._cache_key(root, operation)
+        cache_file = self.cache_dir / f"{key}.json"
+        if not cache_file.exists():
+            return None
+        try:
+            data = json.loads(cache_file.read_text())
+            if time.time() - data.get("timestamp", 0) < self.ttl_seconds:
+                return data.get("result")
+        except Exception:
+            pass
+        return None
+
+    def set(self, root: str, operation: str, result: dict[str, Any]) -> None:
+        key = self._cache_key(root, operation)
+        cache_file = self.cache_dir / f"{key}.json"
+        try:
+            cache_file.write_text(json.dumps({
+                "timestamp": time.time(),
+                "result": result
+            }, default=str))
+        except Exception:
+            pass
+
 
 # ---------------------------------------------------------------------------
 # Project discovery
@@ -189,19 +247,35 @@ def _guess_go_framework(go_mod_path: Path) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None) -> Iterator[Path]:
-    """Yield files under *root*, skipping directories that match any regex in *exclude_patterns*.
+def _load_gitignore(root: Path) -> list[str]:
+    """Load .gitignore patterns and convert them to regex patterns."""
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        return []
+    patterns = []
+    for line in gitignore.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            # Convertir patrón gitignore simple a regex
+            pattern = line.replace(".", r"\.").replace("*", ".*").replace("?", ".")
+            patterns.append(pattern)
+    return patterns
 
-    No path traversal outside *root* is possible (uses Path.resolve()).
+
+def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None, max_files: int = MAX_FILES_TO_SCAN) -> Iterator[Path]:
+    """Yield files under *root*, skipping directories that match any regex in *exclude_patterns*.
+    Respects max_files limit and loads .gitignore patterns.
     """
     root_path = Path(root).resolve()
     exclude_patterns = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
-    compiled = [re.compile(p) for p in exclude_patterns]
+    gitignore_patterns = _load_gitignore(root_path)
+    all_excludes = exclude_patterns + gitignore_patterns
+    compiled = [re.compile(p) for p in all_excludes]
 
+    count = 0
     for current_dir, dirnames, filenames in os.walk(root_path, topdown=True):
         current_dir_path = Path(current_dir).resolve()
         if not str(current_dir_path).startswith(str(root_path)):
-            # Should never happen with topdown=True, but belt-and-suspenders
             dirnames[:] = []
             continue
 
@@ -214,6 +288,10 @@ def safe_walk(root: str | Path, exclude_patterns: list[str] | None = None) -> It
         for filename in filenames:
             file_path = (current_dir_path / filename).resolve()
             if str(file_path).startswith(str(root_path)):
+                if count >= max_files:
+                    logger.warning(f"Reached max_files limit ({max_files}) in {root}")
+                    return
+                count += 1
                 yield file_path
 
 

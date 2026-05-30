@@ -149,15 +149,87 @@ mcp-go/
 └── tests/              # Go, Python, and shell tests
 ```
 
-## Adding a New Tool
+## Tool Management
 
-1. Create `tools/my_tool/main.py` implementing the JSON stdin/stdout protocol.
-2. Register the tool in `configs/config.yaml`.
-3. Restart the service:
+Tools are defined in `configs/config.yaml` under the `tools:` key. Each tool entry specifies the command, arguments, timeout, and input schema.
+
+### Toolkits
+
+Toolkit files under `configs/toolkits/` are curated lists of tools for specific use cases. They serve as reference when customizing your deployment.
+
+| Toolkit | File | Purpose |
+|---------|------|---------|
+| `default` | `configs/toolkits/default.yaml` | General productivity (PDF reports, data analysis, KB, web) |
+| `development` | `configs/toolkits/development.yaml` | Software development (code scan, test runner, git, docs) |
+
+To use a toolkit as your active toolset, replace the `tools:` section in `configs/config.yaml` with the tools from the toolkit file, then restart:
 
 ```bash
 docker compose restart mcp-server
 ```
+
+### Adding a Tool
+
+1. Create `tools/my_tool/main.py` implementing the JSON stdin/stdout protocol.
+2. Register the tool in `configs/config.yaml` under the `tools:` section.
+3. Restart:
+
+```bash
+docker compose restart mcp-server
+```
+
+### Manifest Discovery (Dev Tools)
+
+Tools can also be auto-discovered from a directory of tool manifests. Each subdirectory must contain a `tool.yaml` manifest:
+
+```
+tools/dev-tools/
+├── test_runner/
+│   ├── main.py
+│   └── tool.yaml
+└── git_inspector/
+    ├── main.py
+    └── tool.yaml
+```
+
+Enable discovery by setting environment variables:
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `TOOLS_DISCOVERY` | `manifest` | Enables manifest-based discovery |
+| `TOOLS_DIR` | `/app/tools/dev-tools` | Directory to scan for tool manifests |
+| `TOOLS_APPEND` | `true` | Keep config tools and append discovered ones (`false` = discovered override config) |
+
+Example for development toolkit:
+
+```yaml
+# docker-compose.yml
+environment:
+  TOOLS_DISCOVERY: "manifest"
+  TOOLS_DIR: "/app/tools/dev-tools"
+  TOOLS_APPEND: "true"
+```
+
+### Building a Custom Toolkit
+
+1. List the tool names you want in a new YAML file under `configs/toolkits/`:
+
+```yaml
+# configs/toolkits/my_stack.yaml
+name: "my_stack"
+description: "My custom tool stack"
+tools:
+  - echo
+  - datetime
+  - test_runner
+  - changelog_generator
+```
+
+2. Copy the relevant tool entries from `configs/toolkits/` into `configs/config.yaml`.
+
+### Disabling a Tool
+
+Remove its entry from the `tools:` section in `configs/config.yaml` and restart.
 
 ## License
 

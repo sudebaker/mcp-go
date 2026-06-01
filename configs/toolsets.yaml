@@ -21,7 +21,6 @@ toolsets:
   development:
     description: "Herramientas para desarrollo de software"
     tools:
-      - echo
       - datetime
       - kb_ingest
       - kb_search

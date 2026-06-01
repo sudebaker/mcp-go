@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-TOOL_DIR = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "dev-tools" / "changelog_generator"
+TOOL_DIR = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "changelog_generator"
 
 
 def test_smoke_invalid_path():

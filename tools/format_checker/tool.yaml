@@ -1,0 +1,24 @@
+name: "format_checker"
+description: "Verifica estilo y calidad de codigo con ruff (Python) y gofmt (Go). Detecta violaciones sin modificar archivos. 100% offline, 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "180s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+      description: "Ruta absoluta al proyecto a revisar"
+      default: "/app"
+    mode:
+      type: string
+      enum: ["lint", "format", "both"]
+      default: "both"
+      description: "lint = reglas de calidad, format = solo estilo, both = ambos"
+    severity:
+      type: string
+      enum: ["error", "warning", "info", "all"]
+      default: "all"
+      description: "Minima severidad a reportar"
+  required:
+    - project_root

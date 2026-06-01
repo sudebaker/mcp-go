@@ -93,8 +93,8 @@ print(json.dumps(response, default=str))
 ## Key Patterns
 
 ### Adding a new tool
-1. Create `tools/new_tool/main.py` with JSON stdin/stdout protocol
-2. Add to `configs/config.yaml` with name, command, args, timeout, input_schema
+1. Create `tools/new_tool/main.py` with JSON stdin/stdout protocol and `tool.yaml` manifest
+2. Add the tool name to the appropriate toolset in `configs/toolsets.yaml`
 3. Restart container: `docker-compose restart mcp-server`
 
 ### User Isolation (KB tools)

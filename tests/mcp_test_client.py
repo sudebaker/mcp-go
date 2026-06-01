@@ -56,9 +56,7 @@ INTERNET_DEPENDENT_TOOLS = {
 }
 
 # Tools that need Docker access
-DOCKER_DEPENDENT_TOOLS = {
-    "server_status",
-}
+DOCKER_DEPENDENT_TOOLS = set()
 
 # Tools that need RustFS
 RUSTFS_DEPENDENT_TOOLS = {
@@ -438,15 +436,6 @@ def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
             arguments={"url": "https://example.com", "extract_type": "text", "wait_ms": 1000},
             category="web",
             dependencies=["browserless"],
-        ),
-
-        # System tools
-        ToolTest(
-            name="server_status",
-            description="Get server status",
-            arguments={},
-            category="system",
-            dependencies=["docker"],
         ),
 
         # Media tools

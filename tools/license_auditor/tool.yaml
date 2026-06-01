@@ -1,0 +1,27 @@
+name: "license_auditor"
+description: "Audita licencias de dependencias (Python, Go, npm). Detecta licencias bloqueadas como GPL, AGPL, SSPL. 100% offline, 0 tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "120s"
+input_schema:
+  type: object
+  properties:
+    project_root:
+      type: string
+      description: "Ruta absoluta al proyecto a escanear"
+      default: "/app"
+    ecosystems:
+      type: array
+      items:
+        type: string
+        enum: ["auto", "python", "go", "npm"]
+      default: ["auto"]
+      description: "Ecosistemas a escanear. 'auto' detecta segun archivos presentes"
+    blocklist:
+      type: array
+      items:
+        type: string
+      default: ["GPL", "AGPL", "SSPL", "Proprietary", "BUSL"]
+      description: "Lista de licencias bloqueadas (substring match)"
+  required:
+    - project_root

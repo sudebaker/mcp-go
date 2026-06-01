@@ -26,7 +26,10 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"gopkg.in/yaml.v3"
 )
@@ -314,14 +317,14 @@ func Load(path string) (*Config, error) {
 		cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
 	}
 
-	// Apply toolkit filtering if MCP_TOOLKIT is set.
-	// The server can be started with different tool subsets without code changes.
-	if toolkitName := os.Getenv("MCP_TOOLKIT"); toolkitName != "" {
-		tk, err := loadToolkit(toolkitName)
+	// Apply toolset filtering if MCP_TOOLSET is set.
+	// Supports comma-separated toolset names (e.g. "default,development") for union.
+	if toolsetEnv := os.Getenv("MCP_TOOLSET"); toolsetEnv != "" {
+		tc, err := loadToolsets("configs/toolsets.yaml")
 		if err != nil {
-			return nil, fmt.Errorf("toolkit loading failed for %q: %w", toolkitName, err)
+			return nil, fmt.Errorf("loading toolsets config: %w", err)
 		}
-		cfg.Tools = filterToolsByToolkit(cfg.Tools, tk)
+		cfg.Tools = filterToolsByToolset(cfg.Tools, toolsetEnv, tc.Toolsets)
 	}
 
 	return &cfg, nil
@@ -394,4 +397,71 @@ func (c *Config) GetToolByName(name string) *ToolConfig {
 		}
 	}
 	return nil
+}
+
+// ToolsetsConfig defines the top-level structure for configs/toolsets.yaml.
+type ToolsetsConfig struct {
+	Toolsets map[string]ToolsetDefinition `yaml:"toolsets"`
+}
+
+// ToolsetDefinition defines a named toolset with its tool list.
+type ToolsetDefinition struct {
+	Description string   `yaml:"description"`
+	Tools       []string `yaml:"tools"`
+}
+
+// loadToolsets reads the toolsets definition YAML file.
+func loadToolsets(path string) (*ToolsetsConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read toolsets file: %w", err)
+	}
+	var tc ToolsetsConfig
+	if err := yaml.Unmarshal(data, &tc); err != nil {
+		return nil, fmt.Errorf("parse toolsets YAML: %w", err)
+	}
+	return &tc, nil
+}
+
+// filterToolsByToolset keeps only tools whose names appear in the active toolset(s).
+// The toolsetEnv can be a single name or a comma-separated list (union).
+// Tools not found among the discovered tools are logged as warnings and skipped.
+func filterToolsByToolset(tools []ToolConfig, toolsetEnv string, toolsets map[string]ToolsetDefinition) []ToolConfig {
+	if toolsetEnv == "" {
+		return tools
+	}
+
+	names := strings.Split(toolsetEnv, ",")
+	allowed := make(map[string]bool)
+
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		ts, ok := toolsets[name]
+		if !ok {
+			log.Warn().Str("toolset", name).Msg("Toolset not found in configs/toolsets.yaml")
+			continue
+		}
+		for _, t := range ts.Tools {
+			allowed[t] = true
+		}
+	}
+
+	discoveredNames := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		discoveredNames[t.Name] = true
+	}
+	for toolName := range allowed {
+		if !discoveredNames[toolName] {
+			log.Warn().Str("tool", toolName).Msg("Tool in active toolset not found; skipping")
+		}
+	}
+
+	result := make([]ToolConfig, 0, len(tools))
+	for _, t := range tools {
+		if allowed[t.Name] {
+			result = append(result, t)
+		}
+	}
+
+	return result
 }

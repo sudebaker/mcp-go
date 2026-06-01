@@ -94,7 +94,7 @@ internal/
 | `web_scraper` | HTML extraction | BeautifulSoup |
 | `browser_scraper` | JS rendering | browserless/chromium |
 | `transcribe` | Speech-to-text | faster-whisper |
-| `server_status` | System monitoring | /proc filesystem |
+
 | `rss_reader` | Feed parsing | feedparser |
 | `weather` | AEMET integration | XML parsing |
 | `canvas_diagram` | Diagram generation | Obsidian Canvas JSON |
@@ -136,7 +136,7 @@ flowchart TB
         WebTools["web_search<br/>web_scraper<br/>browser_scraper"]
         DataTools["data_analysis<br/>batch_summarize"]
         DocTools["pdf_reports<br/>document_classifier"]
-        SystemTools["server_status<br/>transcribe"]
+        SystemTools["transcribe"]
     end
 
     subgraph External["External Services"]

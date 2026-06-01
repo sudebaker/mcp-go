@@ -49,19 +49,11 @@ services:
       # Python settings
       PYTHONUNBUFFERED: "1"
 
-      # Toolkit filtering (none, default, development)
-      MCP_TOOLKIT: ${MCP_TOOLKIT:-default}
+      # Toolset filtering (none, default, development)
+      MCP_TOOLSET: ${MCP_TOOLSET:-default}
     volumes:
-      # Configuration (read-only)
-      - ../configs:/app/configs:ro
-      # Tools (read-only, for development hot-reload)
-      - ../tools:/app/tools:ro
-      # Templates (read-only)
-      - ../templates:/app/templates:ro
       # Data directory (read-write)
       - mcp-data:/data
-      # Docker socket for server_status tool
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,7 +65,6 @@ services:
         condition: service_healthy
     networks:
       - mcp-network
-      - docker_default
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -130,7 +121,6 @@ services:
       - whisper-models:/root/.cache/huggingface
     networks:
       - mcp-network
-      - docker_default
     restart: unless-stopped
     deploy:
       resources:
@@ -208,7 +198,6 @@ services:
       - rustfs-data:/data
     networks:
       - mcp-network
-      - docker_default
     restart: unless-stopped
     command: server /data --console-address ":9001"
     healthcheck:
@@ -229,9 +218,6 @@ services:
 networks:
   mcp-network:
     driver: bridge
-  docker_default:
-    driver: bridge
-    external: true
 
 volumes:
   whisper-models:

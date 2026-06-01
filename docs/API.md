@@ -338,13 +338,7 @@ Extracts content from web pages. Returns page text, links, images, or raw HTML.
 
 ---
 
-### server_status
 
-Returns server health report: CPU, RAM, disk usage, uptime, and running Docker containers.
-
-*No parameters required.*
-
----
 
 ### transcribe
 

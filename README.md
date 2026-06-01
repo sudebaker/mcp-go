@@ -65,7 +65,7 @@ Defined in `configs/config.yaml`:
 | Analysis & Generation | `analyze_data`, `analyze_image`, `generate_report` |
 | Knowledge Base | `kb_ingest`, `kb_search` |
 | Document Processing | `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier` |
-| Utilities | `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `server_status`, `transcribe`, `searxng_search`, `browser_scraper` |
+| Utilities | `weather_forecast`, `web_scraper`, `rss_reader`, `canvas_diagram`, `rustfs_storage`, `transcribe`, `searxng_search`, `browser_scraper` |
 
 ## Vision Tool: Provider Override
 
@@ -125,41 +125,44 @@ The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
-## Toolkit Filtering
+## Toolset Filtering
 
-The server can expose different subsets of tools without code changes, using **toolkits** defined in `configs/toolkits/`.
+The server can expose different subsets of tools without code changes, using **toolsets** defined in `configs/toolsets.yaml`.
 
-### Available Toolkits
+### Available Toolsets
 
-| Toolkit | Tools | Use Case |
+| Toolset | Tools | Use Case |
 |---------|-------|----------|
 | `default` | 14 general-purpose tools (echo, weather, kb, web, etc.) | End users, general assistance |
-| `development` | 10 dev tools + core (opencode_context, codebase_scan, git_inspector, etc.) | Developers, coding agents |
+| `development` | 10 dev tools + core (opencode_context, codebase_scan, etc.) | Developers, coding agents |
 | *(unset)* | All available tools | Backward compatible, everything exposed |
 
 ### Usage
 
-Set the `MCP_TOOLKIT` environment variable in your `.env` file:
+Set the `MCP_TOOLSET` environment variable in your `.env` file:
 
 ```bash
 # .env — only expose general-purpose tools
-MCP_TOOLKIT=default
+MCP_TOOLSET=default
 
 # .env — expose development tools
-MCP_TOOLKIT=development
+MCP_TOOLSET=development
+
+# .env — combine multiple toolsets
+MCP_TOOLSET=default,development
 
 # .env — omit to expose all tools (default behavior)
-# (no MCP_TOOLKIT set)
+# (no MCP_TOOLSET set)
 ```
 
 Or with Docker directly:
 
 ```bash
-# General toolkit
-docker run -e MCP_TOOLKIT=default -p 8080:8080 sudebaker/mcp-go
+# General toolset
+docker run -e MCP_TOOLSET=default -p 8080:8080 sudebaker/mcp-go
 
-# Development toolkit
-docker run -e MCP_TOOLKIT=development -p 8080:8080 sudebaker/mcp-go
+# Development toolset
+docker run -e MCP_TOOLSET=development -p 8080:8080 sudebaker/mcp-go
 
 # All tools (backward compatible)
 docker run -p 8080:8080 sudebaker/mcp-go
@@ -167,31 +170,30 @@ docker run -p 8080:8080 sudebaker/mcp-go
 
 ### How It Works
 
-1. The server loads all available tools from `configs/config.yaml` and auto-discovery.
-2. If `MCP_TOOLKIT` is set, it loads the corresponding toolkit YAML from `configs/toolkits/<name>.yaml`.
-3. The server filters the loaded tools to only those listed in the toolkit.
+1. The server discovers all available tools from `tools/<name>/tool.yaml`.
+2. If `MCP_TOOLSET` is set, it loads `configs/toolsets.yaml` and filters tools by the active toolset(s).
+3. Multiple toolsets can be combined: `MCP_TOOLSET=default,development` produces the union of both.
 4. The client (Hermes, Claude Desktop, etc.) receives only the filtered tools via `tools/list`.
 
-The client **does not need to know** about toolkits. The filtering happens entirely on the server side.
+The client **does not need to know** about toolsets. The filtering happens entirely on the server side.
 
-### Adding Custom Toolkits
+### Adding Custom Toolsets
 
-Create a new file in `configs/toolkits/`:
+Add a new entry to `configs/toolsets.yaml`:
 
 ```yaml
-# configs/toolkits/my-team.yaml
-name: "my-team"
-description: "Custom toolkit for my team"
-tools:
-  - echo
-  - datetime
-  - kb_search
+  my-team:
+    description: "Custom toolset for my team"
+    tools:
+      - echo
+      - datetime
+      - kb_search
 ```
 
 Then run with:
 
 ```bash
-MCP_TOOLKIT=my-team docker compose up -d mcp-server
+MCP_TOOLSET=my-team docker compose up -d mcp-server
 ```
 
 ## Documentation
@@ -222,20 +224,16 @@ mcp-go/
 
 Tools are defined in `configs/config.yaml` under the `tools:` key. Each tool entry specifies the command, arguments, timeout, and input schema.
 
-### Toolkits
+### Toolsets
 
-Toolkit files under `configs/toolkits/` are curated lists of tools for specific use cases. They serve as reference when customizing your deployment.
+Toolset definitions in `configs/toolsets.yaml` are curated lists of tools for specific use cases. They serve as reference when customizing your deployment.
 
-| Toolkit | File | Purpose |
-|---------|------|---------|
-| `default` | `configs/toolkits/default.yaml` | General productivity (PDF reports, data analysis, KB, web) |
-| `development` | `configs/toolkits/development.yaml` | Software development (code scan, test runner, git, docs) |
+| Toolset | Tools | Purpose |
+|---------|-------|---------|
+| `default` | 15 tools | General productivity (echo, datetime, PDF reports, data analysis, KB, web) |
+| `development` | 11 tools | Software development (core + codebase_scan, docs) |
 
-To use a toolkit as your active toolset, replace the `tools:` section in `configs/config.yaml` with the tools from the toolkit file, then restart:
-
-```bash
-docker compose restart mcp-server
-```
+To use a toolset, set the `MCP_TOOLSET` environment variable (see [Toolset Filtering](#toolset-filtering)).
 
 ### Adding a Tool
 
@@ -247,58 +245,47 @@ docker compose restart mcp-server
 docker compose restart mcp-server
 ```
 
-### Manifest Discovery (Dev Tools)
+### Manifest Discovery
 
-Tools can also be auto-discovered from a directory of tool manifests. Each subdirectory must contain a `tool.yaml` manifest:
+Tools are auto-discovered from `tools/<tool-name>/`. Each subdirectory must contain a `tool.yaml` manifest:
 
 ```
-tools/dev-tools/
-├── test_runner/
+tools/
+├── echo/
 │   ├── main.py
 │   └── tool.yaml
-└── git_inspector/
-    ├── main.py
-    └── tool.yaml
+├── codebase_scan/
+│   ├── main.py
+│   └── tool.yaml
+└── ...
 ```
 
-Enable discovery by setting environment variables:
+Discovery is enabled by default via `TOOLS_DISCOVERY=manifest`.
 
 | Variable | Value | Description |
 |----------|-------|-------------|
 | `TOOLS_DISCOVERY` | `manifest` | Enables manifest-based discovery |
-| `TOOLS_DIR` | `/app/tools/dev-tools` | Directory to scan for tool manifests |
+| `TOOLS_DIR` | `/app/tools` | Directory to scan for tool manifests |
 | `TOOLS_APPEND` | `true` | Keep config tools and append discovered ones (`false` = discovered override config) |
 
-Example for development toolkit:
+### Adding a Custom Toolset
+
+Add a new entry to `configs/toolsets.yaml`:
 
 ```yaml
-# docker-compose.yml
-environment:
-  TOOLS_DISCOVERY: "manifest"
-  TOOLS_DIR: "/app/tools/dev-tools"
-  TOOLS_APPEND: "true"
+  my_stack:
+    description: "My custom tool stack"
+    tools:
+      - echo
+      - datetime
+      - kb_search
 ```
 
-### Building a Custom Toolkit
-
-1. List the tool names you want in a new YAML file under `configs/toolkits/`:
-
-```yaml
-# configs/toolkits/my_stack.yaml
-name: "my_stack"
-description: "My custom tool stack"
-tools:
-  - echo
-  - datetime
-  - test_runner
-  - changelog_generator
-```
-
-2. Copy the relevant tool entries from `configs/toolkits/` into `configs/config.yaml`.
+Then run with `MCP_TOOLSET=my_stack`. Multiple toolsets can be combined: `MCP_TOOLSET=my_stack,default`.
 
 ### Disabling a Tool
 
-Remove its entry from the `tools:` section in `configs/config.yaml` and restart.
+Remove its entry from `tools/` or exclude it from the active toolset in `configs/toolsets.yaml`.
 
 ## License
 

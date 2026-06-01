@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for tools/dev-tools/opencode_context/main.py
+Tests for tools/opencode_context/main.py
 """
 
 import json
@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-OPENCODE_CONTEXT = os.path.join(os.path.dirname(__file__), "../../../tools/dev-tools/opencode_context/main.py")
+OPENCODE_CONTEXT = os.path.join(os.path.dirname(__file__), "../../../tools/opencode_context/main.py")
 
 
 def _build_project(td: Path) -> None:

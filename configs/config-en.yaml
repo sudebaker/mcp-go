@@ -379,17 +379,6 @@ tools:
       required:
         - url
 
-  # Server Status
-  - name: "server_status"
-    description: "Server status: CPU, RAM, disk, uptime and Docker containers."
-    command: "python3"
-    args: ["/app/tools/server_status/main.py"]
-    timeout: "30s"
-    input_schema:
-      type: object
-      properties: {}
-      required: []
-
   # Transcribe
   - name: "transcribe"
     description: "Transcribe audio on-premise with Whisper AI. Supports mp3, wav, ogg, m4a, webm, flac."
@@ -827,5 +816,155 @@ prompts:
           5. Synthesize findings into a coherent summary
           6. Suggest related topics or follow-up searches
 
+  - name: "debug_issue"
+    description: "Systematic debugging and root-cause analysis for software issues"
+    arguments:
+      - name: "error_description"
+        description: "Clear description of the unexpected behavior or error"
+        required: true
+      - name: "repro_steps"
+        description: "Steps to reproduce the issue"
+        required: false
+      - name: "stack_trace"
+        description: "Full stack trace if available"
+        required: false
+      - name: "logs"
+        description: "Relevant log excerpts in plain text (last 50-100 lines)"
+        required: false
+      - name: "code_snippet"
+        description: "The specific code block or function related to the issue"
+        required: false
+      - name: "file_path"
+        description: "Path to the file where the issue occurs"
+        required: false
+      - name: "environment"
+        description: "Runtime environment (OS, versions, dependencies, deployment model)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a senior debugging engineer with expertise in distributed systems, concurrency, and performance analysis. You follow a systematic approach to root-cause identification."
+      - role: "user"
+        content: |
+          I need help debugging this issue:
+
+          Description: {{error_description}}
+
+          Reproduction steps: {{repro_steps}}
+
+          Stack trace: {{stack_trace}}
+
+          Logs: {{logs}}
+
+          Code snippet: {{code_snippet}}
+
+          File path: {{file_path}}
+
+          Environment: {{environment}}
+
+          Please follow this systematic debugging process:
+          1. Identify the exact failure point (file, line, function)
+          2. Classify the error type (null pointer, race condition, logic error, config issue, resource exhaustion, etc.)
+          3. Propose 2-3 root-cause hypotheses ranked by probability
+          4. For each hypothesis, indicate supporting and contradicting evidence
+          5. Recommend a concrete fix with code example or configuration change
+          6. If information is insufficient, state exactly what additional data is needed
+          7. Suggest preventive measures to avoid recurrence
+
+          Keep the response concise — under 2000 words unless the issue requires deeper analysis.
+
+  - name: "design_review"
+    description: "Review architecture and design decisions for scalability, coupling, and maintainability"
+    arguments:
+      - name: "change_description"
+        description: "Description of the architectural change or design proposal"
+        required: true
+      - name: "affected_components"
+        description: "List of components, services, or modules affected"
+        required: true
+      - name: "diagram_or_schema"
+        description: "URL or description of architecture diagram"
+        required: false
+      - name: "constraints"
+        description: "Known constraints (performance, security, budget, compliance)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a principal software architect with expertise in system design, scalability patterns, and technical debt management."
+      - role: "user"
+        content: |
+          Please review this architectural proposal:
+
+          Change: {{change_description}}
+
+          Affected components: {{affected_components}}
+
+          Diagram/schema: {{diagram_or_schema}}
+
+          Constraints: {{constraints}}
+
+          Evaluate the following dimensions:
+          1. Coupling and cohesion — are modules well-separated?
+          2. SOLID principles — which are respected or violated?
+          3. Scalability — what happens with 10x traffic or data volume?
+          4. Single points of failure — are there critical components without redundancy?
+          5. Security by design — threat model, data classification, least privilege, secure by default
+          6. Data flow and consistency — are transactions and state boundaries clear?
+          7. Operational complexity — deployment, monitoring, rollback, observability
+          8. Cost and trade-offs — infra cost, maintenance burden, technical debt introduced
+          9. Alternative approaches considered and why they were rejected
+          10. Verdict: LGTM, Changes Requested, or Blocked with justification
+
+  - name: "security_audit_prompt"
+    description: "Audit code and configuration for security vulnerabilities and compliance gaps"
+    arguments:
+      - name: "code_or_config"
+        description: "Code snippet, configuration file, or diff to audit"
+        required: true
+      - name: "threat_model"
+        description: "Known threat model or attack surface (e.g., STRIDE categories)"
+        required: false
+      - name: "compliance_requirements"
+        description: "Compliance frameworks to check (GDPR, SOC2, PCI-DSS, etc.)"
+        required: false
+      - name: "context"
+        description: "Additional context (framework, language, deployment model)"
+        required: false
+    messages:
+      - role: "system"
+        content: "You are a senior application security engineer with deep expertise in OWASP, secure coding practices, and compliance frameworks."
+      - role: "user"
+        content: |
+          Please perform a security audit on the following code or configuration:
+
+          ```
+          {{code_or_config}}
+          ```
+
+          Threat model: {{threat_model}}
+
+          Compliance requirements: {{compliance_requirements}}
+
+          Context: {{context}}
+
+          Conduct a thorough security review covering:
+          1. OWASP Top 10 — check each applicable category
+          2. Input validation — are all external inputs validated and sanitized?
+          3. Authentication and authorization — proper identity and access controls?
+          4. Secrets management — no hardcoded credentials or tokens?
+          5. Injection risks — SQL, NoSQL, command, LDAP, XPath, template injection
+          6. Data exposure — sensitive data in logs, errors, or responses?
+          7. Cryptography — proper use of encryption, hashing, randomness
+          8. Session management — secure cookies, tokens, TTLs
+          9. Rate limiting and anti-abuse protections
+          10. SSRF (Server-Side Request Forgery) — are outbound HTTP requests restricted to safe targets?
+          11. IDOR (Insecure Direct Object References) — can users access resources belonging to other users?
+          12. SCA (Software Composition Analysis) — do dependencies have known CVEs?
+          13. Compliance gaps for the specified frameworks
+
+          For each finding, provide:
+          - Severity: Critical / High / Medium / Low / Info
+          - CWE or OWASP reference
+          - Impact description
+          - Concrete remediation with code example
 
 

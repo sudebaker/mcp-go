@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for tools/dev-tools/codebase_scan/main.py
+Tests for tools/codebase_scan/main.py
 """
 
 import json
@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CODEBASE_SCAN = os.path.join(os.path.dirname(__file__), "../../../tools/dev-tools/codebase_scan/main.py")
+CODEBASE_SCAN = os.path.join(os.path.dirname(__file__), "../../../tools/codebase_scan/main.py")
 
 
 def _run(stdin_data: dict) -> dict:

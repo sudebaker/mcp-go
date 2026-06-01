@@ -1,0 +1,38 @@
+toolsets:
+  default:
+    description: "Herramientas generales para usuarios finales"
+    tools:
+      - echo
+      - datetime
+      - generate_report
+      - analyze_data
+      - analyze_image
+      - kb_ingest
+      - kb_search
+      - weather_forecast
+      - web_scraper
+      - searxng_search
+      - browser_scraper
+      - rss_reader
+      - canvas_diagram
+      - rustfs_storage
+      - transcribe
+
+  development:
+    description: "Herramientas para desarrollo de software"
+    tools:
+      - echo
+      - datetime
+      - kb_ingest
+      - kb_search
+      - generate_report
+      - opencode_context
+      - codebase_scan
+      - dependency_audit
+      - security_lint
+      - doc_generator
+      - refactor_suggester
+      - changelog_generator
+      - api_diff
+      - license_auditor
+      - format_checker

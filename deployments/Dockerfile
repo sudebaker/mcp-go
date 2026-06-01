@@ -93,6 +93,9 @@ accelerate>=0.26.0
 pypdf>=3.0.0
 python-docx>=1.0.0
 
+# Format checker
+ruff>=0.6.0
+
 # Config Auditor & PDF Reports
 pyyaml>=6.0
 markdown>=3.5
@@ -132,6 +135,9 @@ COPY --from=go-builder /build/mcp-server /app/mcp-server
 COPY configs/ /app/configs/
 COPY tools/ /app/tools/
 COPY templates/ /app/templates/
+
+# Copy .git history for git-based tools (changelog_generator)
+COPY .git/ /app/.git/
 
 # Create data directory
 RUN mkdir -p /data/reports

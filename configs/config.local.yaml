@@ -10,6 +10,7 @@ execution:
   default_timeout: "60s"
   working_dir: "."
   environment:
+    BASE_URL: "${BASE_URL:-http://localhost:8080}"
     LLM_API_URL: "${LLM_API_URL:-http://localhost:11434}"
     LLM_MODEL: "${LLM_MODEL:-llama3}"
     DATABASE_URL: "${DATABASE_URL:-postgresql://mcp:mcp@localhost:5432/knowledge}"

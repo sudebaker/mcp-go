@@ -305,6 +305,70 @@ def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
             arguments={"description": "User -> Login -> Dashboard", "layout": "horizontal"},
             category="system",
         ),
+        ToolTest(
+            name="api_diff",
+            description="Compare two OpenAPI specs (same file = no diff)",
+            arguments={
+                "old_spec": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/swagger.json",
+                "new_spec": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/swagger.json",
+            },
+            category="system",
+            dependencies=["internet"],
+        ),
+        ToolTest(
+            name="changelog_generator",
+            description="Generate changelog from git repo",
+            arguments={"repo_path": ".", "format": "markdown", "max_commits": 5},
+            category="system",
+        ),
+        ToolTest(
+            name="codebase_scan",
+            description="Scan codebase for dead code",
+            arguments={"project_root": ".", "scan_type": "dead_code"},
+            category="system",
+        ),
+        ToolTest(
+            name="dependency_audit",
+            description="Audit Python and Go dependencies",
+            arguments={"project_root": "."},
+            category="system",
+        ),
+        ToolTest(
+            name="doc_generator",
+            description="Generate documentation from docstrings",
+            arguments={"project_root": "."},
+            category="system",
+        ),
+        ToolTest(
+            name="format_checker",
+            description="Check code formatting with ruff and gofmt",
+            arguments={"project_root": "."},
+            category="system",
+        ),
+        ToolTest(
+            name="license_auditor",
+            description="Audit dependency licenses",
+            arguments={"project_root": "."},
+            category="system",
+        ),
+        ToolTest(
+            name="opencode_context",
+            description="Generate optimized file list for OpenCode",
+            arguments={"project_root": ".", "task_description": "debug codebase_scan tool"},
+            category="system",
+        ),
+        ToolTest(
+            name="refactor_suggester",
+            description="Detect code duplication and complexity",
+            arguments={"project_root": "."},
+            category="system",
+        ),
+        ToolTest(
+            name="security_lint",
+            description="Detect insecure patterns in codebase",
+            arguments={"project_root": "."},
+            category="system",
+        ),
 
         # Knowledge Base tools
         ToolTest(

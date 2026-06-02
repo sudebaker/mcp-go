@@ -2,21 +2,25 @@ toolsets:
   default:
     description: "Herramientas generales para usuarios finales"
     tools:
-      - echo
-      - datetime
-      - generate_report
       - analyze_data
       - analyze_image
+      - batch_summarize
+      - browser_scraper
+      - canvas_diagram
+      - config_auditor
+      - datetime
+      - document_classifier
+      - echo
+      - generate_report
       - kb_ingest
       - kb_search
+      - regulation_diff
+      - rss_reader
+      - rustfs_storage
+      - searxng_search
+      - transcribe
       - weather_forecast
       - web_scraper
-      - searxng_search
-      - browser_scraper
-      - rss_reader
-      - canvas_diagram
-      - rustfs_storage
-      - transcribe
 
   development:
     description: "Herramientas para desarrollo de software"

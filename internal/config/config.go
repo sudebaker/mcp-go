@@ -25,6 +25,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -317,14 +318,21 @@ func Load(path string) (*Config, error) {
 		cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
 	}
 
-	// Apply toolset filtering if MCP_TOOLSET is set.
-	// Supports comma-separated toolset names (e.g. "default,development") for union.
-	if toolsetEnv := os.Getenv("MCP_TOOLSET"); toolsetEnv != "" {
-		tc, err := loadToolsets("configs/toolsets.yaml")
+	// Determine active toolset: MCP_TOOLSET env var, or "default" if not set.
+	toolsetEnv := os.Getenv("MCP_TOOLSET")
+	if toolsetEnv == "" {
+		toolsetEnv = "default"
+	}
+
+	toolsetsPath := filepath.Join(filepath.Dir(path), "toolsets.yaml")
+	if _, err := os.Stat(toolsetsPath); err == nil {
+		tc, err := loadToolsets(toolsetsPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading toolsets config: %w", err)
 		}
 		cfg.Tools = filterToolsByToolset(cfg.Tools, toolsetEnv, tc.Toolsets)
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat toolsets file: %w", err)
 	}
 
 	return &cfg, nil

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -107,17 +108,17 @@ def _pip_installed() -> list[dict[str, str]]:
 
 
 def _pip_license(pkg_name: str) -> str | None:
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "show", pkg_name],
-        capture_output=True, text=True, timeout=10,
-    )
-    if result.returncode != 0:
+    """Fetch license for a Python package using importlib.metadata (fast, no subprocess)."""
+    try:
+        meta = importlib.metadata.metadata(pkg_name)
+        license_ = meta.get("License", "")
+        if not license_:
+            license_ = meta.get("License-Expression", "")
+        return license_ if license_ and license_ != "UNKNOWN" else None
+    except importlib.metadata.PackageNotFoundError:
         return None
-    for line in result.stdout.splitlines():
-        if line.lower().startswith("license:"):
-            val = line.split(":", 1)[1].strip()
-            return val if val and val != "UNKNOWN" else None
-    return None
+    except Exception:
+        return None
 
 
 def scan_python() -> list[dict[str, Any]]:

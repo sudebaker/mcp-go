@@ -121,8 +121,16 @@ def main():
     try:
         request = read_request()
         args = request.get("arguments", {})
-        old_spec = args["old_spec"]
-        new_spec = args["new_spec"]
+        old_spec = args.get("old_spec", "")
+        new_spec = args.get("new_spec", "")
+
+        if not old_spec or not new_spec:
+            write_response({
+                "success": False,
+                "error": {"code": "INVALID_INPUT", "message": "Both old_spec and new_spec are required and must be non-empty strings (file path or URL)."},
+                "request_id": request.get("request_id", ""),
+            })
+            return
 
         old_data = load_spec(old_spec)
         new_data = load_spec(new_spec)

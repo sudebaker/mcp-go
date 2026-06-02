@@ -610,7 +610,7 @@ class TestRunner:
             content = tool_result.get("content", [])
 
             for item in content:
-                if item.get("type") == "error":
+                if item.get("type") == "error" or item.get("isError", False):
                     return TestResult(
                         name=test.name,
                         status=TestStatus.FAILED,

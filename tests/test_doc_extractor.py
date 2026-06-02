@@ -6,13 +6,12 @@ These tests should FAIL initially (red phase in TDD).
 After implementing doc_extractor.py, these tests should pass.
 """
 
-import json
 import os
 import sys
 import unittest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
@@ -242,7 +241,6 @@ class TestIntegration(unittest.TestCase):
 
     def test_create_test_files(self):
         """Create sample files for testing if they don't exist."""
-        
         pdf_path = TEST_DATA_DIR / "sample.pdf"
         docx_path = TEST_DATA_DIR / "sample.docx"
         txt_path = TEST_DATA_DIR / "sample.txt"

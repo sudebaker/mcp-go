@@ -117,7 +117,7 @@ def find_duplicated_blocks(root: Path, min_lines: int = 5) -> list[dict[str, Any
 
         for i in range(len(lines) - min_lines + 1):
             block = lines[i:i + min_lines]
-            normalized = "\n".join(l.split("#")[0].strip() for l in block)
+            normalized = "\n".join(line.split("#")[0].strip() for line in block)
             if len(normalized.strip()) < 20:
                 continue
             h = hashlib.md5(normalized.encode()).hexdigest()

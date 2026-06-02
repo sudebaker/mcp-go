@@ -7,14 +7,10 @@ Extracts content from web pages using HTTP requests and BeautifulSoup.
 import json
 import sys
 import os
-import re
-import io
 import time
 import random
-import traceback
 from urllib.parse import urlparse, urljoin
 from typing import Any, Optional
-from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -293,7 +289,7 @@ def main() -> None:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
-        context = request.get("context", {})
+        request.get("context", {})
 
         url = arguments.get("url", "")[:2000]
         selector = arguments.get("selector", "")[:500]

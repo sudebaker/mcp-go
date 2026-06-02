@@ -14,7 +14,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
 import tempfile
@@ -77,6 +76,7 @@ class TestStatus(Enum):
 @dataclass
 class ToolTest:
     """Definition for testing a single tool."""
+
     name: str
     description: str
     arguments: dict[str, Any]
@@ -89,6 +89,7 @@ class ToolTest:
 @dataclass
 class TestResult:
     """Result of a single tool test."""
+
     name: str
     status: TestStatus
     duration: float
@@ -278,7 +279,6 @@ logging:
 
 def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
     """Get all tool test definitions."""
-
     excel_path = data_gen.create_excel()
     image_path = data_gen.create_image()
     config_path = data_gen.create_config_yaml()
@@ -729,7 +729,7 @@ class TestRunner:
         print(f"  Server: {self.client.base_url}")
         print(f"  User ID: {self.client.user_id}")
         if self.skip_external:
-            print(f"  Mode: Skip external dependencies")
+            print("  Mode: Skip external dependencies")
         print(f"{'='*60}\n")
 
         for i, test in enumerate(tests, 1):
@@ -759,7 +759,7 @@ def print_report(results: list[TestResult]):
     total = len(results)
 
     print(f"\n{'='*60}")
-    print(f"  TEST REPORT")
+    print("  TEST REPORT")
     print(f"{'='*60}")
 
     categories = {}
@@ -768,7 +768,7 @@ def print_report(results: list[TestResult]):
             categories[r.category] = {"passed": 0, "failed": 0, "skipped": 0}
         categories[r.category][r.status.value] += 1
 
-    print(f"\n  Results by category:")
+    print("\n  Results by category:")
     for cat, counts in sorted(categories.items()):
         cat_total = counts["passed"] + counts["failed"] + counts["skipped"]
         print(f"    {cat:12s}: {counts['passed']:2d} passed, {counts['failed']:2d} failed, {counts['skipped']:2d} skipped ({cat_total} total)")
@@ -781,14 +781,14 @@ def print_report(results: list[TestResult]):
     print(f"{'='*60}\n")
 
     if failed > 0:
-        print(f"  Failed tests:")
+        print("  Failed tests:")
         for r in results:
             if r.status == TestStatus.FAILED:
                 print(f"    - {r.name}: {r.error}")
         print()
 
     if skipped > 0:
-        print(f"  Skipped tests:")
+        print("  Skipped tests:")
         for r in results:
             if r.status == TestStatus.SKIPPED:
                 print(f"    - {r.name}: {r.message}")
@@ -820,9 +820,9 @@ def main():
     print(f"Checking MCP server health at {args.server}...")
     if not client.health_check():
         print(f"\033[31m✗ MCP server is not healthy or not accessible at {args.server}\033[0m")
-        print(f"  Make sure the server is running: docker-compose up -d")
+        print("  Make sure the server is running: docker-compose up -d")
         sys.exit(1)
-    print(f"\033[32m✓ MCP server is healthy\033[0m\n")
+    print("\033[32m✓ MCP server is healthy\033[0m\n")
 
     print("Initializing MCP session...")
     try:

@@ -9,7 +9,6 @@ This test:
 4. Verifies the response contains expected chunks and result
 """
 
-import json
 import os
 import sys
 import time
@@ -108,7 +107,7 @@ print(result)
     executor = DockerSandboxedExecutor(config)
     executor.set_chunk_callback(on_chunk)
 
-    print(f"\n⚙️  Executing code in sandbox...")
+    print("\n⚙️  Executing code in sandbox...")
     start_time = time.time()
 
     result = executor.execute_with_volume(

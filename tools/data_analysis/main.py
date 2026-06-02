@@ -29,7 +29,6 @@ from common.safe_file_ops import SafeFileOperations
 from common.sandbox import execute_in_sandbox, SandboxConfig
 from common.llm_cache import call_llm_with_cache
 from common.validators import validate_read_path, is_internal_url
-from common.retry import call_llm_with_retry
 
 
 logger = get_logger(__name__, "data_analysis")
@@ -241,6 +240,7 @@ def validate_request_input(
 
     Returns:
         (is_valid, error_message, normalized_output_format) tuple
+
     """
     # Normalize output format (map 'png' to 'image')
     if output_format and output_format.lower() == "png":
@@ -309,6 +309,7 @@ def download_file_from_url(file_url: str, filename: str) -> BytesIO:
 
     Raises:
         Exception: If download fails
+
     """
     # Check if this is a rustfs/S3 URL - use direct S3 client
     if is_rustfs_url(file_url):
@@ -358,6 +359,7 @@ def load_data_from_buffer(buffer: BytesIO, filename: str) -> "pd.DataFrame":
 
     Raises:
         ValueError: If file format is unsupported
+
     """
     if not PANDAS_AVAILABLE:
         raise ImportError("pandas is not installed")
@@ -402,6 +404,7 @@ def load_data_from_base64(content: str, filename: str) -> "pd.DataFrame":
 
     Raises:
         ValueError: If content is invalid base64, file format is unsupported, or size exceeds limit
+
     """
     if not PANDAS_AVAILABLE:
         raise ImportError("pandas is not installed")
@@ -443,6 +446,7 @@ def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
         FileNotFoundError: If file doesn't exist
         ValueError: If file format is unsupported or file is too large
         PermissionError: If file access is denied
+
     """
     if not PANDAS_AVAILABLE:
         raise ImportError("pandas is not installed")

@@ -110,6 +110,7 @@ def validate_collection_name(collection: str) -> tuple[bool, Optional[str]]:
 
     Returns:
         (is_valid, error_message) tuple
+
     """
     if not collection or not isinstance(collection, str):
         return False, "collection must be a non-empty string"
@@ -135,6 +136,7 @@ def validate_query(query: str) -> tuple[bool, Optional[str]]:
 
     Returns:
         (is_valid, error_message) tuple
+
     """
     if not query or not isinstance(query, str):
         return False, "query must be a non-empty string"
@@ -155,6 +157,7 @@ def validate_top_k(top_k: Any) -> tuple[bool, Optional[str], int]:
 
     Returns:
         (is_valid, error_message, sanitized_value) tuple
+
     """
     try:
         top_k_int = int(top_k)
@@ -175,6 +178,7 @@ def validate_ingest_request(
 
     Returns:
         (is_valid, error_message) tuple
+
     """
     # Content must be provided
     if not content:
@@ -212,6 +216,7 @@ def validate_search_request(
 
     Returns:
         (is_valid, error_message, sanitized_top_k) tuple
+
     """
     # Validate query
     is_valid, error = validate_query(query)
@@ -317,6 +322,7 @@ def chunk_text(
 
     Raises:
         ValueError: If text would produce too many chunks
+
     """
     if len(text) <= chunk_size:
         return [text]
@@ -372,6 +378,7 @@ def compute_doc_hash(content: str) -> str:
 
     Returns:
         SHA256 hash string
+
     """
     return hashlib.sha256(content.encode()).hexdigest()
 
@@ -402,6 +409,7 @@ def ingest_document(
 
     Raises:
         ValueError: If validation fails or limits exceeded
+
     """
     # Generate source identifier from content hash (include user_id for uniqueness)
     source_identifier = f"memorized_{hashlib.sha256((content + user_id).encode()).hexdigest()[:16]}"

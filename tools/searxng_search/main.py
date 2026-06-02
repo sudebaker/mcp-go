@@ -13,7 +13,6 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.structured_logging import get_logger
-from common.validators import is_internal_url
 
 logger = get_logger(__name__, "searxng_search")
 

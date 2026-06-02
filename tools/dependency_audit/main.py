@@ -161,7 +161,8 @@ def _check_missing(declared: dict[str, str], actual: set[str]) -> list[dict[str,
 
 def _check_outdated(python_deps: dict[str, str], js_deps: dict[str, str]) -> list[dict[str, Any]]:
     """Best-effort version lookup via PyPI / npm registry (no auth).
-    Uses language context to route packages to the correct registry."""
+    Uses language context to route packages to the correct registry.
+    """
     outdated: list[dict[str, Any]] = []
     for name, spec in python_deps.items():
         if not spec:

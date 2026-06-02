@@ -4,12 +4,9 @@ Unit tests for security mitigations.
 Tests for SSRF, SSTI, and ReDoS vulnerabilities fixes.
 """
 
-import json
 import os
 import sys
 import unittest
-from io import BytesIO
-from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
@@ -166,7 +163,6 @@ class TestSSTIMitigation(unittest.TestCase):
         env = get_template_env()
         
         # Check if it's a SandboxedEnvironment or Environment with autoescape
-        from jinja2 import Environment
         self.assertIsNotNone(env)
         self.assertTrue(
             hasattr(env, 'autoescape') or hasattr(env, 'shared'),

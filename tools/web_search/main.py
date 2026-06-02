@@ -7,7 +7,6 @@ Uses Brave Search API (primary) or SearXNG (fallback) to perform real web search
 import json
 import sys
 import os
-import traceback
 from typing import Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

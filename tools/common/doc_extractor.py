@@ -13,28 +13,25 @@ Provides functions to extract text from various document formats:
 - INI/ENV files (.ini, .env)
 """
 
-import os
 import io
 import json
 import yaml
-import configparser
 import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 from urllib.parse import urlparse
 
+import importlib.util
+
+_langchain_available = importlib.util.find_spec("langchain_community") is not None
+
 try:
-    from langchain_community.document_loaders import PyPDFLoader
+    from pypdf import PdfReader
 
     PYPDF_AVAILABLE = True
 except ImportError:
-    try:
-        from pypdf import PdfReader
-
-        PYPDF_AVAILABLE = True
-    except ImportError:
-        PYPDF_AVAILABLE = False
+    PYPDF_AVAILABLE = _langchain_available
+    if not _langchain_available:
         PdfReader = None
 
 try:
@@ -75,6 +72,7 @@ def validate_url_for_download(url: str) -> tuple[bool, str]:
         
     Returns:
         Tuple of (is_valid, reason_if_invalid)
+
     """
     try:
         parsed = urlparse(url)
@@ -154,6 +152,7 @@ def download_file(url: str) -> io.BytesIO:
         ImportError: If httpx is not available
         ValueError: If URL fails SSRF validation
         Exception: If download fails
+
     """
     if httpx is None:
         raise ImportError("httpx is not installed. Install with: pip install httpx")
@@ -187,6 +186,7 @@ def extract_text_from_pdf(buffer: io.BytesIO) -> ExtractionResult:
 
     Raises:
         ImportError: If pypdf is not available
+
     """
     if PdfReader is None:
         raise ImportError("pypdf is not installed. Install with: pip install pypdf")
@@ -233,6 +233,7 @@ def extract_text_from_docx(buffer: io.BytesIO) -> ExtractionResult:
 
     Raises:
         ImportError: If python-docx is not available
+
     """
     if Document is None:
         raise ImportError(
@@ -301,6 +302,7 @@ def extract_text_from_buffer(
 
     Returns:
         ExtractionResult with extracted text
+
     """
     suffix = Path(filename).suffix.lower()
 
@@ -355,6 +357,7 @@ def extract_inline_file(data_base64: str, filename: str) -> ExtractionResult:
 
     Returns:
         ExtractionResult with extracted text
+
     """
     import base64
     try:
@@ -379,6 +382,7 @@ def download_and_extract(url: str, filename: str) -> ExtractionResult:
 
     Raises:
         Exception: If download or extraction fails
+
     """
     buffer = download_file(url)
     return extract_text_from_buffer(buffer, filename)
@@ -394,6 +398,7 @@ def extract_text_preview(text: str, max_chars: int = 2000) -> str:
 
     Returns:
         Preview text (truncated if necessary)
+
     """
     if len(text) <= max_chars:
         return text

@@ -16,9 +16,9 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(script_dir, ".."))
 sys.path.insert(0, script_dir)
 
-from knowledge_base.main import handle_ingest, handle_search, ensure_schema, EMBEDDING_MODEL
-from knowledge_base.db_pool import init_pool, get_connection, close_pool
-from knowledge_base.model_cache import get_embedding_model
+from knowledge_base.main import handle_ingest, handle_search, ensure_schema, EMBEDDING_MODEL  # noqa: E402
+from knowledge_base.db_pool import init_pool, get_connection, close_pool  # noqa: E402
+from knowledge_base.model_cache import get_embedding_model  # noqa: E402
 
 logger = None
 

@@ -8,14 +8,12 @@ Container is always removed after execution (auto_remove=True).
 
 import json
 import os
-import sys
 import time
-import uuid
 from typing import Any, Callable, Dict, Optional
 
 try:
     import docker
-    from docker.errors import APIError, ContainerError
+    from docker.errors import APIError
 
     DOCKER_AVAILABLE = True
 except ImportError:
@@ -144,7 +142,6 @@ class DockerSandboxedExecutor:
         env_vars: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
         start_time = time.time()
-        container = None
 
         if not DOCKER_AVAILABLE:
             return SandboxResult(
@@ -164,7 +161,6 @@ class DockerSandboxedExecutor:
             input_csv = ""
             if input_data is not None:
                 import pandas as pd
-                from io import StringIO
 
                 df = (
                     pd.DataFrame(input_data)
@@ -304,7 +300,7 @@ class DockerSandboxedExecutor:
                             files[filename] = base64.b64encode(f.read()).decode()
                 try:
                     os.rmdir(output_dir)
-                except:
+                except Exception:
                     pass
 
             execution_time = int((time.time() - start_time) * 1000)
@@ -517,13 +513,6 @@ if __name__ == "__main__":
             "__bases__",
             "__subclasses__",
             "__mro__",
-        }
-
-        ALLOWED_ATTRIBUTE_ACCESS = {
-            "delattr",
-            "setattr",
-            "getattr",
-            "hasattr",
         }
 
         DANGEROUS_ATTRS = {

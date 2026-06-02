@@ -36,6 +36,7 @@ def get_current_datetime(format_type: str, tz: str) -> str:
 
     Returns:
         Formatted datetime string
+
     """
     if tz == "utc":
         now = datetime.now(timezone.utc)

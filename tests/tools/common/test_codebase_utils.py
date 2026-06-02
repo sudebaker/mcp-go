@@ -3,7 +3,6 @@
 Unit tests for tools/common/codebase_utils.py
 """
 
-import ast
 import json
 import os
 import sys

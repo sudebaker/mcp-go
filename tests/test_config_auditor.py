@@ -10,8 +10,6 @@ import json
 import os
 import sys
 import unittest
-from io import BytesIO
-from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))

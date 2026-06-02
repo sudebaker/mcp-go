@@ -27,7 +27,6 @@ from common.validators import (
     validate_read_path,
     validate_write_path,
     list_files,
-    PathValidationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +82,7 @@ class SafeFileOperations:
         Raises:
             PathValidationError: If path is invalid
             PermissionError: If file is not readable
+
         """
         if "w" in mode or "a" in mode or "+" in mode:
             raise ValueError(f"Write mode not allowed in open_read: {mode}")
@@ -113,6 +113,7 @@ class SafeFileOperations:
         Raises:
             PathValidationError: If path is invalid
             PermissionError: If directory is not writable
+
         """
         if mode not in ("w", "wb", "a", "ab", "x", "xb"):
             raise ValueError(f"Invalid write mode: {mode}")
@@ -174,6 +175,7 @@ class SafeFileOperations:
 
         Returns:
             List of Path objects
+
         """
         return list_files(subdir, self.readonly_dir, pattern)
 

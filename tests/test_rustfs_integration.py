@@ -9,12 +9,10 @@ Tests cover:
 - Bug 4: Base64 content support in __files__
 """
 
-import json
 import os
 import sys
 import unittest
-from io import BytesIO
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
@@ -296,8 +294,6 @@ class TestSecurityFix2_Base64SizeLimit(unittest.TestCase):
 
     def test_base64_size_validation_logic(self):
         """Base64 content size should be validated against MAX_FILE_SIZE_MB."""
-        import base64
-        
         MAX_FILE_SIZE_MB = 100
         MAX_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
         

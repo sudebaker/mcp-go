@@ -50,6 +50,7 @@ def calculate_diff(old_text: str, new_text: str) -> tuple[str, int, int, int]:
 
     Returns:
         tuple of (diff_text, sections_changed, additions, deletions)
+
     """
     old_lines = old_text.splitlines()
     new_lines = new_text.splitlines()
@@ -92,7 +93,6 @@ def analyze_changes(
     output_format: str,
 ) -> str:
     """Generate LLM analysis of the changes."""
-
     truncated_old = old_text[:5000] if old_text else ""
     truncated_new = new_text[:5000] if new_text else ""
 

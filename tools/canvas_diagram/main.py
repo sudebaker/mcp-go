@@ -14,7 +14,6 @@ import traceback
 import io
 from datetime import timedelta
 from typing import Any, Optional
-from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -547,7 +546,7 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
 
             for i, node_id in enumerate(node_list):
                 node = nodes_dict[node_id]
-                angle = start_angle + i * angle_step
+                start_angle + i * angle_step
 
                 node_width = node_widths.get(node_id, 180)
                 node_height = node_heights.get(node_id, 80)
@@ -696,7 +695,7 @@ def main() -> None:
             text = node.get("text", "")[:50]
             preview_lines.append(f"- {text}")
 
-        response_text = f"**Canvas Diagram Generated**\n\n"
+        response_text = "**Canvas Diagram Generated**\n\n"
         response_text += f"**Layout:** {layout}\n"
         response_text += f"**Nodes:** {len(canvas_json.get('nodes', []))}\n"
         response_text += f"**Connections:** {len(canvas_json.get('edges', []))}\n\n"

@@ -23,7 +23,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.structured_logging import get_logger
 from common.codebase_utils import (
     ScanCache,
-    discover_project,
     safe_walk,
     parse_imports,
     read_config_files,
@@ -248,10 +247,10 @@ def _scan_hotspots_cli(root: Path, days: int) -> list[dict[str, Any]]:
             text=True,
             timeout=30,
         )
-        lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         counts: dict[str, int] = defaultdict(int)
-        for l in lines:
-            counts[l] += 1
+        for line in lines:
+            counts[line] += 1
         sorted_files = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return [
             {"file": f, "commits": c, "period_days": days, "source": "git_cli"}

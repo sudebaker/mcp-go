@@ -32,6 +32,7 @@ def read_request() -> dict[str, Any]:
             - request_id: Unique request identifier
             - arguments: Tool-specific arguments (text, debug)
             - context: Execution context (LLM_API_URL, LLM_MODEL, etc.)
+
     """
     input_data = sys.stdin.read()
     return json.loads(input_data)
@@ -49,6 +50,7 @@ def write_response(response: dict[str, Any]) -> None:
             - request_id: Matching the request
             - content: List of ContentItem objects
             - structured_content: Optional additional data
+
     """
     print(json.dumps(response))
 

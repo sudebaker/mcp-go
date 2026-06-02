@@ -90,7 +90,7 @@ class LLMCache:
                 self._redis.ping()
             except redis.ConnectionError as e:
                 logger.error(f"Failed to connect to Redis: {e}")
-                raise CacheError(f"Redis connection failed") from e
+                raise CacheError("Redis connection failed") from e
         return self._redis
 
     def _generate_key(self, prompt: str, model: str) -> str:

@@ -96,7 +96,7 @@ def load_feeds() -> list[dict[str, str]]:
         with open(FEEDS_FILE, "r") as f:
             data = json.load(f)
             return data.get("feeds", [])
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -209,7 +209,7 @@ def main() -> None:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
-        context = request.get("context", {})
+        request.get("context", {})
 
         limit = arguments.get("limit", DEFAULT_LIMIT)
         selected_feeds = arguments.get("feeds", None)

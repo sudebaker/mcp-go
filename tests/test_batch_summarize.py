@@ -6,12 +6,10 @@ These tests should FAIL initially (red phase in TDD).
 After implementing batch_summarize/main.py, these tests should pass.
 """
 
-import json
 import os
 import sys
 import unittest
-from io import BytesIO
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
@@ -80,8 +78,6 @@ class TestBatchSummarizeMocked(unittest.TestCase):
     @patch('common.llm_cache.call_llm_with_cache')
     def test_summarize_single_file(self, mock_llm, mock_extract):
         """Test summarizing a single file."""
-        from tools.batch_summarize import main as batch_main
-        
         mock_extract.return_value.text = "This is test document content."
         mock_extract.return_value.page_count = 1
         mock_extract.return_value.file_type = "txt"

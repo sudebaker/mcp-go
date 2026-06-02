@@ -8,7 +8,6 @@ Compatible with OpenAI Whisper API format.
 import json
 import sys
 import os
-import traceback
 import tempfile
 import base64
 from pathlib import Path

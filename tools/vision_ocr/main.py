@@ -19,8 +19,7 @@ from urllib.parse import urlparse
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.validators import validate_file_path, PathValidationError, validate_url_ssrf
-from common.doc_extractor import download_file
+from common.validators import validate_file_path, validate_url_ssrf
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
 
@@ -198,6 +197,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
 
     Returns:
         Tuple of (api_url, model_name)
+
     """
     # Default model
     resolved_model = model or context.get("llm_model", os.environ.get("LLM_MODEL", "llava"))

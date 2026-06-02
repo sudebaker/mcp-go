@@ -94,7 +94,7 @@ def format_date(fecha_iso: str) -> str:
         meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                  'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
         return f"{dias[dt.weekday()]} {dt.day} de {meses[dt.month-1]}"
-    except:
+    except Exception:
         return fecha_iso
 
 

@@ -3,7 +3,6 @@
 Tests for multi-provider LLM support in tools/common/retry.py
 """
 
-import json
 import os
 import sys
 import requests
@@ -15,7 +14,6 @@ import pytest
 from common.retry import (
     detect_api_format_and_key,
     call_llm_with_retry,
-    TransientError,
     PermanentError,
 )
 

@@ -35,6 +35,7 @@ def validate_pool_params(minconn: int, maxconn: int) -> tuple[bool, str, int, in
 
     Returns:
         (is_valid, error_message, sanitized_minconn, sanitized_maxconn) tuple
+
     """
     try:
         minconn_int = int(minconn)
@@ -78,6 +79,7 @@ def init_pool(
     Raises:
         ValueError: If pool parameters are invalid
         RuntimeError: If pool initialization fails
+
     """
     global _connection_pool
     if _connection_pool is not None:
@@ -131,6 +133,7 @@ def get_connection():
 
     Raises:
         RuntimeError: If pool is not initialized
+
     """
     if _connection_pool is None:
         raise RuntimeError("Connection pool not initialized. Call init_pool() first.")

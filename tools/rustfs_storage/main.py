@@ -13,7 +13,6 @@ import base64
 import traceback
 from datetime import timedelta
 from typing import Any, Optional
-from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -113,6 +112,7 @@ def validate_rustfs_public_url() -> tuple[bool, Optional[str]]:
 
     Returns:
         Tuple of (is_valid, error_message)
+
     """
     public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
     if not public_url:
@@ -132,6 +132,7 @@ def rewrite_to_public_url(presigned_url: str) -> str:
 
     Returns:
         URL with internal endpoint replaced by public endpoint
+
     """
     endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
     public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
@@ -429,7 +430,7 @@ def main() -> None:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
-        context = request.get("context", {})
+        request.get("context", {})
 
         operation = arguments.get("operation", "").lower()
         bucket = arguments.get("bucket", DEFAULT_BUCKET)
@@ -601,14 +602,14 @@ def main() -> None:
         response_text = f"**RustFS Operation: {operation}**\n\n"
 
         if operation == "upload":
-            response_text += f"✅ File uploaded successfully\n"
+            response_text += "✅ File uploaded successfully\n"
             response_text += f"**Bucket:** {result.get('bucket')}\n"
             response_text += f"**Key:** {result.get('key')}\n"
             response_text += f"**Size:** {result.get('size')} bytes\n"
             response_text += f"**Download URL:** {result.get('presigned_url', 'N/A')[:80]}...\n"
 
         elif operation == "download":
-            response_text += f"✅ Download URL generated\n"
+            response_text += "✅ Download URL generated\n"
             response_text += f"**Bucket:** {result.get('bucket')}\n"
             response_text += f"**Key:** {result.get('key')}\n"
             response_text += f"**Expires in:** {result.get('expires')} seconds\n"
@@ -627,7 +628,7 @@ def main() -> None:
                     response_text += f"\n... and {len(files) - 10} more\n"
 
         elif operation == "delete":
-            response_text += f"✅ File deleted successfully\n"
+            response_text += "✅ File deleted successfully\n"
             response_text += f"**Bucket:** {result.get('bucket')}\n"
             response_text += f"**Key:** {result.get('key')}\n"
 

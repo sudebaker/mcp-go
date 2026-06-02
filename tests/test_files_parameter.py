@@ -10,7 +10,6 @@ import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 import time
-import socket
 
 # Sample CSV data for testing
 SAMPLE_CSV = """name,age,salary,department

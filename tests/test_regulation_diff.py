@@ -6,11 +6,9 @@ These tests should FAIL initially (red phase in TDD).
 After implementing regulation_diff/main.py, these tests should pass.
 """
 
-import json
 import os
 import sys
 import unittest
-from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))

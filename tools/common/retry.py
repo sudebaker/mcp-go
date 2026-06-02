@@ -1,6 +1,5 @@
 import logging
 import os
-import random
 from typing import List, Optional, Tuple
 from tenacity import (
     retry,
@@ -28,6 +27,7 @@ def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
 
     Returns:
         Tuple of (api_format: 'ollama' | 'openai', api_key: str | None)
+
     """
     url_lower = llm_api_url.lower()
 
@@ -84,6 +84,7 @@ def is_transient_error(exception: Exception) -> bool:
 
     Returns:
         bool: True si el error es transitorio y debe reintentarse
+
     """
     if isinstance(exception, requests.Timeout):
         return True
@@ -154,6 +155,7 @@ def call_llm_with_retry(
         TransientError: Error transitorio (reintentable)
         PermanentError: Error permanente (no reintentable)
         requests.RequestException: Otros errores de requests
+
     """
     if not llm_api_url:
         raise ValueError("llm_api_url is required")

@@ -201,6 +201,7 @@ def timed_operation(
 
     Returns:
         Decorated function.
+
     """
 
     def decorator(func: Callable) -> Callable:
@@ -277,6 +278,7 @@ class RequestLogger:
             status_code: Response status code
             duration_seconds: Request duration in seconds
             error: Error message if request failed
+
         """
         data = {
             "http_method": method,
@@ -306,5 +308,6 @@ def get_logger(name: str, tool_name: Optional[str] = None) -> StructuredLogger:
 
     Returns:
         StructuredLogger instance
+
     """
     return StructuredLogger(name, tool_name=tool_name)

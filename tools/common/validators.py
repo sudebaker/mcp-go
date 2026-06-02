@@ -189,6 +189,7 @@ def validate_file_path(file_path: str, allowed_dir: str = "/data") -> Path:
         PathValidationError: On path traversal or invalid directory.
         FileNotFoundError: If the file does not exist.
         PermissionError: If the file is not readable.
+
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -229,6 +230,7 @@ def validate_output_path(
     Raises:
         PathValidationError: On path traversal or invalid directory.
         PermissionError: If write permissions are missing.
+
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -268,6 +270,7 @@ def sanitize_filename(filename: str, max_length: int = 255) -> str:
 
     Raises:
         ValueError: If the filename is empty after sanitization.
+
     """
     sanitized = re.sub(r"[^\w\s.-]", "", filename)
     sanitized = sanitized.replace("..", "").strip()
@@ -297,6 +300,7 @@ def validate_read_path(file_path: str, readonly_dir: str = "/data/input") -> Pat
         PathValidationError: On path traversal or invalid directory.
         FileNotFoundError: If the file does not exist.
         PermissionError: If the file is not readable.
+
     """
     try:
         allowed = Path(readonly_dir).resolve(strict=True)
@@ -339,6 +343,7 @@ def list_files(
 
     Raises:
         PathValidationError: On path traversal.
+
     """
     base = Path(base_dir).resolve(strict=True)
     search = (base / subdir).resolve()
@@ -371,6 +376,7 @@ def validate_write_path(
         PathValidationError: On path traversal or invalid directory.
         PermissionError: If write permissions are missing.
         ValueError: If the existing file exceeds the maximum size.
+
     """
     try:
         allowed = Path(writable_dir).resolve(strict=True)
@@ -422,6 +428,7 @@ def validate_url_ssrf(url: str) -> tuple[bool, Optional[str]]:
 
     Returns:
         (is_valid, error_message) tuple
+
     """
     try:
         from urllib.parse import urlparse
@@ -466,7 +473,6 @@ def validate_url_ssrf(url: str) -> tuple[bool, Optional[str]]:
     try:
         # Check if hostname is already an IP address
         addr = ipaddress.ip_address(hostname)
-        addr_version = addr.version
         is_ip = True
     except ValueError:
         is_ip = False

@@ -197,7 +197,6 @@ services:
       - rustfs-data:/data
     networks:
       - mcp-network
-      - docker_default
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:9000/minio/health/live | grep -qE '^(200|403)$'"]

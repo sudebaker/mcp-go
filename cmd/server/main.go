@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/executor"
+	"github.com/sudebaker/mcp-go/internal/health"
 	"github.com/sudebaker/mcp-go/internal/prompts"
 	"github.com/sudebaker/mcp-go/internal/session"
 	"github.com/sudebaker/mcp-go/internal/tracing"
@@ -60,6 +61,11 @@ func main() {
 	if err := config.Validate(cfg); err != nil {
 		log.Fatal().Err(err).Msg("Configuration validation failed")
 	}
+
+	// Build health checker with dependency detection
+	deps := health.BuildDependencies(cfg)
+	healthChecker := health.NewChecker(cfg, nil, nil, deps)
+	log.Info().Int("dependencies", len(deps)).Msg("Health checker initialized")
 
 	log.Info().
 		Str("server_name", cfg.Server.Name).
@@ -133,7 +139,7 @@ func main() {
 	log.Info().Msg("Server started with static configuration")
 
 	// Create SSE server
-	sseServer := transport.NewSSEServer(mcpServer, transport.SSEConfig{
+	sseServer := transport.NewMCPServer(mcpServer, transport.MCPConfig{
 		Host:              cfg.Server.Host,
 		Port:              cfg.Server.Port,
 		BaseURL:           cfg.Server.BaseURL,
@@ -147,6 +153,7 @@ func main() {
 		Tracer:            tracer,
 		Upload:            cfg.Upload,
 		FilesDir:          filepath.Join(cfg.Execution.WorkingDir, cfg.Execution.ReportsDir),
+		HealthChecker:     healthChecker,
 	})
 
 	// Setup graceful shutdown

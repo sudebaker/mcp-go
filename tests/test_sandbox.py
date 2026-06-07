@@ -7,7 +7,7 @@ import json
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
 import pytest
 from unittest.mock import patch
@@ -27,7 +27,7 @@ class TestSandboxConfig:
         config = SandboxConfig()
         assert config.image == "mcp-python-sandbox:latest"
         assert config.timeout == 60
-        assert config.memory == "256m"
+        assert config.memory == "512m"
         assert config.cpu == 0.5
         assert config.pids == 50
         assert config.network_disabled is True
@@ -35,10 +35,10 @@ class TestSandboxConfig:
     def test_custom_config(self):
         config = SandboxConfig(
             image="custom-image:latest",
-            timeout=120,
-            memory="512m",
-            cpu=1.0,
-            pids=100,
+            timeout_seconds=120,
+            memory_limit="512m",
+            cpu_limit=1.0,
+            pids_limit=100,
             network_disabled=False,
         )
         assert config.image == "custom-image:latest"
@@ -116,9 +116,43 @@ class TestExecuteInSandbox:
 
     @patch("common.sandbox.DOCKER_AVAILABLE", False)
     def test_fallback_with_error(self):
-        result = execute_in_sandbox("raise Exception('test error')")
+        """Code that raises an error in the restricted sandbox produces a failure result."""
+        result = execute_in_sandbox("1 / 0")
         assert result.success is False
-        assert "test error" in result.error
+        assert "ZeroDivisionError" in result.error
+
+    @patch("common.sandbox.DOCKER_AVAILABLE", False)
+    @patch.dict(os.environ, {"SANDBOX_REQUIRED": "true"})
+    def test_sandbox_required_blocks_execution(self):
+        """When SANDBOX_REQUIRED=true and Docker is unavailable, execution is denied."""
+        result = execute_in_sandbox("print('hello')")
+        assert result.success is False
+        assert "SANDBOX_REQUIRED" in result.error
+        assert "Code execution denied" in result.error
+
+    @patch("common.sandbox.DOCKER_AVAILABLE", False)
+    @patch.dict(os.environ, {"SANDBOX_REQUIRED": "false"})
+    def test_sandbox_not_required_allows_fallback(self):
+        """When SANDBOX_REQUIRED=false (or unset) and Docker is unavailable, fallback to restricted exec."""
+        result = execute_in_sandbox("print('hello')")
+        assert result.success is True
+        assert result.error is None
+
+    @patch("common.sandbox.DOCKER_AVAILABLE", False)
+    def test_sandbox_required_defaults_to_false(self):
+        """When SANDBOX_REQUIRED is not set at all, fallback works normally."""
+        if "SANDBOX_REQUIRED" in os.environ:
+            del os.environ["SANDBOX_REQUIRED"]
+        result = execute_in_sandbox("print('hello')")
+        assert result.success is True
+
+    @patch("common.sandbox.DOCKER_AVAILABLE", False)
+    @patch.dict(os.environ, {"SANDBOX_REQUIRED": "TRUE"})
+    def test_sandbox_required_case_insensitive(self):
+        """SANDBOX_REQUIRED value is case-insensitive ('TRUE' works)."""
+        result = execute_in_sandbox("print('hello')")
+        assert result.success is False
+        assert "SANDBOX_REQUIRED" in result.error
 
 
 class TestChunkProtocol:

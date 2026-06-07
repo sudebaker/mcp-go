@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
 	"runtime"
 	"time"
 
@@ -31,6 +34,14 @@ type CheckResult struct {
 	Timestamp time.Time     `json:"timestamp"`         // When the check ran
 }
 
+// DependencyStatus represents the reachability test result for an external dependency.
+type DependencyStatus struct {
+	Name    string `json:"name"`              // Dependency name (e.g., "searxng")
+	URL     string `json:"url"`               // Resolved URL tested
+	Reachable bool   `json:"reachable"`       // True if TCP connection succeeded
+	Error   string `json:"error,omitempty"`   // Connection error message if unreachable
+}
+
 // Checker performs health checks against external dependencies and system resources.
 // It validates connectivity to Redis, PostgreSQL, checks memory usage, and verifies
 // configuration integrity. Results are used for monitoring and alerting.
@@ -38,25 +49,115 @@ type Checker struct {
 	cfg         *config.Config // Server configuration for tool validation
 	redisClient *redis.Client  // Redis connection for ping check
 	db          *sql.DB        // PostgreSQL connection for ping check
+	// Dependencies tracks which external services to check based on configured tools.
+	Dependencies []DependencyCheck
+}
+
+// DependencyCheck describes an external service to verify.
+type DependencyCheck struct {
+	Name    string // Human-readable name (e.g., "searxng")
+	URL     string // TCP address (host:port) extracted from env/config
+	Tool    string // Associated tool name (e.g., "searxng_search"), for mapping
+	Critical bool  // If true, /health returns 503 when unreachable
 }
 
 // NewChecker creates a health Checker with dependencies for performing checks.
 //
 // Args:
 //
-//	cfg: Server configuration (used to verify tools are configured)
+//	cfg: Server configuration (used to verify tools are configured and detect tool deps)
 //	redisClient: Redis client (nil if Redis is not used)
 //	db: PostgreSQL database connection (nil if PostgreSQL is not used)
+//	deps: External dependency checks (nil if none). Use BuildDependencies() to auto-populate.
 //
 // Returns:
 //
 //	A Checker ready to run health checks
-func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Checker {
+func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB, deps []DependencyCheck) *Checker {
 	return &Checker{
-		cfg:         cfg,
-		redisClient: redisClient,
-		db:          db,
+		cfg:          cfg,
+		redisClient:  redisClient,
+		db:           db,
+		Dependencies: deps,
 	}
+}
+
+// BuildDependencies scans the server config and environment to build the list of
+// external dependencies that should be health-checked. It detects which tools are
+// configured and extracts their required service URLs from environment variables.
+//
+// This is the preferred way to populate Checker.Dependencies — it ensures the
+// health check only verifies services that are actually in use.
+func BuildDependencies(cfg *config.Config) []DependencyCheck {
+	if cfg == nil {
+		return nil
+	}
+
+	deps := []DependencyCheck{
+		{Name: "redis", Critical: false},     // covered by checkRedis via client
+		{Name: "postgres", Critical: false},  // covered by checkPostgres via client
+	}
+
+	for _, tool := range cfg.Tools {
+		switch tool.Name {
+		case "browser_scraper":
+			browserlessURL := osGetenv("BROWSERLESS_URL", "http://browserless:3000")
+			hostPort := extractHostPort(browserlessURL)
+			deps = append(deps, DependencyCheck{
+				Name:     "browserless",
+				URL:      hostPort,
+				Tool:     "browser_scraper",
+				Critical: false,
+			})
+		case "searxng_search":
+			searxngURL := osGetenv("SEARXNG_URL", "http://searxng:8080")
+			hostPort := extractHostPort(searxngURL)
+			deps = append(deps, DependencyCheck{
+				Name:     "searxng",
+				URL:      hostPort,
+				Tool:     "searxng_search",
+				Critical: false,
+			})
+		case "rustfs_storage":
+			rustfsEndpoint := osGetenv("RUSTFS_ENDPOINT", "rustfs:9000")
+			deps = append(deps, DependencyCheck{
+				Name:     "rustfs",
+				URL:      rustfsEndpoint,
+				Tool:     "rustfs_storage",
+				Critical: false,
+			})
+		case "analyze_image":
+			ollamaURL := osGetenv("LLM_API_URL", "http://localhost:11434")
+			hostPort := extractHostPort(ollamaURL)
+			deps = append(deps, DependencyCheck{
+				Name:     "ollama",
+				URL:      hostPort,
+				Tool:     "analyze_image",
+				Critical: false,
+			})
+		}
+	}
+
+	return deps
+}
+
+// extractHostPort parses a URL string (e.g., "http://browserless:3000") and returns
+// the host:port portion. Returns the original string if parsing fails.
+func extractHostPort(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return u.Host
+}
+
+// osGetenv reads an env var with a default fallback.
+func osGetenv(key, defaultVal string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	return val
 }
 
 // RunAllChecks executes all configured health checks and returns their results.
@@ -64,7 +165,8 @@ func NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Chec
 //
 // Returns:
 //
-//	Slice of CheckResult, one per check. Order: redis, postgres, config, memory
+//	Slice of CheckResult, one per check. Order: redis, postgres, config, memory,
+//	followed by dependency checks (browserless, searxng, rustfs, ollama).
 func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 	checks := []struct {
 		name string
@@ -74,6 +176,22 @@ func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 		{"postgres", c.checkPostgres},
 		{"config", c.checkConfig},
 		{"memory", c.checkMemory},
+	}
+
+	// Add dependency-specific checks
+	for _, dep := range c.Dependencies {
+		// Only add non-core deps (redis/postgres are already checked above via clients)
+		if dep.Name == "redis" || dep.Name == "postgres" {
+			continue
+		}
+		d := dep // capture loop variable
+		checks = append(checks, struct {
+			name string
+			fn   func(ctx context.Context) CheckResult
+		}{
+			name: d.Name,
+			fn:   func(ctx context.Context) CheckResult { return c.checkDependency(ctx, d) },
+		})
 	}
 
 	results := make([]CheckResult, 0, len(checks))
@@ -242,6 +360,82 @@ func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 
 	result.Duration = time.Since(start)
 	return result
+}
+
+// checkDependency verifies TCP connectivity to an external service.
+// Uses a 2-second dial timeout. If the URL is empty, returns StatusDegraded.
+//
+// Args:
+//
+//	dep: the dependency to check (includes Name, URL, Tool, Critical)
+//
+// Returns:
+//
+//	CheckResult with reachability status
+func (c *Checker) checkDependency(ctx context.Context, dep DependencyCheck) CheckResult {
+	start := time.Now()
+	result := CheckResult{
+		Name:      dep.Name,
+		Timestamp: start,
+	}
+
+	if dep.URL == "" {
+		result.Status = StatusDegraded
+		result.Message = fmt.Sprintf("%s URL not configured", dep.Name)
+		result.Duration = time.Since(start)
+		return result
+	}
+
+	// TCP dial with 2-second timeout
+	d := net.Dialer{Timeout: 2 * time.Second}
+	conn, err := d.DialContext(ctx, "tcp", dep.URL)
+	if err != nil {
+		result.Status = StatusUnhealthy
+		result.Message = fmt.Sprintf("%s unreachable at %s: %v", dep.Name, dep.URL, err)
+		log.Error().Err(err).Str("dependency", dep.Name).Str("url", dep.URL).Msg("Dependency health check failed")
+	} else {
+		conn.Close()
+		result.Status = StatusHealthy
+		result.Message = fmt.Sprintf("%s reachable at %s", dep.Name, dep.URL)
+	}
+
+	result.Duration = time.Since(start)
+	return result
+}
+
+// CheckDependencies returns a slice of DependencyStatus for all configured
+// external dependencies. Used by /health/detailed to report per-service state.
+func (c *Checker) CheckDependencies(ctx context.Context) []DependencyStatus {
+	statuses := make([]DependencyStatus, 0, len(c.Dependencies))
+	for _, dep := range c.Dependencies {
+		dStatus := DependencyStatus{
+			Name: dep.Name,
+			URL:  dep.URL,
+		}
+		// redis and postgres are always reported even if not configured
+		if dep.Name == "redis" || dep.Name == "postgres" {
+			// These are checked via the dedicated methods; report as present
+			dStatus.Reachable = true
+			statuses = append(statuses, dStatus)
+			continue
+		}
+		if dep.URL == "" {
+			dStatus.Reachable = false
+			dStatus.Error = "URL not configured"
+		} else {
+			d := net.Dialer{Timeout: 2 * time.Second}
+			conn, err := d.DialContext(ctx, "tcp", dep.URL)
+			if err != nil {
+				dStatus.Reachable = false
+				dStatus.Error = err.Error()
+			} else {
+				conn.Close()
+				dStatus.Reachable = true
+			}
+		}
+		statuses = append(statuses, dStatus)
+	}
+	return statuses
 }
 
 // GetHealthMetrics returns current Go runtime metrics for monitoring.

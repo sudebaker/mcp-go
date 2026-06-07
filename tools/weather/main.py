@@ -13,7 +13,7 @@ import logging
 import os
 import sys
 from datetime import date
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ except ImportError:
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
-WMO_CODES: dict[int, str] = {
+WMO_CODES: Dict[int, str] = {
     0:  "Despejado",
     1:  "Principalmente despejado",
     2:  "Parcialmente nuboso",
@@ -62,7 +62,7 @@ WMO_CODES: dict[int, str] = {
     99: "Tormenta con granizo intenso",
 }
 
-WMO_EMOJI: dict[int, str] = {
+WMO_EMOJI: Dict[int, str] = {
     0:  "☀️",
     1:  "🌤️",
     2:  "⛅",
@@ -111,7 +111,7 @@ def format_date_es(iso_date: str) -> str:
         return iso_date
 
 
-def geocode_city(city_name: str) -> tuple[float, float, str] | None:
+def geocode_city(city_name: str) -> Optional[Tuple[float, float, str]]:
     """Convert city name to coordinates using Open-Meteo Geocoding API."""
     params = {
         "name": city_name,
@@ -143,7 +143,7 @@ def geocode_city(city_name: str) -> tuple[float, float, str] | None:
         return None
 
 
-def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | None:
+def fetch_forecast(lat: float, lon: float, max_days: int) -> Optional[Dict[str, Any]]:
     """Fetch weather forecast from Open-Meteo API for given coordinates."""
     params = {
         "latitude": lat,
@@ -173,7 +173,7 @@ def fetch_forecast(lat: float, lon: float, max_days: int) -> dict[str, Any] | No
         return None
 
 
-def wind_direction_es(degrees: float | None) -> str:
+def wind_direction_es(degrees: Optional[float]) -> str:
     """Convert wind degrees to Spanish compass direction."""
     if degrees is None:
         return "N/D"
@@ -183,9 +183,9 @@ def wind_direction_es(degrees: float | None) -> str:
     return directions[idx]
 
 
-def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int) -> str:
+def build_forecast_text(locations: List[Tuple[str, float, float]], max_days: int) -> str:
     """Build comparative forecast markdown for all locations."""
-    all_data: list[tuple[str, dict]] = []
+    all_data: List[Tuple[str, Dict]] = []
     for name, lat, lon in locations:
         data = fetch_forecast(lat, lon, max_days)
         if data and "daily" in data:
@@ -235,13 +235,13 @@ def build_forecast_text(locations: list[tuple[str, float, float]], max_days: int
     return "\n".join(lines)
 
 
-def read_request() -> dict:
+def read_request() -> Dict[str, Any]:
     """Read JSON request from stdin (MCP protocol)."""
     raw = sys.stdin.read()
     return json.loads(raw)
 
 
-def write_response(data: dict) -> None:
+def write_response(data: Dict[str, Any]) -> None:
     """Write JSON response to stdout (MCP protocol)."""
     print(json.dumps(data, ensure_ascii=False), flush=True)
 
@@ -250,8 +250,9 @@ def write_response(data: dict) -> None:
 # MCP stdio protocol
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    request_id = ""
+    request_id: str = ""
     try:
         request = read_request()
         request_id = request.get("request_id", "")
@@ -286,8 +287,8 @@ def main() -> None:
             })
             return
 
-        locations: list[tuple[str, float, float]] = []
-        not_found: list[str] = []
+        locations: List[Tuple[str, float, float]] = []
+        not_found: List[str] = []
 
         for city in city_names:
             if not isinstance(city, str) or not city.strip():
@@ -331,13 +332,13 @@ def main() -> None:
     except json.JSONDecodeError:
         write_response({
             "success": False,
-            "request_id": "",
+            "request_id": request_id,
             "error": {"code": "INVALID_JSON", "message": "Failed to parse JSON request"},
         })
     except Exception as e:
         write_response({
             "success": False,
-            "request_id": request_id if "request_id" in locals() else "",
+            "request_id": request_id,
             "error": {"code": "EXECUTION_FAILED", "message": str(e)},
         })
 

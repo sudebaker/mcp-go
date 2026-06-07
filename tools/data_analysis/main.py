@@ -593,8 +593,27 @@ def execute_code_safely(
     """
     Execute code in restricted environment (fallback when no Docker).
 
+    SECURITY: Only allows execution when SANDBOX_REQUIRED is not set.
+    When SANDBOX_REQUIRED=true, returns an error immediately — unsafe exec()
+    on the host is not acceptable in production.
+
     Returns dict with keys: success, result, stdout, stderr
     """
+    # Guard: refuse to execute without sandbox when required
+    if os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true":
+        logger.error(
+            "Refusing unsafe exec() — SANDBOX_REQUIRED=true but Docker is unavailable"
+        )
+        return {
+            "success": False,
+            "result": None,
+            "stdout": "",
+            "stderr": (
+                "Code execution denied: SANDBOX_REQUIRED=true but Docker sandbox is "
+                "unavailable. Unsafe exec() on the host is blocked. "
+                "Install and start Docker, then try again."
+            ),
+        }
     SAFE_BUILTINS = {
         "abs": abs,
         "all": all,
@@ -995,9 +1014,45 @@ def main() -> None:
         emit_chunk("code_generated", {"code_length": len(code)})
 
         if use_sandbox:
+            # Early check: refuse to proceed if sandbox is required but Docker unavailable
+            sandbox_required = os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true"
+            if sandbox_required:
+                from common.sandbox import DOCKER_AVAILABLE
+                if not DOCKER_AVAILABLE:
+                    write_response({
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "SANDBOX_UNAVAILABLE",
+                            "message": (
+                                "Docker sandbox is required (SANDBOX_REQUIRED=true) but "
+                                "Docker is not available. Code execution denied for security. "
+                                "Install and start Docker, then try again."
+                            ),
+                        },
+                    })
+                    return
+
             emit_chunk("status", {"message": "Executing code in sandbox"})
             exec_result = execute_code_in_sandbox(code, df, request_id)
         else:
+            # Guard: unsafe exec() blocked when SANDBOX_REQUIRED=true
+            sandbox_required = os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true"
+            if sandbox_required:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {
+                        "code": "SANDBOX_UNAVAILABLE",
+                        "message": (
+                            "Docker sandbox is required (SANDBOX_REQUIRED=true) but "
+                            "sandbox mode is disabled (use_sandbox=false). Code execution denied. "
+                            "Set use_sandbox=true and ensure Docker is running."
+                        ),
+                    },
+                })
+                return
+
             emit_chunk(
                 "warning", {"message": "Using unsafe exec() - sandbox disabled"})
             exec_result = execute_code_safely(code, df, request_id)

@@ -18,10 +18,10 @@ Input Schema:
 
 import json
 import sys
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 
 
-def read_request() -> dict[str, Any]:
+def read_request() -> Dict[str, Any]:
     """Read JSON request from standard input.
 
     Parses the MCP protocol request containing request_id, arguments,
@@ -34,11 +34,13 @@ def read_request() -> dict[str, Any]:
             - context: Execution context (LLM_API_URL, LLM_MODEL, etc.)
 
     """
+    import typing
     input_data = sys.stdin.read()
-    return json.loads(input_data)
+    result = json.loads(input_data)
+    return typing.cast(Dict[str, Any], result)
 
 
-def write_response(response: dict[str, Any]) -> None:
+def write_response(response: Dict[str, Any]) -> None:
     """Write JSON response to standard output.
 
     Serializes the response dictionary as JSON and prints it.
@@ -62,10 +64,11 @@ def main() -> None:
     mode, and writes the response. Handles errors gracefully with
     proper error codes.
     """
+    request_id: str = ""
+    
     try:
         # Read request from STDIN
         request = read_request()
-
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
         context = request.get("context", {})
@@ -102,7 +105,7 @@ def main() -> None:
     except json.JSONDecodeError as e:
         write_response({
             "success": False,
-            "request_id": "",
+            "request_id": request_id,
             "error": {
                 "code": "INVALID_INPUT",
                 "message": f"Failed to parse JSON input: {str(e)}"
@@ -111,7 +114,7 @@ def main() -> None:
     except Exception as e:
         write_response({
             "success": False,
-            "request_id": request.get("request_id", "") if 'request' in dir() else "",
+            "request_id": request_id,
             "error": {
                 "code": "EXECUTION_FAILED",
                 "message": str(e)

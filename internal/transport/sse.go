@@ -53,6 +53,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 	"github.com/sudebaker/mcp-go/internal/config"
+	"github.com/sudebaker/mcp-go/internal/health"
 	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
@@ -115,6 +116,7 @@ type MCPServer struct {
 	allowedOrigins  []string                     // CORS allowed origins (empty = all)
 	uploadConfig    config.UploadConfig          // Upload endpoint configuration
 	filesDir        string                       // Directory for serving generated files via /files/
+	healthChecker   *health.Checker              // Health checker for dependency status
 	stopCh          chan struct{}
 	stopCleanupOnce sync.Once
 }
@@ -147,6 +149,8 @@ type MCPConfig struct {
 	Upload config.UploadConfig
 	// FilesDir is the absolute path to serve generated files from (e.g., /data/reports)
 	FilesDir string
+	// HealthChecker performs health checks against dependencies (nil = no-op)
+	HealthChecker *health.Checker
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -216,6 +220,7 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		allowedOrigins: cfg.AllowedOrigins,
 		uploadConfig:   cfg.Upload,
 		filesDir:       cfg.FilesDir,
+		healthChecker:  cfg.HealthChecker,
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -387,30 +392,55 @@ func (s *MCPServer) Handler() http.Handler {
 	return s.streamServer
 }
 
-// handleHealth returns basic server health status.
+// handleHealth returns basic server health status with dependency checks.
 //
-// This endpoint is intended for load balancers and orchestrators (Kubernetes,
-// Docker Compose health checks). It does not perform deep health checks.
+// This endpoint runs all health checks (redis, postgres, config, memory,
+// and configured external dependencies). If any critical dependency is
+// unreachable, returns HTTP 503 Service Unavailable.
 //
 // Response format:
 //
 //	{
-//	  "status": "healthy",
+//	  "status": "healthy|degraded|unhealthy",
 //	  "service": "mcp-orchestrator",
 //	  "version": "1.0.0",
 //	  "protocol": "mcp",
 //	  "transport": "streamable-http + sse",
+//	  "dependencies": {"redis": "healthy", ...},
 //	  "endpoints": {...}
 //	}
 func (s *MCPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+
+	status := "healthy"
+	httpStatus := http.StatusOK
+	deps := make(map[string]string)
+
+	if s.healthChecker != nil {
+		results := s.healthChecker.RunAllChecks(r.Context())
+		overall := s.healthChecker.GetOverallStatus(results)
+
+		for _, r := range results {
+			deps[r.Name] = string(r.Status)
+		}
+
+		if overall == health.StatusUnhealthy {
+			status = "unhealthy"
+			httpStatus = http.StatusServiceUnavailable
+		} else if overall == health.StatusDegraded {
+			status = "degraded"
+			// Degraded still returns OK but signals partial issues
+		}
+	}
+
+	w.WriteHeader(httpStatus)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "healthy",
-		"service":   s.serverName,
-		"version":   s.version,
-		"protocol":  "mcp",
-		"transport": "streamable-http + sse",
+		"status":       status,
+		"service":      s.serverName,
+		"version":      s.version,
+		"protocol":     "mcp",
+		"transport":    "streamable-http + sse",
+		"dependencies": deps,
 		"endpoints": map[string]string{
 			"mcp":             "/mcp",
 			"sse":             "/sse",
@@ -460,15 +490,42 @@ func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request)
 		},
 	}
 
+	deps := make(map[string]interface{})
+	overallStatus := "healthy"
+
+	if s.healthChecker != nil {
+		results := s.healthChecker.RunAllChecks(r.Context())
+		for _, r := range results {
+			deps[r.Name] = map[string]interface{}{
+				"status":   string(r.Status),
+				"message":  r.Message,
+				"duration_ms": r.Duration.Milliseconds(),
+			}
+		}
+		overall := s.healthChecker.GetOverallStatus(results)
+		overallStatus = string(overall)
+	} else {
+		// Fallback when no health checker is configured
+		deps["redis"] = map[string]string{"status": "unknown"}
+		deps["postgres"] = map[string]string{"status": "unknown"}
+	}
+
+	components["dependencies"] = deps
+
 	response := map[string]interface{}{
-		"status":     "healthy",
+		"status":     overallStatus,
 		"timestamp":  time.Now().Format(time.RFC3339),
 		"service":    s.serverName,
 		"version":    s.version,
 		"components": components,
 	}
 
-	w.WriteHeader(http.StatusOK)
+	httpStatus := http.StatusOK
+	if overallStatus == "unhealthy" {
+		httpStatus = http.StatusServiceUnavailable
+	}
+
+	w.WriteHeader(httpStatus)
 	json.NewEncoder(w).Encode(response)
 }
 

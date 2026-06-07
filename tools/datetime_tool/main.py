@@ -12,17 +12,19 @@ Input Schema:
 
 import json
 import sys
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
-from typing import Any
 
 
-def read_request() -> dict[str, Any]:
+def read_request() -> Dict[str, Any]:
     """Read JSON request from standard input."""
+    import typing
     input_data = sys.stdin.read()
-    return json.loads(input_data)
+    result = json.loads(input_data)
+    return typing.cast(Dict[str, Any], result)
 
 
-def write_response(response: dict[str, Any]) -> None:
+def write_response(response: Dict[str, Any]) -> None:
     """Write JSON response to standard output."""
     print(json.dumps(response))
 
@@ -48,14 +50,15 @@ def get_current_datetime(format_type: str, tz: str) -> str:
     elif format_type == "human_readable":
         return now.strftime("%Y-%m-%d %H:%M:%S")
     else:
-        return now.isoformat()
+        return str(now.isoformat())
 
 
 def main() -> None:
     """Main entry point for the datetime tool."""
+    request_id: str = ""
+    
     try:
         request = read_request()
-
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
 
@@ -105,7 +108,7 @@ def main() -> None:
     except json.JSONDecodeError as e:
         write_response({
             "success": False,
-            "request_id": "",
+            "request_id": request_id,
             "error": {
                 "code": "INVALID_INPUT",
                 "message": f"Failed to parse JSON input: {str(e)}"
@@ -114,7 +117,7 @@ def main() -> None:
     except Exception as e:
         write_response({
             "success": False,
-            "request_id": request.get("request_id", "") if "request" in dir() else "",
+            "request_id": request_id,
             "error": {
                 "code": "EXECUTION_FAILED",
                 "message": str(e)

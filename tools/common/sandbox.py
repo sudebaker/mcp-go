@@ -751,4 +751,12 @@ def execute_in_sandbox(
     if DOCKER_AVAILABLE:
         return executor.execute(code, input_data)
     else:
+        sandbox_required = os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true"
+        if sandbox_required:
+            return SandboxResult(
+                success=False,
+                error="Docker sandbox is required but not available (SANDBOX_REQUIRED=true). "
+                      "Code execution denied for security. Install and start Docker, then try again.",
+                execution_time_ms=0,
+            )
         return executor.execute_fallback(code, input_data)

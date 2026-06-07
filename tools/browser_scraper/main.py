@@ -204,15 +204,42 @@ def extract_text(html: str, selector: Optional[str] = None) -> str:
 
     soup = BeautifulSoup(html, "html.parser")
 
+    # Remove head element entirely (scripts, styles, meta tags inside)
+    head_tag = soup.find("head")
+    if head_tag:
+        head_tag.decompose()
+
+    # Remove all script/style/link/meta tags that might remain
+    for tag in soup(["script", "style", "link", "meta", "noscript", "base"]):
+        tag.decompose()
+
+    # Remove common noise elements: nav, footer, header, aside, form, iframe
+    for tag in soup(["nav", "footer", "header", "aside", "form", "iframe", "svg", "canvas", "template", "dialog", "button", "input", "textarea", "select", "label", "datalist"]):
+        tag.decompose()
+
+    # Remove cookie-consent banners and third-party widgets by common class/id keywords
+    noise_keywords = [
+        "cookie", "consent", "cookiefirst", "gdpr", "banner", "livebeep", "chat",
+        "widget", "popup", "modal", "overlay", "newsletter", "subscribe",
+        "accessibility", "userway", "translation", "translate"
+    ]
+    for tag in soup.find_all(True):
+        classes = " ".join(tag.get("class", [])).lower()
+        tag_id = (tag.get("id") or "").lower()
+        tag_name = tag.name.lower()
+        if any(kw in classes or kw in tag_id for kw in noise_keywords):
+            tag.decompose()
+
     if selector:
         elements = soup.select(selector)
         if elements:
             return "\n\n".join(el.get_text(strip=True, separator=" ") for el in elements)
 
-    for tag in soup(["script", "style", "nav", "footer", "header"]):
-        tag.decompose()
-
-    return soup.get_text(separator="\n", strip=True)
+    # Get clean text with spaces instead of newlines to reduce whitespace bloat
+    text = soup.get_text(separator=" ", strip=True)
+    # Collapse multiple spaces/newlines into single spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 
 def get_page_title(html: str) -> str:

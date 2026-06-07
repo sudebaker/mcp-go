@@ -1,0 +1,10 @@
+name: test_stderr_logging
+description: Test tool to verify stderr logging behavior
+command: python3
+args:
+  - tools/test_stderr_logging/main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties: {}
+  required: []

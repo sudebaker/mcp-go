@@ -37,6 +37,24 @@ Services defined in `deployments/docker-compose.yml`:
 | `mcp-server` | `http://localhost:8080` | MCP server |
 | `postgres` | `localhost:5432` | KB storage (pgvector) |
 | `rustfs` | `http://localhost:9000` | S3-compatible storage |
+| `searxng` | `http://localhost:8080` (internal) | Private web search |
+| `browserless` | `http://localhost:3000` | Headless browser (JS rendering) |
+| `whisper` | `http://localhost:8000` | Audio transcription |
+
+### Resource Limits
+
+Each service in `docker-compose.yml` has CPU and memory limits to prevent any single container from consuming all host resources:
+
+| Service | CPU Limit | Memory Limit | CPU Reservation | Memory Reservation |
+|---------|-----------|--------------|-----------------|--------------------|
+| `mcp-server` | 2 CPUs | 2 GB | 0.5 CPUs | 1 GB |
+| `postgres` | 1 CPU | 1 GB | 0.5 CPUs | 512 MB |
+| `whisper` | 2 CPUs | 2 GB | 0.5 CPUs | 512 MB |
+| `browserless` | 1 CPU | 1 GB | 0.25 CPUs | 512 MB |
+| `searxng` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
+| `rustfs` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
+
+Limits cap the maximum resources a container can use; reservations guarantee a minimum to the Docker scheduler (effective in Swarm mode). These values balance headroom for the Go MCP server and CPU-intensive Whisper with tighter bounds on lighter services like SearXNG and RustFS.
 
 ## MCP Endpoints
 

@@ -2,8 +2,8 @@ import ipaddress
 import os
 import re
 from pathlib import Path
-from typing import Optional
-
+from typing import Optional, Tuple, List, Dict, Any, Union
+from ipaddress import _BaseNetwork
 
 class PathValidationError(ValueError):
     """Exception raised for path validation errors."""
@@ -45,12 +45,12 @@ _compiled_domain_patterns = [
     re.compile(p, re.IGNORECASE) for p in INTERNAL_DOMAIN_PATTERNS
 ]
 
-_ssrf_allowlist_cache: tuple[list[ipaddress._BaseNetwork], list[str]] | None = None
+_ssrf_allowlist_cache: Optional[Tuple[List[_BaseNetwork], List[str]]] = None
 _ssrf_allowlist_cache_time: float = 0.0
 _SSRF_CACHE_TTL_SECONDS: float = 60.0  # Cache allowlist for 60 seconds
 
 
-def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
+def _load_ssrf_allowlist() -> Tuple[List[_BaseNetwork], List[str]]:
     """
     Parse SSRF_ALLOWLIST env var into (networks, hostnames).
 
@@ -73,8 +73,8 @@ def _load_ssrf_allowlist() -> tuple[list[ipaddress._BaseNetwork], list[str]]:
         _ssrf_allowlist_cache_time = current_time
         return _ssrf_allowlist_cache
 
-    networks: list[ipaddress._BaseNetwork] = []
-    hostnames: list[str] = []
+    networks: List[_BaseNetwork] = []
+    hostnames: List[str] = []
 
     for entry in raw.split(","):
         entry = entry.strip()
@@ -189,7 +189,6 @@ def validate_file_path(file_path: str, allowed_dir: str = "/data") -> Path:
         PathValidationError: On path traversal or invalid directory.
         FileNotFoundError: If the file does not exist.
         PermissionError: If the file is not readable.
-
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -230,7 +229,6 @@ def validate_output_path(
     Raises:
         PathValidationError: On path traversal or invalid directory.
         PermissionError: If write permissions are missing.
-
     """
     try:
         allowed = Path(allowed_dir).resolve(strict=True)
@@ -270,7 +268,6 @@ def sanitize_filename(filename: str, max_length: int = 255) -> str:
 
     Raises:
         ValueError: If the filename is empty after sanitization.
-
     """
     sanitized = re.sub(r"[^\w\s.-]", "", filename)
     sanitized = sanitized.replace("..", "").strip()
@@ -300,7 +297,6 @@ def validate_read_path(file_path: str, readonly_dir: str = "/data/input") -> Pat
         PathValidationError: On path traversal or invalid directory.
         FileNotFoundError: If the file does not exist.
         PermissionError: If the file is not readable.
-
     """
     try:
         allowed = Path(readonly_dir).resolve(strict=True)
@@ -330,7 +326,7 @@ def list_files(
     subdir: str = "",
     base_dir: str = "/data",
     pattern: str = "*",
-) -> list[Path]:
+) -> List[Path]:
     """List files in a subdirectory matching a glob pattern.
 
     Args:
@@ -343,7 +339,6 @@ def list_files(
 
     Raises:
         PathValidationError: On path traversal.
-
     """
     base = Path(base_dir).resolve(strict=True)
     search = (base / subdir).resolve()
@@ -376,7 +371,6 @@ def validate_write_path(
         PathValidationError: On path traversal or invalid directory.
         PermissionError: If write permissions are missing.
         ValueError: If the existing file exceeds the maximum size.
-
     """
     try:
         allowed = Path(writable_dir).resolve(strict=True)
@@ -413,7 +407,7 @@ def validate_write_path(
     return path
 
 
-def validate_url_ssrf(url: str) -> tuple[bool, Optional[str]]:
+def validate_url_ssrf(url: str) -> Tuple[bool, Optional[str]]:
     """
     Validate URL against SSRF protection rules.
 
@@ -428,7 +422,6 @@ def validate_url_ssrf(url: str) -> tuple[bool, Optional[str]]:
 
     Returns:
         (is_valid, error_message) tuple
-
     """
     try:
         from urllib.parse import urlparse

@@ -41,6 +41,7 @@ except ImportError:
     DEPENDENCIES_AVAILABLE = False
     S3Error = Exception
     SandboxedEnvironment = None
+    Minio = None
 
 
 _template_env = None

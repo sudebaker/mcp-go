@@ -47,7 +47,7 @@ class StructuredLogger:
         self.tool_name = tool_name or name
         self._ensure_handler()
 
-    def _ensure_handler(self):
+    def _ensure_handler(self) -> None:
         if not self.logger.handlers:
             handler = logging.StreamHandler(sys.stderr)
             handler.setLevel(self.logger.level)
@@ -135,8 +135,8 @@ class StructuredLogger:
         level: int,
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         extra = {"extra_data": extra_data or {}}
         self.logger.log(level, msg, extra=extra, **kwargs)
 
@@ -144,24 +144,24 @@ class StructuredLogger:
         self,
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         self.log(logging.DEBUG, msg, extra_data, **kwargs)
 
     def info(
         self,
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         self.log(logging.INFO, msg, extra_data, **kwargs)
 
     def warning(
         self,
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         self.log(logging.WARNING, msg, extra_data, **kwargs)
 
     def error(
@@ -169,8 +169,8 @@ class StructuredLogger:
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
         exc_info: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         if exc_info:
             self.logger.error(
                 msg, exc_info=True, extra={"extra_data": extra_data or {}}, **kwargs
@@ -182,8 +182,8 @@ class StructuredLogger:
         self,
         msg: str,
         extra_data: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         self.log(logging.CRITICAL, msg, extra_data, **kwargs)
 
 
@@ -191,7 +191,7 @@ def timed_operation(
     operation_name: Optional[str] = None,
     log_result: bool = True,
     log_args: bool = False,
-):
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to log function execution time.
 
     Args:
@@ -204,9 +204,9 @@ def timed_operation(
 
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             logger = StructuredLogger(func.__module__)
             start_time = time.perf_counter()
             op_name = operation_name or func.__name__
@@ -269,7 +269,7 @@ class RequestLogger:
         status_code: Optional[int] = None,
         duration_seconds: Optional[float] = None,
         error: Optional[str] = None,
-    ):
+    ) -> None:
         """Log an HTTP request.
 
         Args:

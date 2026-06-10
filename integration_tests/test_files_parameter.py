@@ -7,9 +7,56 @@ Simulates a file upload flow with a mock HTTP server.
 import json
 import subprocess
 import sys
+import os
+import unittest
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 import time
+
+# Try to import pytest for marker support
+try:
+    import pytest
+    HAVE_PYTEST = True
+except ImportError:
+    HAVE_PYTEST = False
+    pytest = None
+
+# Helper functions for integration tests
+def is_container_running(container_name):
+    """Check if a Docker container is running."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return container_name in result.stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
+
+def skip_if_no_container(container_name="mcp-orchestrator"):
+    """Raise unittest.SkipTest if container not running and RUN_INTEGRATION_TESTS not set."""
+    if os.getenv("RUN_INTEGRATION_TESTS", "").lower() in ("1", "true", "yes"):
+        return
+    if not is_container_running(container_name):
+        raise unittest.SkipTest(
+            f"Container {container_name} not running. "
+            "Set RUN_INTEGRATION_TESTS=1 to run anyway."
+        )
+
+
+def integration_test(func):
+    """Decorator to mark integration tests and apply skip condition."""
+    def wrapper():
+        skip_if_no_container()
+        return func()
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    if pytest is not None:
+        wrapper = pytest.mark.integration(wrapper)
+    return wrapper
 
 # Sample CSV data for testing
 SAMPLE_CSV = """name,age,salary,department
@@ -78,6 +125,7 @@ def start_mock_server(port=9999):
     return server
 
 
+@integration_test
 def test_files_parameter_basic():
     """Test 1: Basic __files__ parameter with simple question"""
     print("\n=== Test 1: Basic __files__ parameter ===")
@@ -109,6 +157,7 @@ def test_files_parameter_basic():
     return result.get("success", False)
 
 
+@integration_test
 def test_png_format_mapping():
     """Test 2: PNG format should be mapped to image"""
     print("\n=== Test 2: PNG format mapping ===")
@@ -143,6 +192,7 @@ def test_png_format_mapping():
     return result.get("success", False)
 
 
+@integration_test
 def test_backward_compatibility():
     """Test 3: Legacy file_path should still work"""
     print("\n=== Test 3: Backward compatibility with file_path ===")
@@ -194,6 +244,7 @@ def test_backward_compatibility():
         )
 
 
+@integration_test
 def test_missing_file_error():
     """Test 4: Should handle missing file gracefully"""
     print("\n=== Test 4: Missing file error handling ===")
@@ -217,6 +268,7 @@ def test_missing_file_error():
     return not result.get("success", False)
 
 
+@integration_test
 def test_invalid_url_error():
     """Test 5: Should handle invalid file URL"""
     print("\n=== Test 5: Invalid file URL error handling ===")

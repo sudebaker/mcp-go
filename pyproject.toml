@@ -24,3 +24,8 @@ strict_optional = true
 exclude = [
     "tools/test_stderr_logging/*",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration (requires external services)",
+]

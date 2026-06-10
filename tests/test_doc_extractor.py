@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
 
-TEST_DATA_DIR = Path("/home/hp/Proyectos/mcp-go/test_data")
+TEST_DATA_DIR = Path(__file__).parent / "test_data"
 TEST_DATA_DIR.mkdir(exist_ok=True)
 
 
@@ -113,15 +113,28 @@ class TestExtractTextFromDOCX(unittest.TestCase):
     """Test DOCX text extraction."""
 
     def test_extract_docx_success(self):
-        from common.doc_extractor import extract_text_from_docx, Document
+        from common.doc_extractor import extract_text_from_docx, ExtractionResult
+        from unittest.mock import Mock, patch
         
-        if Document is None:
-            self.skipTest("python-docx not available")
+        # Mock Document and its dependencies
+        mock_doc = Mock()
+        mock_paragraph = Mock()
+        mock_paragraph.text = "Sample paragraph"
+        mock_doc.paragraphs = [mock_paragraph]
+        mock_doc.tables = []
+        mock_core_props = Mock()
+        mock_core_props.title = None
+        mock_core_props.author = None
+        mock_core_props.subject = None
+        mock_core_props.keywords = None
+        mock_doc.core_properties = mock_core_props
         
-        result = extract_text_from_docx(BytesIO(b"fake docx content"))
+        with patch('common.doc_extractor.Document', return_value=mock_doc):
+            result = extract_text_from_docx(BytesIO(b"fake docx content"))
         
         self.assertIsInstance(result, ExtractionResult)
         self.assertEqual(result.file_type, "docx")
+        self.assertEqual(result.text, "Sample paragraph")
 
     def test_extract_docx_missing_docx(self):
         import common.doc_extractor as doc_extractor
@@ -141,23 +154,39 @@ class TestExtractTextFromBuffer(unittest.TestCase):
     """Test auto-detection of file types."""
 
     def test_extract_pdf_by_extension(self):
-        from common.doc_extractor import extract_text_from_buffer, PdfReader
-        
-        if PdfReader is None:
-            self.skipTest("pypdf not available")
-        
-        result = extract_text_from_buffer(BytesIO(b"pdf content"), "document.pdf")
-        
+        from common.doc_extractor import extract_text_from_buffer
+        from unittest.mock import Mock, patch
+
+        mock_pdf = Mock()
+        mock_page1 = Mock()
+        mock_page1.extract_text.return_value = "Page 1 content"
+        mock_pdf.pages = [mock_page1]
+        mock_pdf.metadata = {}
+
+        with patch('common.doc_extractor.PdfReader', return_value=mock_pdf):
+            result = extract_text_from_buffer(BytesIO(b"pdf content"), "document.pdf")
+
         self.assertEqual(result.file_type, "pdf")
 
     def test_extract_docx_by_extension(self):
-        from common.doc_extractor import extract_text_from_buffer, Document
-        
-        if Document is None:
-            self.skipTest("python-docx not available")
-        
-        result = extract_text_from_buffer(BytesIO(b"docx content"), "document.docx")
-        
+        from common.doc_extractor import extract_text_from_buffer
+        from unittest.mock import Mock, patch
+
+        mock_doc = Mock()
+        mock_paragraph = Mock()
+        mock_paragraph.text = "Sample paragraph"
+        mock_doc.paragraphs = [mock_paragraph]
+        mock_doc.tables = []
+        mock_core_props = Mock()
+        mock_core_props.title = None
+        mock_core_props.author = None
+        mock_core_props.subject = None
+        mock_core_props.keywords = None
+        mock_doc.core_properties = mock_core_props
+
+        with patch('common.doc_extractor.Document', return_value=mock_doc):
+            result = extract_text_from_buffer(BytesIO(b"docx content"), "document.docx")
+
         self.assertEqual(result.file_type, "docx")
 
     def test_extract_txt_by_extension(self):
@@ -210,7 +239,7 @@ class TestDownloadAndExtract(unittest.TestCase):
     """Test combined download and extract functionality."""
 
     def test_download_and_extract_pdf(self):
-        from common.doc_extractor import download_and_extract, PdfReader
+        from common.doc_extractor import download_and_extract, PdfReader, httpx
         
         if PdfReader is None or httpx is None:
             self.skipTest("Dependencies not available")

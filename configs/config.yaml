@@ -100,7 +100,7 @@ tools:
   - name: "datetime"
     description: "Devuelve la fecha y hora actual del sistema. Formatos: iso (default), human_readable, unix_timestamp. Zonas horarias: local (default), utc."
     command: "python3"
-    args: ["/app/tools/datetime/main.py"]
+    args: ["/app/tools/datetime_tool/main.py"]
     timeout: "5s"
     input_schema:
       type: object
@@ -1001,5 +1001,51 @@ prompts:
           - CWE or OWASP reference
           - Impact description
           - Concrete remediation with code example
+
+  - name: "session_notes"
+    description: "Obliga al agente a escribir un session-notes.md con los cambios aplicados, las decisiones tomadas y los TODOs pendientes."
+    arguments:
+      - name: "fecha_auto"
+        description: "Fecha de la sesión en formato ISO o legible"
+        required: false
+    messages:
+      - role: "assistant"
+        content: |
+          Escribe un archivo session-notes.md con la siguiente estructura exacta:
+
+          ## Session Notes — {{fecha_auto}}
+
+          ### Cambios aplicados
+          - Lista detallada de cada cambio realizado durante esta sesión.
+          - Incluye archivos modificados, comandos ejecutados y configuración alterada.
+
+          ### Decisiones tomadas
+          - Decisiones técnicas y arquitectónicas con su justificación.
+          - Alternativas consideradas y por qué se descartaron.
+
+          ### TODOs pendientes
+          - [ ] Tareas que quedan pendientes para futuras sesiones.
+          - [ ] Issues conocidos o deuda técnica identificada.
+
+  - name: "read_session_notes"
+    description: "Lee el archivo session-notes.md del directorio de trabajo actual y lo presenta estructurado con cambios, decisiones y TODOs pendientes."
+    arguments:
+      - name: "path"
+        description: "Ruta al archivo session-notes.md (por defecto: ./session-notes.md)"
+        required: false
+      - name: "focus"
+        description: "Área de enfoque: all (todo), changes (solo cambios), decisions (solo decisiones), todos (solo TODOs pendientes)"
+        required: false
+    messages:
+      - role: "user"
+        content: |
+          Lee el archivo de session notes ubicado en {{path}} (por defecto ./session-notes.md en el directorio de trabajo).
+
+          Si {{focus}} es "all" o está vacío, preséntalo completo estructurado por secciones.
+          Si {{focus}} es "changes", extrae solo la sección de Cambios aplicados.
+          Si {{focus}} es "decisions", extrae solo la sección de Decisiones tomadas.
+          Si {{focus}} es "todos", extrae solo la sección de TODOs pendientes.
+
+          Si el archivo no existe, responde que no hay session-notes.md disponible para esta sesión.
 
 

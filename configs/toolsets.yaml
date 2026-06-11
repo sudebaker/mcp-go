@@ -25,6 +25,20 @@ toolsets:
   ocu-investigacion:
     description: "Herramientas forenses y de investigación para la OCU"
     tools:
+      # Bases compartidas (testing, kb, web, media)
+      - echo
+      - datetime
+      - kb_ingest
+      - kb_search
+      - searxng_search
+      - browser_scraper
+      - web_scraper
+      - analyze_image
+      - transcribe
+      - generate_report
+      - rustfs_storage
+
+      # Forenses OCu
       - memgraph_query
       - opensearch_query
       - audit_log

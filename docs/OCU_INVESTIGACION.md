@@ -20,7 +20,26 @@
 
 ## Visión general
 
-El toolset `ocu-investigacion` reúne 6 herramientas MCP para flujos de investigación:
+El toolset `ocu-investigacion` reúne **17 herramientas MCP**: 11 tools de propósito general
+(bases compartidas) + 6 forenses específicas sobre Memgraph y OpenSearch.
+
+### Bases compartidas (11)
+
+| Tool | Descripción | Backend |
+|---|---|---|
+| `echo` | Tool de testing — repite texto | — |
+| `datetime` | Fecha y hora del sistema | — |
+| `kb_ingest` | Memoriza información en la base de conocimiento | PostgreSQL (pgvector) |
+| `kb_search` | Búsqueda semántica en la base de conocimiento | PostgreSQL (pgvector) |
+| `searxng_search` | Búsqueda web privada (agrega Google, Bing, DDG, Wikipedia) | SearXNG |
+| `browser_scraper` | Scraping con headless browser para páginas JS-heavy | Browserless |
+| `web_scraper` | Scraping simple de texto, links o imágenes | — |
+| `analyze_image` | OCR e interpretación de imágenes | Ollama/LLaVA |
+| `transcribe` | Transcripción de audio | Whisper |
+| `generate_report` | Generación de informes PDF profesionales | — |
+| `rustfs_storage` | Operaciones en RustFS/S3 (upload, download, list, search) | RustFS |
+
+### Forenses OCu (6)
 
 | Tool | Descripción | Backend |
 |---|---|---|

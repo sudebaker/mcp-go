@@ -153,7 +153,7 @@ The server can expose different subsets of tools without code changes, using **t
 |---------|-------|----------|
 | `default` | 14 general-purpose tools (echo, weather, kb, web, etc.) | End users, general assistance |
 | `development` | 10 dev tools + core (opencode_context, codebase_scan, etc.) | Developers, coding agents |
-| `ocu-investigacion` | 6 forensic tools (memgraph_query, opensearch_query, etc.) | Criminal investigation |
+| `ocu-investigacion` | 17 tools (6 forenses + kb, web scraping, OCR, transcription, reports, storage) | Criminal investigation |
 | *(unset)* | All available tools | Backward compatible, everything exposed |
 
 ### Usage
@@ -257,7 +257,7 @@ Toolset definitions in `configs/toolsets.yaml` are curated lists of tools for sp
 |---------|-------|---------|
 | `default` | 15 tools | General productivity (echo, datetime, PDF reports, data analysis, KB, web) |
 | `development` | 11 tools | Software development (core + codebase_scan, docs) |
-| `ocu-investigacion` | 6 tools | Criminal investigation (Memgraph + OpenSearch queries, evidence, forensics, cross-reference) |
+| `ocu-investigacion` | 17 tools | Criminal investigation (6 forenses + kb, web scraping, OCR, transcription, reports, storage) |
 
 To use a toolset, set the `MCP_TOOLSET` environment variable (see [Toolset Filtering](#toolset-filtering)).
 

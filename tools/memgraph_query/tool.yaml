@@ -1,0 +1,24 @@
+name: memgraph_query
+description: Ejecuta queries Cypher de solo lectura contra Memgraph. Valida que la
+  query no contenga operaciones de escritura (CREATE, SET, DELETE, REMOVE, MERGE,
+  DROP, ALTER, CALL). Usa word-boundary regex para evitar falsos positivos en
+  literales de string. Driver-level timeout configurado a 25s.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Consulta Cypher de solo lectura (requerida)
+    params:
+      type: object
+      description: Parametros opcionales para la consulta (key-value pairs)
+    limit:
+      type: integer
+      default: 100
+      description: Limite de resultados (1-10000, default 100)
+  required:
+  - query

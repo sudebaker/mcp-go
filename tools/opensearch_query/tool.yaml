@@ -1,0 +1,23 @@
+name: opensearch_query
+description: Busqueda full-text contra OpenSearch. Ejecuta _search sobre el
+  indice especificado o todos los indices. Usa OPENSEARCH_URL del entorno.
+  Timeout 30s.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    query:
+      description: Consulta de busqueda. Puede ser un string para query_string
+        o un objeto JSON con el cuerpo completo de _search.
+    index:
+      type: string
+      description: Nombre del indice a buscar. Si se omite, busca en todos.
+    max_results:
+      type: integer
+      default: 50
+      description: Maximo de resultados a retornar (1-1000).
+  required:
+  - query

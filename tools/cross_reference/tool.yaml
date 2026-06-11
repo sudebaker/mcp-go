@@ -1,0 +1,41 @@
+name: cross_reference
+description: >-
+  Cruza fuentes para investigación forense. Busca una entidad
+  simultáneamente en Memgraph (grafos), OpenSearch (documentos indexados)
+  y web (SearXNG) mediante threading. Retorna resultados agregados por
+  fuente con score de confianza.
+command: python3
+args:
+- main.py
+timeout: 120s
+input_schema:
+  type: object
+  properties:
+    entity_type:
+      type: string
+      enum:
+      - ip
+      - email
+      - telefono
+      - persona
+      - empresa
+      - caso
+      - req
+      description: Tipo de entidad a buscar
+    entity_value:
+      type: string
+      description: Valor de la entidad (IP, email, teléfono, nombre, etc.)
+    sources:
+      type: array
+      items:
+        type: string
+        enum:
+        - memgraph
+        - opensearch
+        - searxng
+      description: >-
+        Fuentes a consultar (opcional). Por defecto consulta todas las
+        disponibles según las variables de entorno.
+  required:
+  - entity_type
+  - entity_value

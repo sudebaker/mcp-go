@@ -1,0 +1,41 @@
+name: forensic_ingest
+description: >
+  Ingiere datos estructurados en Memgraph (nodos/aristas) y OpenSearch
+  (documentos) para la gestión de casos forenses. Genera audit_ref automático
+  cuando no se provee. Valida la estructura de datos según el target.
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    target:
+      type: string
+      enum:
+      - memgraph
+      - opensearch
+      description: "Sistema destino de la ingesta: 'memgraph' (nodos/aristas) u 'opensearch' (documentos)"
+    caso:
+      type: string
+      description: "Identificador del caso forense (ej. 'Caso-2026-042')"
+    data:
+      type: object
+      description: >
+        Datos a ingestar. Para target=memgraph: objeto con 'nodes' (array de
+        nodos con id, labels, properties) y 'edges' (array de aristas con
+        source, target, type, properties). Para target=opensearch: documento
+        plano para indexar.
+    source:
+      type: string
+      description: "Origen de los datos (ej. 'autopsy', 'volatility', 'sift', 'manual', 'api')"
+    audit_ref:
+      type: string
+      description: >
+        Referencia de auditoría opcional. Si no se provee, se genera
+        automáticamente con formato 'FI-<CASO>-<UUID_SHORT>'.
+  required:
+  - target
+  - caso
+  - data
+  - source

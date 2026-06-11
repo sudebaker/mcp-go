@@ -60,9 +60,6 @@ services:
     volumes:
       # Data directory (read-write)
       - mcp-data:/data
-      # Live configs y tools (sin rebuild)
-      - ../configs:/app/configs:ro
-      - ../tools:/app/tools:ro
     depends_on:
       postgres:
         condition: service_healthy

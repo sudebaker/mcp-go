@@ -1,7 +1,7 @@
 # OCu Investigación — Toolset y Stack de Bases de Datos
 
-> Toolset forense para investigación criminal. 6 herramientas MCP que operan sobre
-> Memgraph (base de grafos) y OpenSearch (búsqueda full-text).
+> Toolset forense para investigación criminal. 25 herramientas MCP: 11 base + 14 forenses
+> sobre Memgraph, OpenSearch, PostgreSQL, archivos, y procesamiento en memoria.
 
 ---
 

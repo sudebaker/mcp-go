@@ -93,6 +93,52 @@ expuestos al host (`localhost:7687`, `localhost:9200`).
 
 ---
 
+## Consideraciones de seguridad
+
+### OpenSearch — TLS/autenticación deshabilitados por defecto
+
+El stack OCu despliega OpenSearch con `DISABLE_SECURITY_PLUGIN=true` (línea 67 del
+`docker-compose.yml`), lo que desactiva SSL y autenticación. Esto es intencional
+para **desarrollo local en red aislada**.
+
+**Riesgos actuales:**
+- Cualquier contenedor o proceso en el host puede acceder al API REST de OpenSearch
+  (`localhost:9200`) sin credenciales
+- El tráfico entre contenedores no está cifrado
+
+**Para producción:**
+1. Usar `DISABLE_SECURITY_PLUGIN=false` en un `docker-compose.prod.yml`
+2. Configurar usuarios y roles mediante el plugin de seguridad de OpenSearch
+3. Habilitar TLS con certificados propios
+4. No exponer el puerto `9200` al host si solo se consume desde el `mcp-server`
+
+### Memgraph — sin contraseña inicial por defecto
+
+La variable `MEMGRAPH_USERNAME=ocu_admin` está definida, pero `MEMGRAPH_PASSWORD`
+no tiene valor inicial. La contraseña debe establecerse **manualmente** en el primer
+arranque mediante una consulta Cypher:
+
+```sql
+ALTER USER ocu_admin SET PASSWORD TO 'contraseña_segura';
+```
+
+**Hasta que se ejecute este comando, cualquier conexión Bolt al puerto 7687 puede
+autenticarse como `ocu_admin` sin contraseña.** Se recomienda ejecutar el `ALTER USER`
+inmediatamente después del primer `docker compose up -d`.
+
+### Buenas prácticas para el toolset forense
+
+- El stack OCu opera en su propia red (`ocu-investigacion-net`) y no comparte
+  red con el stack MCP por defecto. En producción conectar ambas redes (ver
+  [despliegue producción](#despliegue-producción-red-compartida)).
+- Los datos forenses (grafos + índices) no están cifrados en reposo. Para
+  datos sensibles, considerar cifrado a nivel de disco o volumen Docker.
+- Las tools OCu inyectan automáticamente metadatos de auditoría (`_audit_ref`,
+  `_caso`, `_data_source`, `_ingested_at`) en todos los documentos y nodos
+  para trazabilidad.
+
+---
+
 ## Requisitos
 
 - Docker + Docker Compose v2

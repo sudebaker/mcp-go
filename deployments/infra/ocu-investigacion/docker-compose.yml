@@ -40,6 +40,7 @@ services:
       start_period: 30s
     networks:
       - ocu-net
+      - mcp-network
     labels:
       - "ocu.component=graph"
       - "ocu.description=Base de grafos con vector search HNSW"
@@ -82,6 +83,7 @@ services:
       start_period: 60s
     networks:
       - ocu-net
+      - mcp-network
     labels:
       - "ocu.component=search"
       - "ocu.description=Buscador full-text y analíticas forenses"
@@ -133,6 +135,8 @@ networks:
     labels:
       - "ocu.network=investigacion"
       - "ocu.description=Red aislada para el stack de investigación criminal"
+  mcp-network:
+    external: true
 
 volumes:
   ocu-memgraph-data:

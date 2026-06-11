@@ -18,7 +18,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.structured_logging import get_logger
@@ -229,7 +229,7 @@ def ingest_memgraph(
                 props = node.get("properties", {})
                 # Always inject audit metadata
                 props["_caso"] = caso
-                props["_source"] = source
+                props["_data_source"] = source
                 props["_audit_ref"] = audit_ref
                 props["_ingested_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -253,7 +253,7 @@ def ingest_memgraph(
                 rel_type = f"`{edge['type'].replace('`', '')}`"
                 props = edge.get("properties", {})
                 props["_caso"] = caso
-                props["_source"] = source
+                props["_data_source"] = source
                 props["_audit_ref"] = audit_ref
                 props["_ingested_at"] = datetime.now(timezone.utc).isoformat()
 

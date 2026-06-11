@@ -343,7 +343,7 @@ def ingest_opensearch(
                     "mappings": {
                         "properties": {
                             "_caso": {"type": "keyword"},
-                            "_source": {"type": "keyword"},
+                            "_data_source": {"type": "keyword"},  # Changed from _source
                             "_audit_ref": {"type": "keyword"},
                             "_ingested_at": {"type": "date"},
                         }
@@ -356,7 +356,7 @@ def ingest_opensearch(
             enriched = {
                 **doc,
                 "_caso": caso,
-                "_source": source,
+                "_data_source": source,  # Changed from _source to avoid conflict
                 "_audit_ref": audit_ref,
                 "_ingested_at": datetime.now(timezone.utc).isoformat(),
             }

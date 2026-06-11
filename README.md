@@ -153,6 +153,7 @@ The server can expose different subsets of tools without code changes, using **t
 |---------|-------|----------|
 | `default` | 14 general-purpose tools (echo, weather, kb, web, etc.) | End users, general assistance |
 | `development` | 10 dev tools + core (opencode_context, codebase_scan, etc.) | Developers, coding agents |
+| `ocu-investigacion` | 6 forensic tools (memgraph_query, opensearch_query, etc.) | Criminal investigation |
 | *(unset)* | All available tools | Backward compatible, everything exposed |
 
 ### Usage
@@ -168,6 +169,12 @@ MCP_TOOLSET=development
 
 # .env — combine multiple toolsets
 MCP_TOOLSET=default,development
+
+# .env — forensic investigation toolset
+MCP_TOOLSET=ocu-investigacion
+
+# .env — all tools + forensics
+MCP_TOOLSET=default,development,ocu-investigacion
 
 # .env — omit to expose all tools (default behavior)
 # (no MCP_TOOLSET set)
@@ -250,6 +257,7 @@ Toolset definitions in `configs/toolsets.yaml` are curated lists of tools for sp
 |---------|-------|---------|
 | `default` | 15 tools | General productivity (echo, datetime, PDF reports, data analysis, KB, web) |
 | `development` | 11 tools | Software development (core + codebase_scan, docs) |
+| `ocu-investigacion` | 6 tools | Criminal investigation (Memgraph + OpenSearch queries, evidence, forensics, cross-reference) |
 
 To use a toolset, set the `MCP_TOOLSET` environment variable (see [Toolset Filtering](#toolset-filtering)).
 
@@ -300,6 +308,11 @@ Add a new entry to `configs/toolsets.yaml`:
 ```
 
 Then run with `MCP_TOOLSET=my_stack`. Multiple toolsets can be combined: `MCP_TOOLSET=my_stack,default`.
+
+For the **OCu (criminal investigation) toolset**, see the full deployment guide including the required database stack (Memgraph, OpenSearch):
+
+- [OCu Investigación — Toolset y Stack de Bases de Datos](docs/OCU_INVESTIGACION.md)
+- Stack de bases de datos: `deployments/infra/ocu-investigacion/docker-compose.yml`
 
 ### Disabling a Tool
 

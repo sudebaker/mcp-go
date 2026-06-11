@@ -79,6 +79,10 @@ execution:
     SEARXNG_URL: "http://searxng:8080"
     BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
     BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN:-}"
+    MEMGRAPH_URL: "${MEMGRAPH_URL:-bolt://memgraph:7687}"
+    OPENSEARCH_URL: "${OPENSEARCH_URL:-https://opensearch:9200}"
+    MEMGRAPH_USERNAME: "${MEMGRAPH_USERNAME:-}"
+    MEMGRAPH_PASSWORD: "${MEMGRAPH_PASSWORD:-}"
 
 tools:
   # Echo tool for testing

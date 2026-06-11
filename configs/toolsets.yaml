@@ -22,6 +22,16 @@ toolsets:
       - weather_forecast
       - web_scraper
 
+  ocu-investigacion:
+    description: "Herramientas forenses y de investigación para la OCU"
+    tools:
+      - memgraph_query
+      - opensearch_query
+      - audit_log
+      - case_evidence
+      - forensic_ingest
+      - cross_reference
+
   development:
     description: "Herramientas para desarrollo de software"
     tools:

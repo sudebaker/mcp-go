@@ -1,0 +1,43 @@
+name: case_evidence
+description: "Sube documentos de evidencia a RustFS/S3 y los indexa en OpenSearch para
+  gestion de casos. Descarga el archivo desde una URL, lo almacena en RustFS, y
+  registra sus metadatos en OpenSearch."
+command: python3
+args:
+- main.py
+timeout: 120s
+input_schema:
+  type: object
+  properties:
+    caso:
+      type: string
+      description: "Identificador del caso (ej. 'Caso-2026-042')"
+    file_url:
+      type: string
+      description: URL publica del documento a descargar y almacenar
+    tipo:
+      type: string
+      enum:
+      - pdf
+      - imagen
+      - documento
+      - audio
+      - video
+      - otro
+      description: Tipo de documento
+    clasificacion:
+      type: string
+      enum:
+      - publico
+      - interno
+      - reservado
+      - confidencial
+      description: Nivel de clasificacion del documento
+    metadata:
+      type: object
+      description: "Metadatos adicionales (autor, fecha, descripcion, tags, etc.)"
+  required:
+  - caso
+  - file_url
+  - tipo
+  - clasificacion

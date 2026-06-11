@@ -1,0 +1,42 @@
+name: audit_log
+description: Registra y consulta la cadena de custodia forense. Dos modos via parametro
+  action -- 'write' (caso, agente, operacion, query_resumen) o 'search' (caso,
+  agente, desde, hasta). Usa DATABASE_URL del entorno (PostgreSQL).
+command: python3
+args:
+- main.py
+timeout: 15s
+input_schema:
+  type: object
+  properties:
+    action:
+      type: string
+      enum:
+      - write
+      - search
+      description: Accion a ejecutar
+    caso:
+      type: string
+      description: Identificador del caso (requerido en ambos modos)
+    agente:
+      type: string
+      description: Agente responsable (requerido en write, opcional en search)
+    operacion:
+      type: string
+      description: Nombre de la operacion (solo write)
+    query_resumen:
+      type: string
+      description: Resumen de la consulta u operacion realizada (solo write)
+    desde:
+      type: string
+      description: Fecha ISO-8601 de inicio del rango (opcional, solo search)
+    hasta:
+      type: string
+      description: Fecha ISO-8601 de fin del rango (opcional, solo search)
+    limit:
+      type: integer
+      default: 100
+      description: Maximo de resultados a devolver (1-500, solo search)
+  required:
+  - action
+  - caso

@@ -23,7 +23,7 @@ toolsets:
       - web_scraper
 
   ocu-investigacion:
-    description: "Herramientas forenses y de investigación para la OCU"
+    description: "Herramientas forenses y de investigación para la OCU (25 tools: 11 base + 14 forenses)"
     tools:
       # Bases compartidas (testing, kb, web, media)
       - echo

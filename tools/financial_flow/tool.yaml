@@ -1,0 +1,30 @@
+name: financial_flow
+description: >
+  Detecta patrones de flujo de dinero en un grafo Memgraph: structuring (múltiples
+  depósitos bajo límite), layering (cadenas de transacciones), round_tripping
+  (dinero que sale y vuelve), concentration (salida repentina a múltiples destinos).
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    pattern:
+      type: string
+      enum: [structuring, layering, round_tripping, concentration]
+      description: "Patrón financiero a detectar"
+    case_id:
+      type: string
+      description: "Identificador del caso en Memgraph"
+    threshold_eur:
+      type: number
+      default: 10000
+      description: "Umbral en EUR para considerar transacciones relevantes"
+    time_window_days:
+      type: integer
+      default: 30
+      description: "Ventana de tiempo en días para el análisis"
+  required:
+  - pattern
+  - case_id

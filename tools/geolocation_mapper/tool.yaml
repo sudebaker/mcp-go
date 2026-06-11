@@ -1,0 +1,48 @@
+name: geolocation_mapper
+description: >
+  Genera un mapa HTML con puntos geográficos a partir de IPs (resueltas vía
+  ipinfo.io), coordenadas GPS directas o celdas móviles. Usa folium para el
+  renderizado del mapa.
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    points:
+      type: array
+      description: "Array de puntos geográficos a mapear"
+      items:
+        type: object
+        properties:
+          type:
+            type: string
+            enum: [ip, gps, cell]
+            description: "Tipo de punto: ip (resolver via ipinfo), gps (coordenadas directas), cell (torre celular)"
+          value:
+            type: string
+            description: "Valor: IP para type=ip, identificador para type=cell"
+          lat:
+            type: number
+            description: "Latitud (requerido para type=gps)"
+          lon:
+            type: number
+            description: "Longitud (requerido para type=gps)"
+          label:
+            type: string
+            description: "Etiqueta descriptiva para el marcador"
+          color:
+            type: string
+            default: red
+            description: "Color del marcador (red, blue, green, orange, purple, darkblue, lightred, beige, darkgreen, pink)"
+    output_path:
+      type: string
+      default: /data/output/map.html
+      description: "Ruta donde guardar el mapa HTML generado"
+    max_points:
+      type: integer
+      default: 100
+      description: "Máximo de puntos a renderizar"
+  required:
+  - points

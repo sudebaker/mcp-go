@@ -46,6 +46,16 @@ toolsets:
       - forensic_ingest
       - cross_reference
 
+      # Forenses nuevas (junio 2026)
+      - timeline_generator
+      - communication_graph
+      - financial_flow
+      - entity_resolution
+      - metadata_extractor
+      - stego_detector
+      - document_fingerprint
+      - geolocation_mapper
+
   development:
     description: "Herramientas para desarrollo de software"
     tools:

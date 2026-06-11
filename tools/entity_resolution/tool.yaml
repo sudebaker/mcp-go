@@ -1,0 +1,43 @@
+name: entity_resolution
+description: >
+  Detecta duplicados en listas de entidades usando fuzzy matching con rapidfuzz.
+  Normaliza teléfonos y nombres, compara por nombre, teléfono y email. Agrupa
+  candidatos duplicados con score de similitud.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    entities:
+      type: array
+      description: "Array de entidades a comparar"
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            description: "Identificador único de la entidad"
+          type:
+            type: string
+            enum: [person, company, account, phone, email]
+            description: "Tipo de entidad"
+          name:
+            type: string
+            description: "Nombre de la entidad"
+          phone:
+            type: string
+            description: "Teléfono (opcional)"
+          email:
+            type: string
+            description: "Email (opcional)"
+          metadata:
+            type: object
+            description: "Metadatos adicionales (opcional)"
+    threshold:
+      type: number
+      default: 0.85
+      description: "Umbral de similitud (0.0-1.0) para considerar duplicado"
+  required:
+  - entities

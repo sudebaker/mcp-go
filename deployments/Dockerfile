@@ -100,6 +100,12 @@ ruff>=0.6.0
 pyyaml>=6.0
 markdown>=3.5
 minio>=7.2.0
+
+# Forensic investigation tools
+rapidfuzz>=3.0.0
+python-magic>=0.4.27
+imagehash>=4.3.1
+folium>=0.14.0
 EOF
 
 # Install Python dependencies

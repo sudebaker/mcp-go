@@ -196,6 +196,16 @@ func main() {
 	log.Info().Msg("Server stopped")
 }
 
+// truncateClientError caps error message length sent to clients.
+// Full error details (including Details field) are always logged server-side
+// to prevent leaking internal information.
+func truncateClientError(msg string) string {
+	if len(msg) > 500 {
+		msg = msg[:500] + "... (truncated)"
+	}
+	return msg
+}
+
 // registerTool registers a tool with the MCP server.
 func registerTool(mcpServer *server.MCPServer, exec *executor.Executor, toolCfg config.ToolConfig) {
 	// Build input schema for the tool
@@ -303,17 +313,20 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 		// Execute via subprocess
 		result, err := exec.Execute(ctx, toolName, args)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			log.Error().Err(err).Str("tool", toolName).Msg("Tool execution failed")
+			return mcp.NewToolResultError("Tool execution failed. Check server logs for details."), nil
 		}
 
-		// Handle execution error from subprocess
+		// Handle execution error from subprocess (sanitized)
 		if !result.Success {
 			if result.Error != nil {
-				errorMsg := result.Error.Message
-				if result.Error.Details != "" {
-					errorMsg += "\n" + result.Error.Details
-				}
-				return mcp.NewToolResultError(errorMsg), nil
+				log.Error().
+					Str("tool", toolName).
+					Str("error_code", result.Error.Code).
+					Str("error_message", result.Error.Message).
+					Str("error_details", result.Error.Details).
+					Msg("Tool returned error")
+				return mcp.NewToolResultError(truncateClientError(result.Error.Message)), nil
 			}
 			return mcp.NewToolResultError("Tool execution failed with no error details"), nil
 		}

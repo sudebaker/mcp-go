@@ -20,8 +20,8 @@
 
 ## Visión general
 
-El toolset `ocu-investigacion` reúne **17 herramientas MCP**: 11 tools de propósito general
-(bases compartidas) + 6 forenses específicas sobre Memgraph y OpenSearch.
+El toolset `ocu-investigacion` reúne **25 herramientas MCP**: 11 tools de propósito general
+(bases compartidas) + 14 forenses específicas sobre Memgraph, OpenSearch, PostgreSQL y archivos.
 
 ### Bases compartidas (11)
 
@@ -39,7 +39,7 @@ El toolset `ocu-investigacion` reúne **17 herramientas MCP**: 11 tools de prop�
 | `generate_report` | Generación de informes PDF profesionales | — |
 | `rustfs_storage` | Operaciones en RustFS/S3 (upload, download, list, search) | RustFS |
 
-### Forenses OCu (6)
+### Forenses OCu (14)
 
 | Tool | Descripción | Backend |
 |---|---|---|
@@ -49,13 +49,29 @@ El toolset `ocu-investigacion` reúne **17 herramientas MCP**: 11 tools de prop�
 | `case_evidence` | Sube documentos a RustFS/S3 y los indexa en OpenSearch | RustFS + OpenSearch |
 | `audit_log` | Registra y consulta cadena de custodia forense (PostgreSQL) | PostgreSQL del MCP |
 | `cross_reference` | Cruza una entidad en Memgraph + OpenSearch + web simultáneamente | Memgraph + OpenSearch + SearXNG |
+| `timeline_generator` | Línea temporal cronológica a partir de eventos timestamped | Memoria |
+| `communication_graph` | Métricas de red: centralidad, clusters, intermediarios, pares | Memgraph |
+| `financial_flow` | Detecta structuring, layering, round-tripping, concentración | Memgraph |
+| `entity_resolution` | Fuzzy matching de entidades duplicadas (rapidfuzz) | Memoria |
+| `metadata_extractor` | Extrae EXIF/GPS, metadatos PDF/Word, SHA256 | Archivos |
+| `stego_detector` | Análisis LSB, chi-cuadrado y entropía en imágenes | Archivos |
+| `document_fingerprint` | Hash perceptual (phash/dhash/whash) y comparación de imágenes | Archivos |
+| `geolocation_mapper` | Mapa HTML desde IPs (ipinfo.io), GPS o celdas móviles | ipinfo.io + folium |
 
 **Dependencias de bases de datos:**
-- **Memgraph** — necesario para `memgraph_query`, `forensic_ingest`, `cross_reference`
+- **Memgraph** — necesario para `memgraph_query`, `forensic_ingest`, `cross_reference`, `communication_graph`, `financial_flow`
 - **OpenSearch** — necesario para `opensearch_query`, `forensic_ingest`, `case_evidence`, `cross_reference`
 - **RustFS** — necesario para `case_evidence` (ya existe en el stack MCP)
 - **PostgreSQL** — necesario para `audit_log` (ya existe en el stack MCP)
 - **SearXNG** — necesario para `cross_reference` (ya existe en el stack MCP)
+
+**Dependencias de librerías (nuevas):**
+- `rapidfuzz` — fuzzy matching (`entity_resolution`)
+- `python-magic` — detección MIME por contenido (`metadata_extractor`)
+- `imagehash` — hash perceptual de imágenes (`document_fingerprint`)
+- `folium` — generación de mapas HTML (`geolocation_mapper`)
+
+Estas librerías se instalan automáticamente durante el `docker build` del MCP.
 
 ---
 
@@ -252,10 +268,10 @@ compartida.
 | Variable | Default | Descripción | Tools que la usan |
 |---|---|---|---|
 | `MCP_TOOLSET` | `default` | Toolset(s) activo. Para OCu: `ocu-investigacion` o `default,ocu-investigacion` | Todas |
-| `MEMGRAPH_URL` | `bolt://memgraph:7687` | URL de conexión Bolt a Memgraph | `memgraph_query`, `forensic_ingest`, `cross_reference` |
+| `MEMGRAPH_URL` | `bolt://memgraph:7687` | URL de conexión Bolt a Memgraph | `memgraph_query`, `forensic_ingest`, `cross_reference`, `communication_graph`, `financial_flow` |
 | `OPENSEARCH_URL` | `http://opensearch:9200` | URL REST de OpenSearch | `opensearch_query`, `forensic_ingest`, `case_evidence`, `cross_reference` |
-| `MEMGRAPH_USERNAME` | *(vacío)* | Usuario de Memgraph (auth opcional) | `memgraph_query`, `forensic_ingest`, `cross_reference` |
-| `MEMGRAPH_PASSWORD` | *(vacío)* | Contraseña de Memgraph (auth opcional) | `memgraph_query`, `forensic_ingest`, `cross_reference` |
+| `MEMGRAPH_USERNAME` | *(vacío)* | Usuario de Memgraph (auth opcional) | `memgraph_query`, `forensic_ingest`, `cross_reference`, `communication_graph`, `financial_flow` |
+| `MEMGRAPH_PASSWORD` | *(vacío)* | Contraseña de Memgraph (auth opcional) | `memgraph_query`, `forensic_ingest`, `cross_reference`, `communication_graph`, `financial_flow` |
 
 Todas siguen el patrón `${VAR:-default}` — si no se pasan, se usan los defaults.
 Si el backend OCu no está disponible, las tools fallan con mensaje claro pero
@@ -271,7 +287,10 @@ el MCP no se cae.
 curl -s http://localhost:8080/mcp/tools/list | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-ocu = ['memgraph_query', 'opensearch_query', 'forensic_ingest', 'case_evidence', 'audit_log', 'cross_reference']
+ocu = ['memgraph_query', 'opensearch_query', 'forensic_ingest', 'case_evidence',
+       'audit_log', 'cross_reference', 'timeline_generator', 'communication_graph',
+       'financial_flow', 'entity_resolution', 'metadata_extractor', 'stego_detector',
+       'document_fingerprint', 'geolocation_mapper']
 for tool in data.get('tools', data):
     if tool.get('name') in ocu:
         print(f'  ✅ {tool[\"name\"]}')
@@ -300,6 +319,20 @@ Requiere `DATABASE_URL` configurada:
 DATABASE_URL=postgresql://mcp:mcp@localhost:5432/knowledge \
   echo '{"request_id":"test-1","arguments":{"action":"write","caso":"TEST-001","agente":"amanda","operacion":"test","query_resumen":"verificacion toolset"}}' | \
   python3 tools/audit_log/main.py
+```
+
+### Test básico — timeline_generator
+
+```bash
+echo '{"request_id":"test-1","arguments":{"events":[{"timestamp":"2024-01-15T10:30:00Z","description":"Llamada","importance":"high"},{"timestamp":"2024-01-15T11:00:00Z","description":"Transferencia","importance":"critical"}]}}' | \
+  python3 tools/timeline_generator/main.py
+```
+
+### Test básico — entity_resolution
+
+```bash
+echo '{"request_id":"test-1","arguments":{"entities":[{"id":"A","name":"Juan Pérez","phone":"+34 612 345 678"},{"id":"B","name":"J. Pérez","phone":"612345678"}],"threshold":0.8}}' | \
+  python3 tools/entity_resolution/main.py
 ```
 
 ---
@@ -331,6 +364,20 @@ docker exec mcp-orchestrator env | grep MCP_TOOLSET
 # Verificar que el toolset existe en configs/toolsets.yaml
 docker exec mcp-orchestrator cat /app/configs/toolsets.yaml | grep ocu-investigacion
 ```
+
+### Librerías nuevas no encontradas
+
+Si al ejecutar las tools nuevas ves errores `ModuleNotFoundError`, la imagen
+Docker no incluye las dependencias. Reconstruir:
+
+```bash
+cd deployments
+docker compose build mcp-server
+# o manualmente:
+docker build -t mcp-orchestrator -f Dockerfile ..
+```
+
+Las librerías necesarias: `rapidfuzz`, `python-magic`, `imagehash`, `folium`.
 
 ### "Connection refused" a Memgraph/OpenSearch
 Causa más común: el MCP usa defaults (`bolt://memgraph:7687`) que no son

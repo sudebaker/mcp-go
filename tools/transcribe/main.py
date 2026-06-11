@@ -5,6 +5,7 @@ Transcribes audio files locally using faster-whisper-server (100% on-premise, no
 Compatible with OpenAI Whisper API format.
 """
 
+import binascii
 import json
 import sys
 import os
@@ -57,9 +58,16 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
     if suffix not in SUPPORTED_FORMATS:
         return None, f"Unsupported format '{suffix}'. Supported: {', '.join(SUPPORTED_FORMATS)}"
 
+    mime_map = {
+        ".mp3": "audio/mpeg", ".mp4": "audio/mp4", ".wav": "audio/wav",
+        ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".webm": "audio/webm",
+        ".flac": "audio/flac", ".opus": "audio/ogg", ".mpeg": "audio/mpeg",
+        ".mpga": "audio/mpeg",
+    }
+    mime_type = mime_map.get(suffix, "audio/mpeg")
     try:
         with open(file_path, "rb") as f:
-            files = {"file": (path.name, f, "audio/mpeg")}
+            files = {"file": (path.name, f, mime_type)}
             data = {
                 "model": WHISPER_MODEL,
                 "response_format": response_format,
@@ -79,16 +87,22 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
 
         if response_format == "json":
             result = response.json()
-            return result.get("text", ""), None
+            text = result.get("text")
+            if not text:
+                return None, "Whisper response missing 'text' field"
+            return text, None
         else:
-            return response.text, None
+            text = response.text.strip()
+            if not text:
+                return None, "Whisper returned empty transcription"
+            return text, None
 
     except requests.exceptions.Timeout:
         return None, f"Transcription timed out after {DEFAULT_TIMEOUT}s"
     except requests.exceptions.ConnectionError as e:
         return None, f"Cannot connect to whisper server at {WHISPER_URL}: {str(e)}"
-    except Exception as e:
-        return None, f"Transcription failed: {str(e)}"
+    except requests.exceptions.RequestException as e:
+        return None, f"Whisper request failed: {str(e)}"
 
 
 def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
@@ -102,7 +116,7 @@ def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = N
             return None, f"Audio too large. Max size: {MAX_AUDIO_SIZE_MB}MB"
 
         audio_bytes = base64.b64decode(audio_b64)
-    except Exception as e:
+    except (binascii.Error, ValueError) as e:
         return None, f"Invalid base64 audio: {str(e)}"
 
     suffix = Path(filename).suffix.lower() or ".wav"

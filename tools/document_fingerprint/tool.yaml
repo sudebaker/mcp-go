@@ -1,0 +1,25 @@
+name: document_fingerprint
+description: >
+  Genera hash perceptual de imágenes (phash, dhash, whash) y compara dos imágenes
+  para detectar similitud visual o manipulación. Retorna score 0-100 + hashes.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    image1_path:
+      type: string
+      description: "Ruta a la primera imagen"
+    image2_path:
+      type: string
+      description: "Ruta a la segunda imagen"
+    method:
+      type: string
+      enum: [phash, dhash, whash, average_hash]
+      default: phash
+      description: "Algoritmo de hash perceptual"
+  required:
+  - image1_path
+  - image2_path

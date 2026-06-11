@@ -1,0 +1,26 @@
+name: communication_graph
+description: >
+  Analiza un grafo de comunicaciones en Memgraph y calcula métricas de red:
+  centralidad (degree, betweenness), detección de clusters, intermediarios clave,
+  pares con máxima frecuencia de contacto.
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    query_type:
+      type: string
+      enum: [metrics, clusters, intermediaries, top_pairs]
+      description: "Tipo de análisis: metrics (centralidad), clusters (comunidades), intermediaries (intermediarios), top_pairs (pares frecuentes)"
+    case_id:
+      type: string
+      description: "Identificador del caso en Memgraph"
+    limit:
+      type: integer
+      default: 20
+      description: "Máximo de resultados (1-1000)"
+  required:
+  - query_type
+  - case_id

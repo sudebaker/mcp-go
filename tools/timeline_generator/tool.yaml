@@ -1,0 +1,38 @@
+name: timeline_generator
+description: >
+  Genera una línea temporal cronológica Markdown a partir de eventos timestamped.
+  Detecta gaps, superposiciones y eventos críticos. Procesamiento 100% en memoria.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    events:
+      type: array
+      description: "Array de objetos evento con timestamp, description, entity (opcional) e importance (opcional)"
+      items:
+        type: object
+        properties:
+          timestamp:
+            type: string
+            description: "Timestamp ISO-8601 del evento (requerido)"
+          description:
+            type: string
+            description: "Descripción del evento (requerido)"
+          entity:
+            type: string
+            description: "Entidad asociada (opcional)"
+          importance:
+            type: string
+            enum: [low, medium, high, critical]
+            default: medium
+            description: "Importancia del evento"
+    format:
+      type: string
+      enum: [markdown, json]
+      default: markdown
+      description: "Formato de salida"
+  required:
+  - events

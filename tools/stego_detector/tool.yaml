@@ -1,0 +1,24 @@
+name: stego_detector
+description: >
+  Detecta esteganografía en imágenes: análisis LSB (bits menos significativos),
+  chi-cuadrado estadístico, y análisis de entropía vs tamaño. Retorna score de
+  sospecha por método.
+command: python3
+args:
+- main.py
+timeout: 60s
+input_schema:
+  type: object
+  properties:
+    file_path:
+      type: string
+      description: "Ruta absoluta a la imagen en el servidor"
+    methods:
+      type: array
+      items:
+        type: string
+        enum: [lsb, chi_square, entropy]
+      default: [lsb, chi_square, entropy]
+      description: "Métodos de detección a aplicar"
+  required:
+  - file_path

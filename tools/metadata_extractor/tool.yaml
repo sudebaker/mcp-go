@@ -1,0 +1,25 @@
+name: metadata_extractor
+description: >
+  Extrae metadatos forenses de archivos: EXIF de imágenes (GPS, cámara, fecha),
+  encabezados PDF/Word (autor, software, fecha creación), hash SHA256, y tipo
+  MIME. Genera cadena de custodia.
+command: python3
+args:
+- main.py
+timeout: 30s
+input_schema:
+  type: object
+  properties:
+    file_path:
+      type: string
+      description: "Ruta absoluta al archivo en el servidor"
+    extract_gps:
+      type: boolean
+      default: true
+      description: "Extraer coordenadas GPS de EXIF"
+    extract_history:
+      type: boolean
+      default: true
+      description: "Extraer historial de metadatos internos"
+  required:
+  - file_path

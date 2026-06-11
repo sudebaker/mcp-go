@@ -45,6 +45,8 @@ EXTERNAL_DEPENDENCY_TOOLS = {
     "browser_scraper",     # Needs Browserless service
     "kb_ingest",           # Needs PostgreSQL + pgvector
     "kb_search",           # Needs PostgreSQL + pgvector
+    "communication_graph", # Needs Memgraph
+    "financial_flow",      # Needs Memgraph
 }
 
 # Tools that need internet access
@@ -52,6 +54,7 @@ INTERNET_DEPENDENT_TOOLS = {
     "weather_forecast",
     "web_scraper",
     "rss_reader",
+    "geolocation_mapper",
 }
 
 # Tools that need Docker access
@@ -523,6 +526,87 @@ def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
             dependencies=["rustfs"],
         ),
 
+        # Forensic tools - in-memory
+        ToolTest(
+            name="timeline_generator",
+            description="Generate timeline from events",
+            arguments={
+                "events": [
+                    {"timestamp": "2024-01-15T10:30:00Z", "description": "Llamada", "importance": "high"},
+                    {"timestamp": "2024-01-15T11:00:00Z", "description": "Transferencia", "importance": "critical"},
+                ],
+                "format": "markdown",
+            },
+            category="forensic",
+        ),
+        ToolTest(
+            name="entity_resolution",
+            description="Detect duplicate entities",
+            arguments={
+                "entities": [
+                    {"id": "A", "name": "Juan Pérez", "phone": "+34 612 345 678"},
+                    {"id": "B", "name": "J. Pérez", "phone": "612345678"},
+                ],
+                "threshold": 0.8,
+            },
+            category="forensic",
+        ),
+
+        # Forensic tools - file I/O
+        ToolTest(
+            name="metadata_extractor",
+            description="Extract metadata from file",
+            arguments={"file_path": text_path if text_path else "/nonexistent.txt", "extract_gps": False},
+            category="forensic",
+            dependencies=["files"],
+        ),
+        ToolTest(
+            name="stego_detector",
+            description="Detect steganography in image",
+            arguments={"file_path": image_path if image_path else "/nonexistent.png"},
+            category="forensic",
+            dependencies=["files"],
+        ),
+        ToolTest(
+            name="document_fingerprint",
+            description="Compare two images perceptual hash",
+            arguments={
+                "image1_path": image_path if image_path else "/nonexistent1.png",
+                "image2_path": image_path if image_path else "/nonexistent2.png",
+            },
+            category="forensic",
+            dependencies=["files"],
+        ),
+
+        # Forensic tools - network
+        ToolTest(
+            name="geolocation_mapper",
+            description="Generate map from IPs",
+            arguments={
+                "points": [{"type": "gps", "lat": 40.4168, "lon": -3.7038, "label": "Madrid"}],
+                "output_path": "/tmp/test_map.html",
+                "max_points": 10,
+            },
+            category="forensic",
+            dependencies=["internet"],
+        ),
+
+        # Forensic tools - Memgraph
+        ToolTest(
+            name="communication_graph",
+            description="Analyze communication graph",
+            arguments={"query_type": "metrics", "case_id": "TEST-001", "limit": 10},
+            category="forensic",
+            dependencies=["memgraph"],
+        ),
+        ToolTest(
+            name="financial_flow",
+            description="Detect money flow patterns",
+            arguments={"pattern": "structuring", "case_id": "TEST-001", "threshold_eur": 10000, "time_window_days": 30},
+            category="forensic",
+            dependencies=["memgraph"],
+        ),
+
         # PDF Reports
         ToolTest(
             name="generate_report",
@@ -599,6 +683,20 @@ class TestRunner:
         if "browserless" in test.dependencies:
             if not os.environ.get("BROWSERLESS_URL"):
                 return False, "BROWSERLESS_URL not configured"
+
+        if "memgraph" in test.dependencies:
+            memgraph_host = os.environ.get("MEMGRAPH_HOST", "localhost")
+            memgraph_port = os.environ.get("MEMGRAPH_PORT", "7687")
+            try:
+                import socket
+                try:
+                    port = int(memgraph_port)
+                except ValueError:
+                    return False, f"MEMGRAPH_PORT inválido: {memgraph_port}"
+                sock = socket.create_connection((memgraph_host, port), timeout=5)
+                sock.close()
+            except (socket.timeout, ConnectionRefusedError, OSError):
+                return False, f"Memgraph not available at {memgraph_host}:{memgraph_port}"
 
         if "whisper" in test.dependencies:
             whisper_url = os.environ.get("WHISPER_URL", "http://localhost:8000")

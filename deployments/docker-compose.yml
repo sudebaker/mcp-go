@@ -1,11 +1,13 @@
 # MCP Orchestrator Stack — Stack completo unificado
 # Incluye: MCP Server, PostgreSQL, SearXNG, Browserless, Whisper, RustFS
-#           OCu Investigación: Memgraph, OpenSearch, OpenSearch Dashboards, Memgraph Lab
+#           OCu Investigación: Memgraph, OpenSearch
 #
 # SEGURIDAD DE REDES:
 #   mcp-internal  — Red aislada (internal: true). Servicios de datos sin acceso a internet.
 #   mcp-external  — Red con acceso a internet. Servicios públicos/proxy.
 #   mcp-server es el único puente entre ambas.
+#
+# Variables de entorno en deployments/.env (ver .env.example)
 
 services:
 
@@ -20,49 +22,32 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # MCP Configuration
-      BASE_URL: ${BASE_URL:?BASE_URL is required - set to your public IP/hostname:8080}
-      SEARXNG_URL: http://searxng:8080
-
-      # LLM Configuration
-      LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
-      LLM_MODEL: ${LLM_MODEL:-llama3}
-      REMOTE_OLLAMA_URL: ${REMOTE_OLLAMA_URL:-}
-
-      # Database Configuration
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:***@postgres:5432/knowledge}
-
-      # Embedding model cache
-      FASTEMBED_CACHE_PATH: /root/.cache/fastembed
-
-      # RustFS / S3 Configuration
-      BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
-      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
-      WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
-      SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-rustfs}
-      LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
-      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?RUSTFS_PUBLIC_URL is required}
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-default}
-      DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
-
-      # Upload endpoint API key
-      MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY:-}
-
-      # Python settings
-      PYTHONUNBUFFERED: "1"
-
-      # OCu Investigación
-      MEMGRAPH_URL: ${MEMGRAPH_URL:-bolt://memgraph:7687}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
-      MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME:-}
-      MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD:-}
-
-      # Toolset filtering
-      MCP_TOOLSET: ${MCP_TOOLSET:-default}
+      BASE_URL: ${BASE_URL}
+      SEARXNG_URL: ${SEARXNG_URL}
+      LLM_API_URL: ${LLM_API_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      REMOTE_OLLAMA_URL: ${REMOTE_OLLAMA_URL}
+      DATABASE_URL: ${DATABASE_URL}
+      FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH}
+      BROWSERLESS_URL: ${BROWSERLESS_URL}
+      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN}
+      WHISPER_URL: ${WHISPER_URL}
+      SSRF_ALLOWLIST: ${SSRF_ALLOWLIST}
+      LLM_API_FORMAT: ${LLM_API_FORMAT}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT}
+      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL}
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS}
+      MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY}
+      PYTHONUNBUFFERED: ${PYTHONUNBUFFERED}
+      MEMGRAPH_URL: ${MEMGRAPH_URL}
+      OPENSEARCH_URL: ${OPENSEARCH_URL}
+      MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME}
+      MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD}
+      MCP_TOOLSET: ${MCP_TOOLSET}
     volumes:
       - mcp-data:/data
     depends_on:
@@ -104,16 +89,16 @@ services:
     image: pgvector/pgvector:pg16
     container_name: mcp-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mcp}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mcp}
-      POSTGRES_DB: ${POSTGRES_DB:-knowledge}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - mcp-internal
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcp -d knowledge"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -160,8 +145,8 @@ services:
     ports:
       - "9000:9000"
     environment:
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY}
     volumes:
       - rustfs-data:/data
     networks:
@@ -197,7 +182,7 @@ services:
       - ocu-memgraph-etc:/etc/memgraph
     environment:
       - MEMGRAPH_ORGANIZATION_NAME=OCu
-      - MEMGRAPH_USERNAME=ocu_admin
+      - MEMGRAPH_USERNAME=${MEMGRAPH_USERNAME}
     command:
       - "--bolt-port=7687"
       - "--log-level=TRACE"
@@ -269,13 +254,13 @@ services:
       - "3000:3000"
     environment:
       CONCURRENT: "5"
-      TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
+      TOKEN: ${BROWSERLESS_TOKEN}
       TIMEOUT: "60000"
     networks:
       - mcp-external
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROW...OKEN is required}", "http://localhost:3000/json/version"]
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN}", "http://localhost:3000/json/version"]
       interval: 30s
       timeout: 10s
       retries: 3

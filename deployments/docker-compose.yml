@@ -321,46 +321,6 @@ services:
       - "network.security=external"
       - "network.description=Meta-buscador privado (OSINT)"
 
-  # ═══════════════════════════════════════════════
-  # OCu VISUALIZACIÓN — Interfaces web para investigación
-  # ═══════════════════════════════════════════════
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest
-    container_name: ocu-opensearch-dashboards
-    restart: unless-stopped
-    ports:
-      - "5601:5601"
-    environment:
-      - OPENSEARCH_HOSTS=http://opensearch:9200
-      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
-    depends_on:
-      opensearch:
-        condition: service_healthy
-    networks:
-      - mcp-internal
-      - mcp-external
-    labels:
-      - "ocu.component=dashboards"
-      - "network.security=bridge"
-      - "network.description=Interfaz visual para OpenSearch"
-
-  memgraph-lab:
-    image: memgraph/lab:latest
-    container_name: ocu-memgraph-lab
-    restart: unless-stopped
-    ports:
-      - "3100:3000"
-    depends_on:
-      memgraph:
-        condition: service_healthy
-    networks:
-      - mcp-internal
-      - mcp-external
-    labels:
-      - "ocu.component=graph-ui"
-      - "network.description=Consola web para queries Cypher y visualización de grafos"
-
 # ═══════════════════════════════════════════════
 # REDES DE SEGURIDAD
 # ═══════════════════════════════════════════════

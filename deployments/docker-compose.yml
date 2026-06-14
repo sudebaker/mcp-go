@@ -1,4 +1,17 @@
+# MCP Orchestrator Stack — Stack completo unificado
+# Incluye: MCP Server, PostgreSQL, SearXNG, Browserless, Whisper, RustFS
+#           OCu Investigación: Memgraph, OpenSearch, OpenSearch Dashboards, Memgraph Lab
+#
+# SEGURIDAD DE REDES:
+#   mcp-internal  — Red aislada (internal: true). Servicios de datos sin acceso a internet.
+#   mcp-external  — Red con acceso a internet. Servicios públicos/proxy.
+#   mcp-server es el único puente entre ambas.
+
 services:
+
+  # ═══════════════════════════════════════════════
+  # MCP SERVER — Único punto de entrada, puente entre redes
+  # ═══════════════════════════════════════════════
   mcp-server:
     build:
       context: ..
@@ -11,25 +24,18 @@ services:
       BASE_URL: ${BASE_URL:?BASE_URL is required - set to your public IP/hostname:8080}
       SEARXNG_URL: http://searxng:8080
 
-      # LLM Configuration - can be overridden via .env or CLI
+      # LLM Configuration
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
       REMOTE_OLLAMA_URL: ${REMOTE_OLLAMA_URL:-}
 
       # Database Configuration
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:mcp@postgres:5432/knowledge}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp:***@postgres:5432/knowledge}
 
-      # ACB PostgreSQL (standalone, independent from MCP postgres)
-      ACB_PG_HOST: ${ACB_PG_HOST:-acb-postgres}
-      ACB_PG_PORT: ${ACB_PG_PORT:-5432}
-      ACB_PG_USER: ${ACB_PG_USER:-acb}
-      ACB_PG_PASSWORD: ${ACB_PG_PASSWORD:-}
-      ACB_PG_DATABASE: ${ACB_PG_DATABASE:-acb}
-
-      # Embedding model cache for air-gapped / offline use
+      # Embedding model cache
       FASTEMBED_CACHE_PATH: /root/.cache/fastembed
 
-      # RustFS / S3 Configuration (for presigned URL download)
+      # RustFS / S3 Configuration
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
       BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
@@ -37,28 +43,27 @@ services:
       LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
-      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?RUSTFS_PUBLIC_URL is required - set to your public IP/hostname}
+      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?RUSTFS_PUBLIC_URL is required}
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-default}
       DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
 
-      # Upload endpoint API key (auth for POST /upload)
+      # Upload endpoint API key
       MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY:-}
 
       # Python settings
       PYTHONUNBUFFERED: "1"
 
-      # OCu Investigación (toolset ocu-investigacion)
+      # OCu Investigación
       MEMGRAPH_URL: ${MEMGRAPH_URL:-bolt://memgraph:7687}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
       MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME:-}
       MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD:-}
 
-      # Toolset filtering (none, default, development)
+      # Toolset filtering
       MCP_TOOLSET: ${MCP_TOOLSET:-default}
     volumes:
-      # Data directory (read-write)
       - mcp-data:/data
     depends_on:
       postgres:
@@ -70,10 +75,11 @@ services:
       searxng:
         condition: service_healthy
     networks:
-      - mcp-network
+      - mcp-internal
+      - mcp-external
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -86,6 +92,13 @@ services:
         reservations:
           cpus: '0.5'
           memory: 1G
+    labels:
+      - "network.security=bridge"
+      - "network.description=Puente entre red interna y externa"
+
+  # ═══════════════════════════════════════════════
+  # SERVICIOS INTERNOS — Sin acceso a internet (mcp-internal)
+  # ═══════════════════════════════════════════════
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -96,10 +109,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-knowledge}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     networks:
-      - mcp-network
+      - mcp-internal
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mcp -d knowledge"]
@@ -115,6 +126,9 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    labels:
+      - "network.security=internal"
+      - "network.description=Base de datos vectorial (KB)"
 
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu
@@ -126,7 +140,7 @@ services:
     volumes:
       - whisper-models:/root/.cache/huggingface
     networks:
-      - mcp-network
+      - mcp-internal
     restart: unless-stopped
     deploy:
       resources:
@@ -136,60 +150,9 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
-
-  browserless:
-    image: ghcr.io/browserless/chromium:latest
-    container_name: browserless
-    ports:
-      - "3000:3000"
-    environment:
-      CONCURRENT: "5"
-      TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
-      TIMEOUT: "60000"
-    networks:
-      - mcp-network
-    restart: unless-stopped
-    # SECURITY: Token visible in process list (ps aux) - acceptable for dev, review for prod
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}", "http://localhost:3000/json/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 512M
-
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
-    environment:
-      - BASE_URL=http://searxng:8080
-      - INSTANCE_NAME=SearXNG-MCP
-    volumes:
-      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
-    networks:
-      - mcp-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
+    labels:
+      - "network.security=internal"
+      - "network.description=Transcripción de audio (Whisper)"
 
   rustfs:
     image: rustfs/rustfs:latest
@@ -202,7 +165,7 @@ services:
     volumes:
       - rustfs-data:/data
     networks:
-      - mcp-network
+      - mcp-internal
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:9000/minio/health/live | grep -qE '^(200|403)$'"]
@@ -218,11 +181,205 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
+    labels:
+      - "network.security=internal"
+      - "network.description=Almacenamiento S3-compatible (evidencias)"
 
+  memgraph:
+    image: memgraph/memgraph-mage:latest
+    container_name: ocu-memgraph
+    restart: unless-stopped
+    ports:
+      - "7687:7687"
+    volumes:
+      - ocu-memgraph-data:/var/lib/memgraph
+      - ocu-memgraph-logs:/var/log/memgraph
+      - ocu-memgraph-etc:/etc/memgraph
+    environment:
+      - MEMGRAPH_ORGANIZATION_NAME=OCu
+      - MEMGRAPH_USERNAME=ocu_admin
+    command:
+      - "--bolt-port=7687"
+      - "--log-level=TRACE"
+      - "--also-log-to-stderr=true"
+      - "--storage-properties-on-edges=true"
+      - "--storage-snapshot-interval-sec=300"
+      - "--storage-wal-enabled=true"
+      - "--telemetry-enabled=false"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f memgraph || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - mcp-internal
+    labels:
+      - "ocu.component=graph"
+      - "network.security=internal"
+      - "network.description=Base de grafos (relaciones de casos)"
+
+  opensearch:
+    image: opensearchproject/opensearch:latest
+    container_name: ocu-opensearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - ocu-opensearch-data:/usr/share/opensearch/data
+    environment:
+      - cluster.name=ocu-cluster
+      - node.name=ocu-node-1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true
+      - network.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - mcp-internal
+    labels:
+      - "ocu.component=search"
+      - "network.security=internal"
+      - "network.description=Motor de búsqueda full-text (evidencias)"
+
+  # ═══════════════════════════════════════════════
+  # SERVICIOS EXTERNOS — Con acceso a internet (mcp-external)
+  # ═══════════════════════════════════════════════
+
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: browserless
+    ports:
+      - "3000:3000"
+    environment:
+      CONCURRENT: "5"
+      TOKEN: ${BROWSERLESS_TOKEN:?BROWSERLESS_TOKEN is required}
+      TIMEOUT: "60000"
+    networks:
+      - mcp-external
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROW...OKEN is required}", "http://localhost:3000/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    labels:
+      - "network.security=external"
+      - "network.description=Navegador headless (scraping, screenshots)"
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    environment:
+      - BASE_URL=http://searxng:8080
+      - INSTANCE_NAME=SearXNG-MCP
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    networks:
+      - mcp-external
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      - "network.security=external"
+      - "network.description=Meta-buscador privado (OSINT)"
+
+  # ═══════════════════════════════════════════════
+  # OCu VISUALIZACIÓN — Interfaces web para investigación
+  # ═══════════════════════════════════════════════
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: ocu-opensearch-dashboards
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - mcp-internal
+      - mcp-external
+    labels:
+      - "ocu.component=dashboards"
+      - "network.security=bridge"
+      - "network.description=Interfaz visual para OpenSearch"
+
+  memgraph-lab:
+    image: memgraph/lab:latest
+    container_name: ocu-memgraph-lab
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    depends_on:
+      memgraph:
+        condition: service_healthy
+    networks:
+      - mcp-internal
+      - mcp-external
+    labels:
+      - "ocu.component=graph-ui"
+      - "network.description=Consola web para queries Cypher y visualización de grafos"
+
+# ═══════════════════════════════════════════════
+# REDES DE SEGURIDAD
+# ═══════════════════════════════════════════════
 networks:
-  mcp-network:
+  mcp-internal:
     driver: bridge
+    internal: true
+    labels:
+      - "network.security=internal"
+      - "network.description=Red aislada sin acceso a internet. Servicios de datos."
+  mcp-external:
+    driver: bridge
+    labels:
+      - "network.security=external"
+      - "network.description=Red con acceso a internet. Servicios públicos y proxy."
 
+# ═══════════════════════════════════════════════
+# VOLÚMENES PERSISTENTES
+# ═══════════════════════════════════════════════
 volumes:
   whisper-models:
     driver: local
@@ -231,4 +388,12 @@ volumes:
   postgres-data:
     driver: local
   rustfs-data:
+    driver: local
+  ocu-memgraph-data:
+    driver: local
+  ocu-memgraph-logs:
+    driver: local
+  ocu-memgraph-etc:
+    driver: local
+  ocu-opensearch-data:
     driver: local

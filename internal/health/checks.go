@@ -93,9 +93,15 @@ func BuildDependencies(cfg *config.Config) []DependencyCheck {
 		return nil
 	}
 
-	deps := []DependencyCheck{
-		{Name: "redis", Critical: false},     // covered by checkRedis via client
-		{Name: "postgres", Critical: false},  // covered by checkPostgres via client
+	deps := []DependencyCheck{}
+
+	// Only add redis if REDIS_URL is configured
+	if os.Getenv("REDIS_URL") != "" {
+		deps = append(deps, DependencyCheck{Name: "redis", Critical: false})
+	}
+	// Only add postgres if DATABASE_URL is configured
+	if os.Getenv("DATABASE_URL") != "" {
+		deps = append(deps, DependencyCheck{Name: "postgres", Critical: false})
 	}
 
 	for _, tool := range cfg.Tools {
@@ -168,14 +174,29 @@ func osGetenv(key, defaultVal string) string {
 //	Slice of CheckResult, one per check. Order: redis, postgres, config, memory,
 //	followed by dependency checks (browserless, searxng, rustfs, ollama).
 func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
+	// Build the list of checks, skipping redis if not configured
 	checks := []struct {
 		name string
 		fn   func(ctx context.Context) CheckResult
 	}{
-		{"redis", c.checkRedis},
-		{"postgres", c.checkPostgres},
 		{"config", c.checkConfig},
 		{"memory", c.checkMemory},
+	}
+
+	// Only add redis check if client is configured
+	if c.redisClient != nil {
+		checks = append(checks, struct {
+			name string
+			fn   func(ctx context.Context) CheckResult
+		}{"redis", c.checkRedis})
+	}
+
+	// Only add postgres check if db is configured
+	if c.db != nil {
+		checks = append(checks, struct {
+			name string
+			fn   func(ctx context.Context) CheckResult
+		}{"postgres", c.checkPostgres})
 	}
 
 	// Add dependency-specific checks

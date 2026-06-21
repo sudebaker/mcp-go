@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
@@ -64,7 +67,43 @@ func main() {
 
 	// Build health checker with dependency detection
 	deps := health.BuildDependencies(cfg)
-	healthChecker := health.NewChecker(cfg, nil, nil, deps)
+
+	// Open PostgreSQL connection from DATABASE_URL if configured
+	var db *sql.DB
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL != "" {
+		// Ensure sslmode=disable for internal Docker connections
+		if !containsParam(databaseURL, "sslmode") {
+			separator := "?"
+			if containsChar(databaseURL, '?') {
+				separator = "&"
+			}
+			databaseURL = databaseURL + separator + "sslmode=disable"
+		}
+		var dbErr error
+		db, dbErr = sql.Open("postgres", databaseURL)
+		if dbErr != nil {
+			log.Error().Err(dbErr).Msg("Failed to open PostgreSQL connection for health checks")
+			db = nil
+		} else {
+			db.SetMaxOpenConns(2) // Health checks only need minimal connections
+			db.SetMaxIdleConns(1)
+			log.Info().Msg("PostgreSQL health check connection initialized")
+		}
+	}
+
+	// Filter out redis from deps if REDIS_URL is not set
+	if os.Getenv("REDIS_URL") == "" {
+		filtered := make([]health.DependencyCheck, 0, len(deps))
+		for _, d := range deps {
+			if d.Name != "redis" {
+				filtered = append(filtered, d)
+			}
+		}
+		deps = filtered
+	}
+
+	healthChecker := health.NewChecker(cfg, nil, db, deps)
 	log.Info().Int("dependencies", len(deps)).Msg("Health checker initialized")
 
 	log.Info().
@@ -386,4 +425,14 @@ func createToolHandler(exec *executor.Executor, toolName string) server.ToolHand
 		// Default to empty text result
 		return mcp.NewToolResultText(""), nil
 	}
+}
+
+// containsParam checks if a URL string already contains a query parameter.
+func containsParam(rawURL, param string) bool {
+	return strings.Contains(rawURL, param+"=")
+}
+
+// containsChar checks if a string contains a specific character.
+func containsChar(s string, c byte) bool {
+	return strings.IndexByte(s, c) >= 0
 }

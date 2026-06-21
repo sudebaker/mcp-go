@@ -215,7 +215,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Stores text in the knowledge base for future semantic search. Use to memorize facts, preferences, decisions, or any information the user wants the bot to remember across conversations. Returns a confirmation with the stored content ID."
+    description: "Stores text in the knowledge base for future semantic search. Use to memorize facts, preferences, decisions, or any information the user wants the bot to remember across conversations. Returns a confirmation with the stored content ID. user_id is automatically injected from the MCP session context (capabilities.experimental.user_id) for data isolation. If the MCP client does not send user_id, all data defaults to 'anonymous' — shared across sessions. No user_id parameter is needed in the tool call."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -240,7 +240,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Searches the knowledge base for relevant facts using semantic similarity. Use when the user asks about something previously discussed, their preferences, past decisions, or any memorized information. Returns ranked results with relevance scores."
+    description: "Searches the knowledge base for relevant facts using semantic similarity. Use when the user asks about something previously discussed, their preferences, past decisions, or any memorized information. Returns ranked results with relevance scores. user_id is automatically injected from the MCP session context (capabilities.experimental.user_id) for data isolation. If the MCP client does not send user_id, searches default to 'anonymous' — returning all shared data. No user_id parameter is needed in the tool call."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"

@@ -35,7 +35,7 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
-BROWSERLESS_URL = os.environ.get("BROWSERLESS_URL", "http://browserless:3000")
+BROWSERLESS_URL = os.environ.get("BROWSERLESS_URL") or "http://browserless:3000"
 BROWSERLESS_TOKEN = os.environ.get("BROWSERLESS_TOKEN")
 DEFAULT_WAIT_MS = 3000
 DEFAULT_TIMEOUT = 60

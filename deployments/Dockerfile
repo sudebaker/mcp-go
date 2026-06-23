@@ -106,6 +106,10 @@ rapidfuzz>=3.0.0
 python-magic>=0.4.27
 imagehash>=4.3.1
 folium>=0.14.0
+
+# Graph / search drivers for forensic tools
+neo4j>=5.14.0
+opensearch-py>=2.4.0
 EOF
 
 # Install Python dependencies

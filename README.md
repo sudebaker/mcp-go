@@ -94,18 +94,18 @@ The `analyze_image` tool supports optional `provider` and `model` parameters to 
 | Provider | Routes to | Default Model | API Key Required |
 |----------|-----------|---------------|------------------|
 | `ollama` / `local` | `LLM_API_URL` env var (default `http://localhost:11434`) | `LLM_MODEL` or `llava` | No |
-| `remote-ollama` | `REMOTE_OLLAMA_URL` env var | `qwen3.5:9b` (multimodal) | No |
+| `remote-ollama` | `LLM_VISION_API_URL` env var | `qwen3.5:9b` (multimodal) | No |
 | `openrouter` | `https://openrouter.ai/api/v1` | `google/gemini-2.0-flash-001` | `OPENROUTER_API_KEY` |
 | `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` | `OPENAI_API_KEY` |
 | Custom URL | Used directly as-is | `LLM_MODEL` or `llava` | Varies |
 
 ### Configuration
 
-Set the `REMOTE_OLLAMA_URL` environment variable in your `.env` file (gitignored) to point to a remote Ollama instance (VPN, Tailscale, LAN, etc.):
+Set the `LLM_VISION_API_URL` environment variable in your `.env` file (gitignored) to point to a remote Ollama instance (VPN, Tailscale, LAN, etc.):
 
 ```bash
 # Example: Ollama running on a remote machine via VPN/Tailscale
-REMOTE_OLLAMA_URL=http://<your-remote-ollama-host>:11434
+LLM_VISION_API_URL=http://<your-remote-ollama-host>:11434
 ```
 
 ### Usage Examples

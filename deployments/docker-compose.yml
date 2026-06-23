@@ -26,7 +26,7 @@ services:
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
-      REMOTE_OLLAMA_URL: ${REMOTE_OLLAMA_URL}
+      LLM_VISION_API_URL: ${LLM_VISION_API_URL}
       DATABASE_URL: ${DATABASE_URL}
       FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/data/fastembed}
       BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}

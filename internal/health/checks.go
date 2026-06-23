@@ -151,7 +151,7 @@ func BuildDependencies(cfg *config.Config) []DependencyCheck {
 // the host:port portion. Returns the original string if parsing fails.
 func extractHostPort(rawURL string) string {
 	u, err := url.Parse(rawURL)
-	if err != nil {
+	if err != nil || u.Host == "" {
 		return rawURL
 	}
 	return u.Host

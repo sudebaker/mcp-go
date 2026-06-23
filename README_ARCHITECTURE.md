@@ -332,7 +332,6 @@ print(json.dumps(response))
 - `RUSTFS_ENDPOINT` - Internal endpoint (e.g., `http://rustfs:9000`)
 - `RUSTFS_PUBLIC_URL` - Public URL for external agents
 - `RUSTFS_ACCESS_KEY_ID`, `RUSTFS_SECRET_ACCESS_KEY` - Credentials
-- `S3_BUCKET_NAME` - Default bucket (default: `default`)
 - `RUSTFS_PRESIGNED_TTL_SECONDS` - Presigned URL expiry (default: 3600)
 
 ---

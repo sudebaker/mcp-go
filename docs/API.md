@@ -562,7 +562,6 @@ upload:
 | RUSTFS_PUBLIC_URL | **required** | Public URL for external agents (e.g., http://192.168.1.100:9000) |
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
-| S3_BUCKET_NAME | default | Bucket name |
 | SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges (whitelist) |
 | SSRF_BLOCKED_NETWORKS | 169.254.0.0/16,127.0.0.0/8 | Comma-separated CIDR ranges to block (blacklist) |
 | S3_OPERATION_TIMEOUT_SECONDS | 30 | Timeout for S3 read operations (seconds) |

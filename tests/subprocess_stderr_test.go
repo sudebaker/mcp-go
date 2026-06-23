@@ -28,7 +28,7 @@ func TestStderrLogging(t *testing.T) {
 				Name:        "test_stderr_logging",
 				Description: "Test tool to verify stderr logging behavior",
 				Command:     "python3",
-				Args:        []string{"tools/test_stderr_logging/main.py"},
+				Args:        []string{"../tools/test_stderr_logging/main.py"},
 				Timeout:     30 * time.Second,
 			},
 		},

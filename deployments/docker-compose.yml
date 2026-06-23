@@ -126,6 +126,7 @@ services:
       - whisper-models:/root/.cache/huggingface
     networks:
       - mcp-internal
+    command: ["uv", "run", "--offline", "uvicorn", "--factory", "faster_whisper_server.main:create_app"]
     restart: unless-stopped
     deploy:
       resources:

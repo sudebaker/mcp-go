@@ -188,7 +188,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
 
     Supported providers:
         - 'ollama' or 'local': Uses LLM_API_URL env var (default http://localhost:11434)
-        - 'remote-ollama' or 'tailscale': Uses remote vision endpoint via LLM_VISION_API_URL env var
+        - 'vision': Uses remote vision endpoint via LLM_VISION_API_URL env var
         - 'openrouter': Uses OpenRouter API (needs OPENROUTER_API_KEY env var)
         - 'openai': Uses OpenAI API (needs OPENAI_API_KEY env var)
         - 'anthropic': Uses Anthropic API (needs ANTHROPIC_API_KEY env var)
@@ -210,12 +210,12 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
             api_url = os.environ.get("LLM_API_URL", "http://localhost:11434")
             return api_url, resolved_model
 
-        if provider_lower in ("remote-ollama", "tailscale"):
+        if provider_lower == "vision":
             # Remote vision endpoint — URL configurable via env var
             # Use /v1 endpoint for OpenAI-compatible format (supports vision via multi-part content)
             api_url = os.environ.get("LLM_VISION_API_URL", "")
             if not api_url:
-                raise ValueError("LLM_VISION_API_URL env var not set. Configure it to point to your remote Ollama host (e.g. http://<remote-host>:11434)")
+                raise ValueError("LLM_VISION_API_URL env var not set")
             # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
             api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
             resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)

@@ -94,28 +94,27 @@ The `analyze_image` tool supports optional `provider` and `model` parameters to 
 | Provider | Routes to | Default Model | API Key Required |
 |----------|-----------|---------------|------------------|
 | `ollama` / `local` | `LLM_API_URL` env var (default `http://localhost:11434`) | `LLM_MODEL` or `llava` | No |
-| `remote-ollama` | `LLM_VISION_API_URL` env var | `qwen3.5:9b` (multimodal) | No |
+| `vision` | `LLM_VISION_API_URL` env var | `qwen3.5:9b` (multimodal) | No |
 | `openrouter` | `https://openrouter.ai/api/v1` | `google/gemini-2.0-flash-001` | `OPENROUTER_API_KEY` |
 | `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` | `OPENAI_API_KEY` |
 | Custom URL | Used directly as-is | `LLM_MODEL` or `llava` | Varies |
 
 ### Configuration
 
-Set the `LLM_VISION_API_URL` environment variable in your `.env` file (gitignored) to point to a remote Ollama instance (VPN, Tailscale, LAN, etc.):
+Set the `LLM_VISION_API_URL` environment variable in your `.env` file to point to a remote inference endpoint:
 
 ```bash
-# Example: Ollama running on a remote machine via VPN/Tailscale
-LLM_VISION_API_URL=http://<your-remote-ollama-host>:11434
+LLM_VISION_API_URL=http://<your-vision-host>:11434/v1
 ```
 
 ### Usage Examples
 
 ```json
-// Route to remote Ollama (private, no third-party)
-analyze_image(image_path="/data/tmp/photo.jpg", task="describe", provider="remote-ollama")
+// Route to remote vision endpoint (private, no third-party)
+analyze_image(image_path="/data/tmp/photo.jpg", task="describe", provider="vision")
 
 // Specify model explicitly
-analyze_image(image_path="/data/tmp/photo.jpg", task="ocr", provider="remote-ollama", model="gemma4:34b")
+analyze_image(image_path="/data/tmp/photo.jpg", task="ocr", provider="vision", model="gemma4:34b")
 
 // Use OpenRouter (cloud-based)
 analyze_image(image_path="/data/tmp/photo.jpg", task="answer", provider="openrouter", model="google/gemini-2.0-flash-001")

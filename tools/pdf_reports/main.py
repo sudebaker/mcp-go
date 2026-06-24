@@ -51,7 +51,7 @@ def get_template_env() -> Environment:
     """
     global _template_env
     if _template_env is None:
-        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/home/amphora/src/mcp-go/templates/reports"))
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
 
         if SandboxedEnvironment is not None:
             _template_env = SandboxedEnvironment(
@@ -384,7 +384,7 @@ def main() -> None:
 
         html_content = renderers[report_type](data, env)
 
-        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/home/amphora/src/mcp-go/templates/reports"))
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
         styles_css_path = templates_dir / "styles.css"
 
         generate_pdf(

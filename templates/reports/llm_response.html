@@ -1,33 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .content { margin: 20px; }
+    </style>
 </head>
 <body>
-    {% if logo_url %}
-    <div class="logo-container">
-        <img src="{{ logo_url }}" alt="Company Logo">
-    </div>
-    {% endif %}
-
-    <div class="report-header">
-        <div class="report-type">AI Generated Report</div>
+    <div class="content">
         <h1>{{ title }}</h1>
-        <div class="report-date">Generated: {{ generated_at }}</div>
-        {% if author %}
-        <div class="report-author">Author: {{ author }}</div>
-        {% endif %}
+        <p>Generated at: {{ generated_at }}</p>
+        <p>Author: {{ author }}</p>
+        <div>{{ content_html|safe }}</div>
     </div>
-
-    <div class="llm-content">
-        {{ content_html | safe }}
-    </div>
-
-    <footer>
-        <div class="confidential">{{ confidentiality }}</div>
-        <p class="generated-at">Report generated on {{ generated_at }}</p>
-    </footer>
 </body>
 </html>

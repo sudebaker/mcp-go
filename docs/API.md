@@ -176,13 +176,13 @@ Simple text echo for testing.
 
 ### generate_report
 
-Generates PDF reports from templates. Supports uploading to RustFS/S3 storage.
+Generates PDF reports from templates.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| report_type | string | Yes | `incident`, `meeting`, `audit`, `executive_summary`, `formal_report`, `corporate_email`, `llm_response` |
-| data | object | Yes | Report data object |
-| output_path | string | No | Optional output path |
+|| Parameter | Type | Required | Description |
+||-----------|------|----------|-------------|
+|| report_type | string | Yes | `incident`, `meeting`, `audit`, `executive_summary`, `formal_report`, `corporate_email`, `llm_response` |
+|| data | object | Yes | Report data object |
+|| output_path | string | No | Optional output path |
 
 **Report Types:**
 - `formal_report`: Supports a `content` field (markdown) that is rendered as the report body. Falls back to structured `sections`, `recommendations`, etc. if `content` is not provided.
@@ -191,10 +191,8 @@ Generates PDF reports from templates. Supports uploading to RustFS/S3 storage.
 
 **Output:**
 - `pdf_base64`: PDF content encoded in base64 (MCP standard)
-- `download_url`: Public URL to download the PDF (valid 24h by default)
-- `storage`: Object with `bucket`, `object_name`, `presigned_url`, `download_url` (if RustFS available)
-
----
+- `output_path`: Path to the generated PDF file
+- `file_size`: Size of the generated PDF in bytes
 
 ### analyze_data
 
@@ -574,7 +572,7 @@ upload:
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
 
-**Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram, pdf_reports). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
+**Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
 
 ---
 

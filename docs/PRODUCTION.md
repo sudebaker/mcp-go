@@ -77,7 +77,7 @@ docker-compose -f deployments/docker-compose.yml ps
 # Required
 LLM_API_URL=http://localhost:11434
 LLM_MODEL=llama3
-DATABASE_URL=postgresql://mcp:mcp@localhost:5432/knowledge
+DATABASE_URL=postgresql://mcp:***@localhost:5432/knowledge
 
 # RustFS/S3 (required for storage tools)
 RUSTFS_ENDPOINT=http://rustfs:9000
@@ -89,7 +89,6 @@ RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
 SSRF_ALLOWLIST=rustfs
 S3_OPERATION_TIMEOUT_SECONDS=30
 RUSTFS_PRESIGNED_TTL_SECONDS=3600
-DOWNLOAD_URL_EXPIRY_HOURS=24
 ```
 
 ### Start Services

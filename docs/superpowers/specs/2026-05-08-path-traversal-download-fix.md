@@ -98,12 +98,12 @@ python -m pytest tests/ -v
 
 ## Implementation Checklist
 
-- [ ] Eliminar `internal/transport/download.go`
-- [ ] Limpiar referencias en `internal/transport/sse.go`
-- [ ] Eliminar `generate_download_url` y referencias en `tools/pdf_reports/main.py`
-- [ ] Actualizar `configs/config.yaml`
-- [ ] Actualizar `configs/config-en.yaml`
-- [ ] Actualizar `docs/API.md`
+- [x] Eliminar `internal/transport/download.go`
+- [x] Limpiar referencias en `internal/transport/sse.go`
+- [x] Eliminar `generate_download_url` y referencias en `tools/pdf_reports/main.py`
+- [x] Actualizar `configs/config.yaml`
+- [x] Actualizar `configs/config-en.yaml`
+- [x] Actualizar `docs/API.md`
 - [ ] Actualizar `docs/DEVELOPMENT.md`
 - [ ] Ejecutar `go build && go test ./...`
 - [ ] Verificar que no hay referencias residuales a `/download/`

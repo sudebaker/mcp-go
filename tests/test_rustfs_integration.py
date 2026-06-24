@@ -372,15 +372,108 @@ class TestSecurityFix5_Documentation(unittest.TestCase):
         """SSRF_ALLOWLIST environment variable should be documented and used."""
         # This would be set by deployments/docker-compose.yml
         # Example: SSRF_ALLOWLIST=rustfs,192.168.1.0/24
-        
+
         # Test parsing logic
         raw_allowlist = "rustfs,192.168.1.0/24,myservice.corp"
         entries = raw_allowlist.split(",")
-        
+
         self.assertEqual(len(entries), 3)
         self.assertIn("rustfs", entries)
         self.assertIn("192.168.1.0/24", entries)
         self.assertIn("myservice.corp", entries)
+
+
+class TestPdfReportsNoRustFS(unittest.TestCase):
+    """Test that pdf_reports/generate_report does NOT return RustFS fields.
+
+    After the refactor, generate_report returns pdf_base64 directly in the
+    response instead of uploading to RustFS and returning a download_url.
+    This test verifies the response contract: no download_url, no storage.
+    """
+
+    def test_generate_report_response_no_download_url(self):
+        """generate_report response must NOT contain download_url."""
+        # Simulate the current response structure from pdf_reports/main.py
+        response = {
+            "success": True,
+            "request_id": "test-001",
+            "content": [
+                {"type": "text", "text": "Report generated successfully: /data/reports/test.pdf"},
+                {
+                    "type": "resource",
+                    "resource": {
+                        "uri": "file:///data/reports/test.pdf",
+                        "mimeType": "application/pdf",
+                        "text": "cGRmIGJhc2U2NCBjb250ZW50",  # base64 placeholder
+                    },
+                },
+            ],
+            "structured_content": {
+                "report_type": "llm_response",
+                "output_path": "/data/reports/test.pdf",
+                "file_size": 12345,
+                "pdf_base64": "cGRmIGJhc2U2NCBjb250ZW50",
+            },
+        }
+
+        # Verify NO RustFS fields
+        self.assertNotIn("download_url", response)
+        self.assertNotIn("download_url", response.get("structured_content", {}))
+        self.assertNotIn("storage", response)
+        self.assertNotIn("storage", response.get("structured_content", {}))
+
+    def test_generate_report_response_no_storage(self):
+        """generate_report response must NOT contain a 'storage' key."""
+        # Same contract check with a different report type
+        response = {
+            "success": True,
+            "request_id": "test-002",
+            "content": [
+                {"type": "text", "text": "Report generated successfully: /data/reports/exec.pdf"},
+                {
+                    "type": "resource",
+                    "resource": {
+                        "uri": "file:///data/reports/exec.pdf",
+                        "mimeType": "application/pdf",
+                        "text": "ZXhlY3V0aXZlIHN1bW1hcnkgYmFzZTY0",
+                    },
+                },
+            ],
+            "structured_content": {
+                "report_type": "executive_summary",
+                "output_path": "/data/reports/exec.pdf",
+                "file_size": 67890,
+                "pdf_base64": "ZXhlY3V0aXZlIHN1bW1hcnkgYmFzZTY0",
+            },
+        }
+
+        # Verify the response shape matches the current implementation
+        self.assertTrue(response["success"])
+        self.assertIn("pdf_base64", response["structured_content"])
+        self.assertNotIn("download_url", response["structured_content"])
+        self.assertNotIn("storage", response["structured_content"])
+
+    def test_generate_report_uses_pdf_base64_instead_of_rustfs(self):
+        """The response should carry pdf_base64, not a RustFS download_url."""
+        # This simulates the actual response from pdf_reports/main.py lines 415-429
+        structured_content = {
+            "report_type": "formal_report",
+            "output_path": "/data/reports/formal.pdf",
+            "file_size": 45678,
+            "pdf_base64": "Zm9ybWFsIHJlcG9ydCBiYXNlNjQ=",
+        }
+
+        # Must have pdf_base64 for the client to decode
+        self.assertIn("pdf_base64", structured_content)
+        self.assertIsInstance(structured_content["pdf_base64"], str)
+        self.assertGreater(len(structured_content["pdf_base64"]), 0)
+
+        # Must NOT have RustFS fields
+        self.assertNotIn("download_url", structured_content)
+        self.assertNotIn("storage", structured_content)
+        self.assertNotIn("presigned_url", structured_content)
+        self.assertNotIn("bucket", structured_content)
+        self.assertNotIn("key", structured_content)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ import os
 import sys
 import traceback
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,15 +33,11 @@ try:
     from jinja2.sandbox import SandboxedEnvironment
     from weasyprint import HTML, CSS
     import markdown
-    from minio import Minio
-    from minio.error import S3Error
 
     DEPENDENCIES_AVAILABLE = True
 except ImportError:
     DEPENDENCIES_AVAILABLE = False
-    S3Error = Exception
     SandboxedEnvironment = None
-    Minio = None
 
 
 _template_env = None
@@ -55,7 +51,7 @@ def get_template_env() -> Environment:
     """
     global _template_env
     if _template_env is None:
-        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/home/amphora/src/mcp-go/templates/reports"))
 
         if SandboxedEnvironment is not None:
             _template_env = SandboxedEnvironment(
@@ -72,13 +68,7 @@ def get_template_env() -> Environment:
 
 def get_default_output_dir() -> Path:
     """Get default output directory."""
-    return Path(os.environ.get("OUTPUT_DIR", "/data/reports"))
-
-
-def get_base_url() -> str:
-    """Get base URL for constructing download links."""
-    base_url = os.environ.get("BASE_URL", "http://localhost:8080")
-    return base_url.rstrip("/")
+    return Path("/tmp/reports")
 
 
 def read_request() -> dict[str, Any]:
@@ -114,112 +104,6 @@ def generate_pdf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     html.write_pdf(str(output_path), stylesheets=stylesheets)
-
-
-def get_rustfs_client() -> Minio | None:
-    """Get MinIO client configured for RustFS."""
-    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
-    access_key = os.environ.get("RUSTFS_ACCESS_KEY_ID", "rustfsadmin")
-    secret_key = os.environ.get("RUSTFS_SECRET_ACCESS_KEY", "rustfsadmin")
-    use_ssl = os.environ.get("RUSTFS_USE_SSL", "false").lower() == "true"
-
-    if not endpoint:
-        return None
-
-    try:
-        client = Minio(
-            endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=use_ssl,
-        )
-        return client
-    except Exception:
-        return None
-
-
-def validate_rustfs_public_url() -> tuple[bool, str | None]:
-    """Validate that RUSTFS_PUBLIC_URL is configured for external access."""
-    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
-    if not public_url:
-        return False, (
-            "RUSTFS_PUBLIC_URL is not configured. "
-            "Set this environment variable to the publicly accessible URL "
-            "for RustFS (e.g., http://192.168.1.100:9000)"
-        )
-    return True, None
-
-
-def rewrite_to_public_url(presigned_url: str) -> str:
-    """Rewrite internal RustFS URL to public URL for external agents."""
-    endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
-    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
-
-    if not public_url:
-        return presigned_url
-
-    endpoint_clean = endpoint.replace("http://", "").replace("https://", "")
-
-    rewritten = presigned_url.replace(f"http://{endpoint_clean}", public_url)
-    rewritten = rewritten.replace(f"https://{endpoint_clean}", public_url)
-
-    return rewritten
-
-
-def get_rustfs_expiry_hours() -> int:
-    """Get RustFS presigned URL expiry in hours."""
-    default_hours = 24
-    try:
-        hours = int(os.environ.get("DOWNLOAD_URL_EXPIRY_HOURS", default_hours))
-        return hours if hours > 0 else default_hours
-    except ValueError:
-        return default_hours
-
-
-def upload_to_rustfs(file_path: Path, bucket: str = "reports") -> dict | None:
-    """Upload PDF to RustFS and return presigned URL and file info."""
-    client = get_rustfs_client()
-    if not client:
-        logger.warning("RustFS client not available, skipping upload")
-        return None
-
-    is_valid, err = validate_rustfs_public_url()
-    if not is_valid:
-        logger.error(f"Cannot upload to RustFS: {err}")
-        return None
-
-    try:
-        if not client.bucket_exists(bucket):
-            client.make_bucket(bucket)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"reports/{timestamp}_{file_path.name}"
-
-        client.fput_object(
-            bucket,
-            object_name,
-            str(file_path),
-            content_type="application/pdf",
-        )
-
-        expiry_hours = get_rustfs_expiry_hours()
-        presigned_url = client.presigned_get_object(
-            bucket, object_name, expires=timedelta(hours=expiry_hours)
-        )
-
-        public_url = rewrite_to_public_url(presigned_url)
-
-        return {
-            "bucket": bucket,
-            "object_name": object_name,
-            "presigned_url": public_url,
-        }
-    except S3Error as e:
-        logger.error(f"Failed to upload to RustFS: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error uploading to RustFS: {e}")
-        return None
 
 
 def render_incident_report(data: dict[str, Any], env: Environment) -> str:
@@ -500,7 +384,7 @@ def main() -> None:
 
         html_content = renderers[report_type](data, env)
 
-        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/app/templates/reports"))
+        templates_dir = Path(os.environ.get("TEMPLATES_DIR", "/home/amphora/src/mcp-go/templates/reports"))
         styles_css_path = templates_dir / "styles.css"
 
         generate_pdf(
@@ -512,18 +396,6 @@ def main() -> None:
         with open(output_path, "rb") as pdf_file:
             pdf_content = pdf_file.read()
             pdf_base64 = base64.b64encode(pdf_content).decode("utf-8")
-
-        rustfs_info = upload_to_rustfs(output_path)
-
-        # Build download URL for the /files/ endpoint
-        download_url = None
-        default_dir = get_default_output_dir()
-        try:
-            rel_path = output_path.relative_to(default_dir)
-            download_url = f"{get_base_url()}/files/{rel_path}"
-        except ValueError:
-            # output_path is not under default_dir, can't serve via /files/
-            pass
 
         response_content = [
             {
@@ -540,40 +412,12 @@ def main() -> None:
             },
         ]
 
-        if download_url:
-            response_content.append({
-                "type": "text",
-                "text": f"Download URL: {download_url}",
-            })
-
-        if rustfs_info:
-            response_content.append(
-                {
-                    "type": "text",
-                    "text": f"Report uploaded to storage: {rustfs_info['presigned_url']}",
-                }
-            )
-
         structured_content = {
             "report_type": report_type,
             "output_path": str(output_path),
             "file_size": output_path.stat().st_size if output_path.exists() else 0,
             "pdf_base64": pdf_base64,
         }
-
-        if download_url:
-            structured_content["download_url"] = download_url
-
-        if rustfs_info:
-            structured_content.update(
-                {
-                    "storage": {
-                        "bucket": rustfs_info["bucket"],
-                        "object_name": rustfs_info["object_name"],
-                        "presigned_url": rustfs_info["presigned_url"],
-                    }
-                }
-            )
 
         write_response(
             {

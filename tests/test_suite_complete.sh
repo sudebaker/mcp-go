@@ -270,7 +270,7 @@ print_header "8. PDF REPORTS TOOL TEST"
 print_test "Test pdf_reports tool"
 PDF_INPUT=$(cat << 'EOF'
 {
-    "template_name": "simple_report",
+    "report_type": "llm_response",
     "output_path": "/data/reports/test_report.pdf",
     "data": {
         "title": "Test Report",
@@ -281,10 +281,19 @@ EOF
 )
 
 PDF_OUTPUT=$(echo "$PDF_INPUT" | docker exec -i mcp-orchestrator python3 /app/tools/pdf_reports/main.py 2>&1)
-if echo "$PDF_OUTPUT" | grep -q "success"; then
+if echo "$PDF_OUTPUT" | grep -q '"success": true'; then
     print_success "PDF reports tool executed successfully"
+    # Verify NO RustFS fields in response (legacy download_url and storage removed)
+    print_test "Verify pdf_reports response has no download_url or storage fields"
+    if echo "$PDF_OUTPUT" | grep -q '"download_url"'; then
+        print_failure "pdf_reports response should NOT contain download_url"
+    elif echo "$PDF_OUTPUT" | grep -q '"storage"'; then
+        print_failure "pdf_reports response should NOT contain storage"
+    else
+        print_success "pdf_reports response correctly omits download_url and storage"
+    fi
 else
-    print_failure "PDF reports tool failed (may require template): $PDF_OUTPUT"
+    print_failure "PDF reports tool failed: $(echo "$PDF_OUTPUT" | head -5)"
 fi
 
 # ===========================================

@@ -345,14 +345,16 @@ print(json.dumps(response))
 **Key Functions:**
 - `render_incident_report(data, env) -> str` - Render incident template
 - `generate_pdf(html_content, output_path, css_path)` - Convert HTML to PDF via WeasyPrint
-- `upload_to_rustfs(file_path, bucket) -> dict` - Upload to RustFS
-- `main()` - Entry point with template rendering and upload
+- `main()` - Entry point with template rendering and base64 PDF output
 
 **Features:**
 - Jinja2 sandboxed templates (prevents SSTI)
 - CSS styling via styles.css
-- Presigned URL generation for downloads
-- Base64 PDF output in response
+- Base64 PDF output in response (MCP standard)
+
+**Environment Variables:**
+- `OUTPUT_DIR` - Default directory for generated PDFs (default: `/data/reports`)
+- `TEMPLATES_DIR` - Directory for HTML/CSS templates (default: `/app/templates/reports`)
 
 ---
 

@@ -85,8 +85,9 @@ Tipos relevantes de `report_type`:
 
 Salida esperada:
 
-- PDF en base64
-- URL de descarga (válida 24h por defecto)
+- `pdf_base64`: PDF en base64
+- `output_path`: ruta al archivo generado
+- `file_size`: tamaño en bytes
 
 ### 4. Knowledge base
 

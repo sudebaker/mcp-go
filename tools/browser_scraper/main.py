@@ -202,6 +202,9 @@ def fetch_with_crawl4ai(
             if isinstance(data, list) and len(data) > 0:
                 return data[0], None
             elif isinstance(data, dict):
+                # v0.9 wraps results in {success, results, ...}
+                if "results" in data and isinstance(data["results"], list) and len(data["results"]) > 0:
+                    return data["results"][0], None
                 return data, None
             return None, "Unexpected response format from Crawl4ai"
 
@@ -219,6 +222,8 @@ def fetch_with_crawl4ai(
                 if isinstance(data, list) and len(data) > 0:
                     return data[0], None
                 elif isinstance(data, dict):
+                    if "results" in data and isinstance(data["results"], list) and len(data["results"]) > 0:
+                        return data["results"][0], None
                     return data, None
 
         return None, f"Crawl4ai returned HTTP {response.status_code}: {response.text[:200]}"
@@ -252,20 +257,28 @@ def get_page_title_from_result(result: dict) -> str:
 
 
 def extract_markdown(result: dict, selector: Optional[str], max_chars: int) -> str:
-    """Extract and clean markdown from Crawl4ai result."""
-    # Crawl4ai v0.9 returns markdown as a dict with raw_markdown key
+    """Extract and clean markdown from Crawl4ai result.
+
+    Crawl4ai v0.9 returns markdown as a dict with raw_markdown key,
+    or plain str in older versions. Falls back to HTML->text if no markdown.
+    """
+    # Try markdown field first (v0.9 dict format)
     md_field = result.get("markdown", "")
     if isinstance(md_field, dict):
-        markdown = md_field.get("raw_markdown", "") or ""
+        markdown = md_field.get("raw_markdown") or md_field.get("markdown") or ""
+    elif isinstance(md_field, str) and md_field:
+        markdown = md_field
     else:
-        markdown = md_field or ""
+        markdown = ""
 
-    # If selector provided and we have HTML, try to filter
-    # (Crawl4ai doesn't support per-selector extraction server-side
-    # for markdown, but the full markdown is already clean)
-    if selector and markdown:
-        # Fallback: do basic text filtering if needed
-        pass
+    # Fallback: convert HTML to plain text if no markdown available
+    if not markdown:
+        html = result.get("fit_html") or result.get("cleaned_html") or result.get("html", "")
+        if html:
+            # Basic HTML tag stripping
+            import re
+            markdown = re.sub(r"<[^>]+>", "", html)
+            markdown = re.sub(r"\s+", " ", markdown).strip()
 
     # Truncate
     if len(markdown) > max_chars:

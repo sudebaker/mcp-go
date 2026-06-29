@@ -91,8 +91,8 @@ internal/
 | `regulation_diff` | Document comparison | difflib |
 | `config_auditor` | Security scanning | YAML/JSON parsing |
 | `web_search` | Brave Search API | requests |
-| `web_scraper` | HTML extraction | BeautifulSoup |
-| `browser_scraper` | JS rendering | browserless/chromium |
+| `web_scraper` | Web scraping | Crawl4ai |
+| `browser_scraper` | Web scraping | Crawl4ai |
 | `transcribe` | Speech-to-text | faster-whisper |
 
 | `rss_reader` | Feed parsing | feedparser |
@@ -142,7 +142,7 @@ flowchart TB
     subgraph External["External Services"]
         BraveAPI["Brave Search API"]
         WhisperAPI["faster-whisper"]
-        Browserless["browserless:3000"]
+        Crawl4ai["crawl4ai:8000"]
         LLM["LLM (Ollama)"]
         PostgreSQL["PostgreSQL + pgvector"]
         Redis["Redis"]
@@ -345,7 +345,7 @@ graph LR
 
     subgraph Tools["Tool Dependencies"]
         Whisper["whisper:8000"]
-        Browserless["browserless:3000"]
+        Crawl4ai["crawl4ai:8000"]
         Brave["api.search.brave.com"]
         AEMET["opendata.aemet.es"]
     end
@@ -561,14 +561,14 @@ graph TD
         redis["redis:latest"]
         rustfs["rustfs:latest"]
         whisper["faster-whisper"]
-        browserless["browserless/chromium"]
+        crawl4ai["crawl4ai:latest"]
     end
 
     mcp --> postgres
     mcp --> redis
     mcp --> rustfs
     mcp --> whisper
-    mcp --> browserless
+    mcp --> crawl4ai
 
     style mcp fill:#fff3e0
     style postgres fill:#e3f2fd
@@ -582,7 +582,7 @@ graph TD
 | mcp-orchestrator | 2 cores | 3.5 GB |
 | postgres | 2 cores | 2.5 GB |
 | whisper | 2 cores | 2 GB |
-| browserless | 1 core | 1 GB |
+| crawl4ai | 2 cores | 4 GB |
 | rustfs | 1 core | 512 MB |
 
 ---

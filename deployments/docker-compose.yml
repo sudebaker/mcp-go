@@ -1,5 +1,5 @@
 # MCP Orchestrator Stack — Stack completo unificado
-# Incluye: MCP Server, PostgreSQL, SearXNG, Browserless, Whisper, RustFS
+# Includes: MCP Server, PostgreSQL, SearXNG, Crawl4ai, Whisper, RustFS
 #           OCu Investigación: Memgraph, OpenSearch
 #
 # SEGURIDAD DE REDES:
@@ -29,8 +29,8 @@ services:
       LLM_VISION_API_URL: ${LLM_VISION_API_URL}
       DATABASE_URL: ${DATABASE_URL}
       FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/data/fastembed}
-      BROWSERLESS_URL: ${BROWSERLESS_URL:-http://browserless:3000}
-      BROWSERLESS_TOKEN: ${BROWSERLESS_TOKEN}
+      CRAWL4AI_URL: ${CRAWL4AI_URL:-http://crawl4ai:11235}
+      CRAWL4AI_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
       SSRF_ALLOWLIST: ${SSRF_ALLOWLIST}
       LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
@@ -54,7 +54,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      browserless:
+      crawl4ai:
         condition: service_healthy
       whisper:
         condition: service_started
@@ -123,11 +123,13 @@ services:
       WHISPER_MODEL: Systran/faster-whisper-small
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
+      HF_HOME: /root/.cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface
     volumes:
       - whisper-models:/root/.cache/huggingface
     networks:
       - mcp-internal
-    command: ["uv", "run", "--offline", "uvicorn", "--factory", "faster_whisper_server.main:create_app"]
+    command: ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
     deploy:
       resources:
@@ -249,35 +251,34 @@ services:
   # SERVICIOS EXTERNOS — Con acceso a internet (mcp-external)
   # ═══════════════════════════════════════════════
 
-  browserless:
-    image: ghcr.io/browserless/chromium:latest
-    container_name: browserless
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: crawl4ai
     ports:
-      - "3000:3000"
+      - "11235:11235"
+    shm_size: "1gb"
     environment:
-      CONCURRENT: "5"
-      TOKEN: ${BROWSERLESS_TOKEN}
-      TIMEOUT: "60000"
+      CRAWL4AI_API_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
     networks:
       - mcp-external
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${BROWSERLESS_TOKEN}", "http://localhost:3000/json/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 1G
+          cpus: '2'
+          memory: 4G
         reservations:
-          cpus: '0.25'
-          memory: 512M
+          cpus: '0.5'
+          memory: 1G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11235/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     labels:
       - "network.security=external"
-      - "network.description=Navegador headless (scraping, screenshots)"
+      - "network.description=Crawl4ai — scraper LLM-friendly sin API key"
 
   searxng:
     image: searxng/searxng:latest

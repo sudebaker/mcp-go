@@ -50,8 +50,7 @@ execution:
     RUSTFS_SECRET_ACCESS_KEY: "${RUSTFS_SECRET_ACCESS_KEY:-rustfsadmin}"
     SSRF_ALLOWLIST: "${SSRF_ALLOWLIST:-rustfs}"
     SEARXNG_URL: "http://searxng:8080"
-    BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
-    BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN:-}"
+    CRAWL4AI_URL: "${CRAWL4AI_URL:-http://crawl4ai:11235}"
 
 tools:
   # Echo tool for testing
@@ -462,13 +461,13 @@ tools:
 
   # Browser Scraper
   - name: "browser_scraper"
-    description: "Scrape JS-heavy or anti-bot protected pages with headless browser. Use when web_scraper fails."
+    description: "Scrapes JS-heavy or anti-bot pages using Crawl4ai. Produces LLM-optimized markdown. Use when web_scraper fails."
     command: "python3"
     args: ["/app/tools/browser_scraper/main.py"]
     timeout: "90s"
     environment:
-      BROWSERLESS_URL: "${BROWSERLESS_URL:-http://browserless:3000}"
-      BROWSERLESS_TOKEN: "${BROWSERLESS_TOKEN}"
+      CRAWL4AI_URL: "${CRAWL4AI_URL:-http://crawl4ai:11235}"
+      CRAWL4AI_TOKEN: "${CRAWL4AI_TOKEN:-}"
     input_schema:
       type: object
       properties:

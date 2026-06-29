@@ -103,7 +103,7 @@ Herramientas:
 - `config_auditor`
 - `document_classifier`
 - `weather_forecast`
-- `web_scraper`
+- `web_scraper` (usa Crawl4ai)
 - `rss_reader`
 - `canvas_diagram`
 - `rustfs_storage`

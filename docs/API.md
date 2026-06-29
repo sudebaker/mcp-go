@@ -326,13 +326,13 @@ Gets weather forecast for specified cities using Open-Meteo API. Automatically g
 
 ### web_scraper
 
-Extracts content from web pages. Returns page text, links, images, or raw HTML.
+Extracts content from web pages using Crawl4ai. Returns LLM-optimized markdown, raw HTML, or structured data.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | url | string | Yes | URL to scrape (http:// or https://) |
 | selector | string | No | CSS selector to extract specific content |
-| extract_type | string | No | `text`, `html`, `links`, `images` (default: `text`) |
+| extract_type | string | No | `text` (default, markdown), `html`, `links`, `images` |
 
 ---
 

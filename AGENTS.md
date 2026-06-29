@@ -128,7 +128,7 @@ hooks.AddOnUnregisterSession(func(ctx context.Context, sess server.ClientSession
 | RustFS | `rustfs:9000` | S3-compatible storage |
 | Ollama | `ollama:11434` | LLM inference |
 | SearXNG | `searxng:8080` | Private web search |
-| browserless | `browserless:3000` | JS rendering |
+| crawl4ai | `crawl4ai:8000` | Web scraping (LLM-optimized) |
 
 ## Important Paths
 

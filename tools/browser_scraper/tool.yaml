@@ -1,5 +1,5 @@
 name: browser_scraper
-description: Scraping con headless browser para páginas JS-heavy o anti-bot. Usar
+description: Scraping con Crawl4ai para páginas JS-heavy o anti-bot. Produce markdown optimizado para LLM. Usar si web_scraper falla.
   si web_scraper falla.
 command: python3
 args:

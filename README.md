@@ -38,7 +38,7 @@ Services defined in `deployments/docker-compose.yml`:
 | `postgres` | `localhost:5432` | KB storage (pgvector) |
 | `rustfs` | `http://localhost:9000` | S3-compatible storage |
 | `searxng` | `http://localhost:8080` (internal) | Private web search |
-| `browserless` | `http://localhost:3000` | Headless browser (JS rendering) |
+| `crawl4ai` | `http://localhost:8000` | Web scraping (LLM-optimized markdown) |
 | `whisper` | `http://localhost:8000` | Audio transcription |
 
 ### Resource Limits
@@ -50,7 +50,7 @@ Each service in `docker-compose.yml` has CPU and memory limits to prevent any si
 | `mcp-server` | 2 CPUs | 2 GB | 0.5 CPUs | 1 GB |
 | `postgres` | 1 CPU | 1 GB | 0.5 CPUs | 512 MB |
 | `whisper` | 2 CPUs | 2 GB | 0.5 CPUs | 512 MB |
-| `browserless` | 1 CPU | 1 GB | 0.25 CPUs | 512 MB |
+| `crawl4ai` | 2 CPUs | 4 GB | 0.5 CPUs | 1 GB |
 | `searxng` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
 | `rustfs` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
 

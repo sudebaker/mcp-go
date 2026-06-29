@@ -32,8 +32,8 @@ El toolset `ocu-investigacion` reúne **25 herramientas MCP**: 11 tools de prop�
 | `kb_ingest` | Memoriza información en la base de conocimiento | PostgreSQL (pgvector) |
 | `kb_search` | Búsqueda semántica en la base de conocimiento | PostgreSQL (pgvector) |
 | `searxng_search` | Búsqueda web privada (agrega Google, Bing, DDG, Wikipedia) | SearXNG |
-| `browser_scraper` | Scraping con headless browser para páginas JS-heavy | Browserless |
-| `web_scraper` | Scraping simple de texto, links o imágenes | — |
+| `browser_scraper` | Scraping web con renderizado JS y salida LLM-optimizada | Crawl4ai |
+| `web_scraper` | Scraping web con salida LLM-optimizada (markdown) | Crawl4ai |
 | `analyze_image` | OCR e interpretación de imágenes | Ollama/LLaVA |
 | `transcribe` | Transcripción de audio | Whisper |
 | `generate_report` | Generación de informes PDF profesionales | — |

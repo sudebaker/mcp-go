@@ -106,11 +106,11 @@ func BuildDependencies(cfg *config.Config) []DependencyCheck {
 
 	for _, tool := range cfg.Tools {
 		switch tool.Name {
-		case "browser_scraper":
-			browserlessURL := osGetenv("BROWSERLESS_URL", "http://browserless:3000")
-			hostPort := extractHostPort(browserlessURL)
+		case "browser_scraper", "web_scraper":
+			crawl4aiURL := osGetenv("CRAWL4AI_URL", "http://crawl4ai:8000")
+			hostPort := extractHostPort(crawl4aiURL)
 			deps = append(deps, DependencyCheck{
-				Name:     "browserless",
+				Name:     "crawl4ai",
 				URL:      hostPort,
 				Tool:     "browser_scraper",
 				Critical: false,
@@ -147,7 +147,7 @@ func BuildDependencies(cfg *config.Config) []DependencyCheck {
 	return deps
 }
 
-// extractHostPort parses a URL string (e.g., "http://browserless:3000") and returns
+// extractHostPort parses a URL string (e.g., "http://crawl4ai:8000") and returns
 // the host:port portion. Returns the original string if parsing fails.
 func extractHostPort(rawURL string) string {
 	u, err := url.Parse(rawURL)
@@ -172,7 +172,7 @@ func osGetenv(key, defaultVal string) string {
 // Returns:
 //
 //	Slice of CheckResult, one per check. Order: redis, postgres, config, memory,
-//	followed by dependency checks (browserless, searxng, rustfs, ollama).
+//	followed by dependency checks (crawl4ai, searxng, rustfs, ollama).
 func (c *Checker) RunAllChecks(ctx context.Context) []CheckResult {
 	// Build the list of checks, skipping redis if not configured
 	checks := []struct {

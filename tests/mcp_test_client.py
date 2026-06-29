@@ -42,7 +42,7 @@ EXTERNAL_DEPENDENCY_TOOLS = {
     "document_classifier", # Needs LLM
     "transcribe",          # Needs Whisper service
     "searxng_search",      # Needs SearXNG service
-    "browser_scraper",     # Needs Browserless service
+    "browser_scraper",     # Needs Crawl4ai service
     "kb_ingest",           # Needs PostgreSQL + pgvector
     "kb_search",           # Needs PostgreSQL + pgvector
     "communication_graph", # Needs Memgraph
@@ -502,7 +502,7 @@ def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
             description="Scrape with headless browser",
             arguments={"url": "https://example.com", "extract_type": "text", "wait_ms": 1000},
             category="web",
-            dependencies=["browserless"],
+            dependencies=["crawl4ai"],
         ),
 
         # Media tools
@@ -680,9 +680,15 @@ class TestRunner:
             except requests.RequestException:
                 return False, "SearXNG not available"
 
-        if "browserless" in test.dependencies:
-            if not os.environ.get("BROWSERLESS_URL"):
-                return False, "BROWSERLESS_URL not configured"
+        if "crawl4ai" in test.dependencies:
+            # Verify crawl4ai is reachable (may be internal or external URL)
+            crawl4ai_url = os.environ.get("CRAWL4AI_URL", "http://localhost:11235")
+            try:
+                resp = requests.get(f"{crawl4ai_url.rstrip('/')}/health", timeout=5)
+                if resp.status_code != 200:
+                    return False, f"Crawl4ai returned {resp.status_code}"
+            except requests.RequestException:
+                return False, "Crawl4ai not reachable"
 
         if "memgraph" in test.dependencies:
             memgraph_host = os.environ.get("MEMGRAPH_HOST", "localhost")

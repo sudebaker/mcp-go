@@ -178,6 +178,11 @@ MCP_TOOLSET=default,development,ocu-investigacion
 # (no MCP_TOOLSET set)
 ```
 
+> **Note:** The `ocu-investigacion` toolset requires additional services (Memgraph and OpenSearch). When running with Docker Compose, activate the matching profile:
+> ```bash
+> docker compose --profile ocu-investigacion up -d
+> ```
+
 Or with Docker directly:
 
 ```bash

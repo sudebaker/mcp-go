@@ -175,6 +175,8 @@ services:
   memgraph:
     image: memgraph/memgraph-mage:latest
     container_name: ocu-memgraph
+    profiles:
+      - ocu-investigacion
     restart: unless-stopped
     ports:
       - "7687:7687"
@@ -209,6 +211,8 @@ services:
   opensearch:
     image: opensearchproject/opensearch:latest
     container_name: ocu-opensearch
+    profiles:
+      - ocu-investigacion
     restart: unless-stopped
     ports:
       - "9200:9200"

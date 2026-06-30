@@ -42,11 +42,13 @@ depends_on:
     condition: service_healthy
   memgraph:
     condition: service_healthy
+    required: false
   opensearch:
     condition: service_healthy
+    required: false
 ```
 
-> Nota: las dependencias de servicios en profiles no activados son ignoradas por Compose, por lo que no afectan a `default` ni `development`.
+> Nota: `required: false` evita que `docker compose` falle cuando `memgraph`/`opensearch` no están activados por su profile. Cuando el profile `ocu-investigacion` sí se activa, `mcp-server` espera a que pasen sus healthchecks.
 
 ### 2. `deployments/.env.example`
 

@@ -124,8 +124,10 @@ Reemplazar el bloque `depends_on` existente por:
         condition: service_healthy
       memgraph:
         condition: service_healthy
+        required: false
       opensearch:
         condition: service_healthy
+        required: false
 ```
 
 - [ ] **Step 2: Añadir comentario explicativo**

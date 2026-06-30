@@ -215,7 +215,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
             # Use /v1 endpoint for OpenAI-compatible format (supports vision via multi-part content)
             api_url = os.environ.get("LLM_VISION_API_URL", "")
             if not api_url:
-                raise ValueError("LLM_VISION_API_URL env var not set")
+                raise ValueError("LLM_VISION_API_URL env var not set. To use the 'vision' provider, set this environment variable to your remote vision endpoint URL (e.g., http://192.168.1.100:11434/v1).")
             # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
             api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
             resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)

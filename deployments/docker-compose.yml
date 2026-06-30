@@ -51,6 +51,8 @@ services:
       MCP_TOOLSET: ${MCP_TOOLSET:-default}
     volumes:
       - mcp-data:/data
+    # memgraph y opensearch solo se levantan con --profile ocu-investigacion.
+    # required: false evita que falle la validacion cuando no estan activados.
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +62,12 @@ services:
         condition: service_started
       searxng:
         condition: service_healthy
+      memgraph:
+        condition: service_healthy
+        required: false
+      opensearch:
+        condition: service_healthy
+        required: false
     networks:
       - mcp-internal
       - mcp-external

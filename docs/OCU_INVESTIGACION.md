@@ -11,7 +11,7 @@
 2. [Arquitectura](#arquitectura)
 3. [Requisitos](#requisitos)
 4. [Despliegue rápido (dev)](#despliegue-rápido-dev)
-5. [Despliegue producción (red compartida)](#despliegue-producción-red-compartida)
+5. [Despliegue producción](#despliegue-producción)
 6. [Variables de entorno](#variables-de-entorno)
 7. [Verificación](#verificación)
 8. [Solución de problemas](#solución-de-problemas)
@@ -78,34 +78,25 @@ Estas librerías se instalan automáticamente durante el `docker build` del MCP.
 ## Arquitectura
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  Red: ocu-investigacion-net           │
-│                                                      │
-│  ┌──────────┐   ┌──────────────┐   ┌──────────────┐ │
-│  │ memgraph │   │  opensearch  │   │   rustfs     │ │
-│  │ :7687    │   │  :9200       │   │   :9000      │ │
-│  │ :3001*   │   │  :5601**     │   │              │ │
-│  └──────────┘   └──────────────┘   └──────────────┘ │
-│       │                │                 │           │
-└───────┼────────────────┼─────────────────┼───────────┘
-        │                │                 │
-        ▼                ▼                 ▼
-┌──────────────────────────────────────────────────────┐
-│                  Red: mcp-network                     │
-│                                                      │
-│  ┌──────────────┐  ┌──────────┐  ┌────────────────┐ │
-│  │  mcp-server  │  │ postgres │  │   searxng      │ │
-│  │  :8080       │  │ :5432    │  │   :8080        │ │
-│  └──────────────┘  └──────────┘  └────────────────┘ │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Red: mcp-internal                            │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────┐  ┌────────────────┐  ┌──────────┐  │
+│  │  mcp-server  │  │ postgres │  │   searxng      │  │  rustfs  │  │
+│  │  :8080       │  │ :5432    │  │   :8080        │  │  :9000   │  │
+│  └──────────────┘  └──────────┘  └────────────────┘  └──────────┘  │
+│       │                                                                │
+│       │    ┌──────────┐   ┌──────────────┐                          │
+│       │    │ memgraph │   │  opensearch  │  (solo con profile       │
+│       │    │ :7687    │   │  :9200       │   ocu-investigacion)     │
+│       │    └──────────┘   └──────────────┘                          │
+│       │                                                                │
+└───────┴────────────────────────────────────────────────────────────────┘
 ```
 
-> \* :3001 = Memgraph Lab (consola web)
-> \*\* :5601 = OpenSearch Dashboards
-
-En **producción**, ambas redes se conectan compartiendo `mcp-network` para que
-los contenedores se resuelvan por nombre. En **desarrollo**, se usan los puertos
-expuestos al host (`localhost:7687`, `localhost:9200`).
+Los servicios `memgraph` y `opensearch` se activan únicamente con el profile
+`ocu-investigacion` de Docker Compose. En **desarrollo**, se accede por los
+puertos expuestos al host (`localhost:7687`, `localhost:9200`).
 
 ---
 
@@ -144,9 +135,9 @@ inmediatamente después del primer `docker compose up -d`.
 
 ### Buenas prácticas para el toolset forense
 
-- El stack OCu opera en su propia red (`ocu-investigacion-net`) y no comparte
-  red con el stack MCP por defecto. En producción conectar ambas redes (ver
-  [despliegue producción](#despliegue-producción-red-compartida)).
+- Los servicios `memgraph` y `opensearch` se levantan dentro del mismo
+  `deployments/docker-compose.yml` usando el profile `ocu-investigacion`.
+  No es necesario un compose separado ni conectar redes manualmente.
 - Los datos forenses (grafos + índices) no están cifrados en reposo. Para
   datos sensibles, considerar cifrado a nivel de disco o volumen Docker.
 - Las tools OCu inyectan automáticamente metadatos de auditoría (`_audit_ref`,
@@ -167,99 +158,54 @@ inmediatamente después del primer `docker compose up -d`.
 
 Usa los puertos expuestos al host. No requiere modificar redes.
 
-### 1. Levantar las bases de datos OCu
-
-El stack OCu incluye Memgraph + OpenSearch + Dashboards + Lab:
-
-```bash
-# Desde el directorio del proyecto
-cd deployments/infra/ocu-investigacion
-docker compose up -d
-
-# Verificar que los servicios están sanos
-docker compose ps
-```
-
-Esto levanta:
-- **Memgraph** en `localhost:7687` (Bolt) y `localhost:3001` (Lab web)
-- **OpenSearch** en `localhost:9200` (API REST)
-- **OpenSearch Dashboards** en `localhost:5601`
-- **Memgraph Lab** en `localhost:3100`
-
-> ⚠️ OpenSearch tarda ~60s en arrancar la primera vez. Esperar al healthcheck.
-
-### 2. Levantar el MCP con el toolset OCu
+El stack OCu se levanta desde el mismo `deployments/docker-compose.yml` activando
+el profile `ocu-investigacion`:
 
 ```bash
 cd deployments
-MCP_TOOLSET=ocu-investigacion \
-  MEMGRAPH_URL=bolt://localhost:7687 \
-  OPENSEARCH_URL=http://localhost:9200 \
-  docker compose up -d
+docker compose --profile ocu-investigacion up -d
 ```
+
+Esto levanta:
+- **Memgraph** en `localhost:7687` (Bolt)
+- **OpenSearch** en `localhost:9200` (API REST)
+- El MCP con acceso a ambos por nombre de contenedor
+
+> ⚠️ OpenSearch tarda ~60s en arrancar la primera vez. Esperar al healthcheck.
 
 Si quieres combinar tools generales + OCu:
 
 ```bash
-MCP_TOOLSET=default,ocu-investigacion \
-  MEMGRAPH_URL=bolt://localhost:7687 \
-  OPENSEARCH_URL=http://localhost:9200 \
-  docker compose up -d
+cd deployments
+MCP_TOOLSET=default,ocu-investigacion docker compose --profile ocu-investigacion up -d
 ```
 
-### 3. Verificar
+### Verificar
 
 ```bash
 # Comprobar que el MCP responde
 curl http://localhost:8080/health
 
-# Listar tools disponibles (debe incluir las 6 OCu)
+# Listar tools disponibles (debe incluir las OCu)
 curl http://localhost:8080/mcp/tools/list | python3 -m json.tool | grep -E "name|description"
 ```
 
 ---
 
-## Despliegue producción (red compartida)
+## Despliegue producción
 
-En producción los contenedores OCu deben ser alcanzables desde la red del MCP
-por nombre de contenedor (no por localhost).
-
-### 1. Preparar el stack OCu
-
-El directorio `deployments/infra/ocu-investigacion/docker-compose.yml` ya incluye
-`mcp-network` como red externa. Desplegar:
-
-```bash
-# Primero asegurarse de que el MCP está levantado (crea la red mcp-network)
-cd deployments
-docker compose up -d
-
-# Luego levantar el stack OCu conectado a la misma red
-cd deployments/infra/ocu-investigacion
-docker compose up -d
-```
-
-### 2. Añadir env vars al docker-compose del MCP
-
-Editar `deployments/docker-compose.yml` y añadir bajo `mcp-server.environment`:
-
-```yaml
-      # OCu Investigación (toolset ocu-investigacion)
-      MEMGRAPH_URL: ${MEMGRAPH_URL:-bolt://memgraph:7687}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
-      MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME:-}
-      MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD:-}
-```
-
-### 3. Levantar el MCP con el toolset
+En producción el procedimiento es el mismo: se usa el profile `ocu-investigacion`
+para activar Memgraph y OpenSearch dentro del compose unificado. El MCP resuelve
+`memgraph` y `opensearch` como hostnames dentro de la red interna.
 
 ```bash
 cd deployments
-MCP_TOOLSET=default,ocu-investigacion docker compose up -d mcp-server
+MCP_TOOLSET=default,ocu-investigacion docker compose --profile ocu-investigacion up -d
 ```
 
-Ahora el MCP resuelve `memgraph` y `opensearch` como hostnames dentro de la red
-compartida.
+No es necesario editar `docker-compose.yml` ni conectar redes manualmente: las
+variables `MEMGRAPH_URL` y `OPENSEARCH_URL` ya apuntan por defecto a los nombres
+de contenedor.
 
 ---
 
@@ -351,8 +297,8 @@ sudo sysctl -w vm.max_map_count=262144
 ### Memgraph no acepta conexiones
 ```bash
 docker logs ocu-memgraph
-# Verificar que el puerto Bolt está expuesto
-curl -s http://localhost:3001  # Lab web debería responder
+# Verificar que el contenedor está sano
+docker compose ps
 ```
 
 ### Las tools OCu no aparecen en el MCP
@@ -382,8 +328,10 @@ Las librerías necesarias: `rapidfuzz`, `python-magic`, `imagehash`, `folium`.
 ### "Connection refused" a Memgraph/OpenSearch
 Causa más común: el MCP usa defaults (`bolt://memgraph:7687`) que no son
 resolubles en su red. Soluciones:
-- **Dev**: pasar `MEMGRAPH_URL=bolt://localhost:7687` y `OPENSEARCH_URL=http://localhost:9200`
-- **Producción**: conectar el stack OCu a `mcp-network` (ver [despliegue producción](#despliegue-producción-red-compartida))
+- **Dev**: asegurarse de levantar con `--profile ocu-investigacion` y usar los
+  hostnames `memgraph`/`opensearch` (valores por defecto).
+- **Producción**: usar el mismo profile; los contenedores comparten la red
+  interna del compose.
 
 ---
 
@@ -392,4 +340,4 @@ resolubles en su red. Soluciones:
 - [Plan de desarrollo de las herramientas OCu](../configs/toolsets.yaml) — definición del toolset
 - [Arquitectura del MCP](ARCHITECTURE.md)
 - [Guía de desarrollo](DEVELOPMENT.md) — cómo añadir tools
-- `deployments/infra/ocu-investigacion/docker-compose.yml` — stack de bases de datos
+- `deployments/docker-compose.yml` — stack unificado con profile `ocu-investigacion`

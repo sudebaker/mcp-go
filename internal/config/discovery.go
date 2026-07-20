@@ -135,8 +135,14 @@ func validateManifestFields(tool *ToolConfig) error {
 func resolveAndValidateArgs(toolDir string, tool *ToolConfig) error {
 	for i, arg := range tool.Args {
 		// Only resolve arguments that look like relative paths.
-		// Skip flags, URLs, and absolute paths.
+		// Skip flags, URLs, absolute paths, and positional arguments
+		// that are clearly not file paths (no slash, no dot extension).
 		if arg == "" || strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
+			continue
+		}
+		// Positional arguments like "search", "ingest", etc. are subcommands,
+		// not file paths. Skip them if they contain no slash or dot.
+		if !strings.Contains(arg, "/") && !strings.Contains(arg, ".") {
 			continue
 		}
 

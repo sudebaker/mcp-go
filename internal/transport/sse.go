@@ -497,8 +497,8 @@ func (s *MCPServer) handleHealthDetailed(w http.ResponseWriter, r *http.Request)
 		results := s.healthChecker.RunAllChecks(r.Context())
 		for _, r := range results {
 			deps[r.Name] = map[string]interface{}{
-				"status":   string(r.Status),
-				"message":  r.Message,
+				"status":      string(r.Status),
+				"message":     r.Message,
 				"duration_ms": r.Duration.Milliseconds(),
 			}
 		}

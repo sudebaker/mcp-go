@@ -40,6 +40,7 @@ package transport
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -52,6 +53,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/admin"
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/health"
 	"github.com/sudebaker/mcp-go/internal/tracing"
@@ -117,6 +119,8 @@ type MCPServer struct {
 	uploadConfig    config.UploadConfig          // Upload endpoint configuration
 	filesDir        string                       // Directory for serving generated files via /files/
 	healthChecker   *health.Checker              // Health checker for dependency status
+	adminKey        string                       // ADMIN_API_KEY for admin endpoints (empty = disabled)
+	db              *sql.DB                      // Database connection for admin endpoints
 	stopCh          chan struct{}
 	stopCleanupOnce sync.Once
 }
@@ -151,6 +155,10 @@ type MCPConfig struct {
 	FilesDir string
 	// HealthChecker performs health checks against dependencies (nil = no-op)
 	HealthChecker *health.Checker
+	// AdminKey is the ADMIN_API_KEY for admin endpoints (empty = disabled)
+	AdminKey string
+	// DB is the database connection for admin endpoints (nil = admin endpoints disabled)
+	DB *sql.DB
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -221,6 +229,8 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		uploadConfig:   cfg.Upload,
 		filesDir:       cfg.FilesDir,
 		healthChecker:  cfg.HealthChecker,
+		adminKey:       cfg.AdminKey,
+		db:             cfg.DB,
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -266,6 +276,91 @@ func (s *MCPServer) Start() error {
 
 	// Files endpoint (GET /files/{tool}/{filename}) - serve generated files
 	mux.HandleFunc("/files/", s.handleFiles)
+
+	// Admin endpoints (protected with ADMIN_API_KEY)
+	if s.adminKey != "" && s.db != nil {
+		adminHandler := admin.NewHandler(s.db)
+
+		// Run migrations
+		if err := adminHandler.SetupMigrations(context.Background()); err != nil {
+			log.Error().Err(err).Msg("Failed to apply admin migrations")
+		}
+
+		adminMux := http.NewServeMux()
+		adminMux.HandleFunc("/admin/kb/users", func(w http.ResponseWriter, r *http.Request) {
+			// Route: /admin/kb/users (GET list, GET /{id}, DELETE /{id}, DELETE /{id}/collections/{name}, GET /{id}/export)
+			if r.Method == http.MethodGet {
+				// Check if it's /admin/kb/users/{user_id} or /admin/kb/users/{user_id}/export
+				path := strings.TrimPrefix(r.URL.Path, "/admin/kb/users")
+				if path == "" || path == "/" {
+					adminHandler.ListUsers(w, r)
+				} else if strings.HasSuffix(path, "/export") {
+					adminHandler.ExportUser(w, r)
+				} else {
+					adminHandler.GetUser(w, r)
+				}
+			} else if r.Method == http.MethodDelete {
+				adminHandler.DeleteUserData(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		adminMux.HandleFunc("/admin/kb/users/", func(w http.ResponseWriter, r *http.Request) {
+			path := strings.TrimPrefix(r.URL.Path, "/admin/kb/users/")
+			if strings.Contains(path, "/collections/") {
+				if r.Method == http.MethodDelete {
+					adminHandler.DeleteUserCollection(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			} else if strings.HasSuffix(path, "/export") {
+				adminHandler.ExportUser(w, r)
+			} else if r.Method == http.MethodGet {
+				adminHandler.GetUser(w, r)
+			} else if r.Method == http.MethodDelete {
+				adminHandler.DeleteUserData(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		adminMux.HandleFunc("/admin/kb/collections/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				adminHandler.DeleteGlobalCollection(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		adminMux.HandleFunc("/admin/audit", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				adminHandler.AuditLog(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		adminMux.HandleFunc("/admin/audit/", func(w http.ResponseWriter, r *http.Request) {
+			adminHandler.AuditLog(w, r)
+		})
+
+		// Method-aware rate limiting: GET 60/min, DELETE 10/min
+		adminGetLimiter := NewRateLimiter(1.0, 60)    // 60 req/min
+		adminDeleteLimiter := NewRateLimiter(0.17, 10) // 10 req/min
+		rateLimitedAdminMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				adminGetLimiter.Middleware(adminMux).ServeHTTP(w, r)
+			case http.MethodDelete:
+				adminDeleteLimiter.Middleware(adminMux).ServeHTTP(w, r)
+			default:
+				adminMux.ServeHTTP(w, r)
+			}
+		})
+
+		handler := admin.Middleware(s.adminKey, rateLimitedAdminMux)
+		mux.Handle("/admin/", handler)
+		log.Info().Msg("Admin endpoints enabled on /admin/")
+	} else {
+		log.Warn().Msg("Admin endpoints disabled: ADMIN_API_KEY or DB not configured")
+	}
 
 	// Start background TTL cleanup goroutine for uploaded files
 	go s.startUploadCleanup()

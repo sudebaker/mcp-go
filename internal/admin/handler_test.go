@@ -219,7 +219,7 @@ func TestDeleteUserData_NoDocs(t *testing.T) {
 	h, mock := newTestHandler(t)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1`)).
 		WithArgs("user1").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(0, int64(0)))
 	mock.ExpectCommit()
@@ -247,7 +247,7 @@ func TestDeleteUserData_WithDocs(t *testing.T) {
 	reqID := "test-request-id"
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1`)).
 		WithArgs("user1").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(5, int64(2500)))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb_documents WHERE user_id = $1`)).
@@ -299,7 +299,7 @@ func TestDeleteGlobalCollection_Empty(t *testing.T) {
 	h, mock := newTestHandler(t)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1`)).
 		WithArgs("test-collection").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(0, int64(0)))
 	mock.ExpectCommit()
@@ -327,7 +327,7 @@ func TestDeleteGlobalCollection_WithDocs(t *testing.T) {
 	reqID := "test-req"
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1`)).
 		WithArgs("global-col").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(10, int64(50000)))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb_documents WHERE collection = $1`)).

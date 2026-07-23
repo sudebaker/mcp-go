@@ -218,7 +218,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
                 raise ValueError("LLM_VISION_API_URL env var not set. To use the 'vision' provider, set this environment variable to your remote vision endpoint URL (e.g., http://192.168.1.100:11434/v1).")
             # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
             api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
-            resolved_model = model or "gemma4:e2b"  # Default to gemma4:e2b (multimodal, vision-capable)
+            resolved_model = model or "gemma4:e2b-mlx"  # Default to gemma4:e2b-mlx (Mac Mini MLX, multimodal, vision-capable)
             return api_url, resolved_model
 
         if provider_lower == "openrouter":

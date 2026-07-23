@@ -36,10 +36,10 @@ type CheckResult struct {
 
 // DependencyStatus represents the reachability test result for an external dependency.
 type DependencyStatus struct {
-	Name    string `json:"name"`              // Dependency name (e.g., "searxng")
-	URL     string `json:"url"`               // Resolved URL tested
+	Name      string `json:"name"`            // Dependency name (e.g., "searxng")
+	URL       string `json:"url"`             // Resolved URL tested
 	Reachable bool   `json:"reachable"`       // True if TCP connection succeeded
-	Error   string `json:"error,omitempty"`   // Connection error message if unreachable
+	Error     string `json:"error,omitempty"` // Connection error message if unreachable
 }
 
 // Checker performs health checks against external dependencies and system resources.
@@ -55,10 +55,10 @@ type Checker struct {
 
 // DependencyCheck describes an external service to verify.
 type DependencyCheck struct {
-	Name    string // Human-readable name (e.g., "searxng")
-	URL     string // TCP address (host:port) extracted from env/config
-	Tool    string // Associated tool name (e.g., "searxng_search"), for mapping
-	Critical bool  // If true, /health returns 503 when unreachable
+	Name     string // Human-readable name (e.g., "searxng")
+	URL      string // TCP address (host:port) extracted from env/config
+	Tool     string // Associated tool name (e.g., "searxng_search"), for mapping
+	Critical bool   // If true, /health returns 503 when unreachable
 }
 
 // NewChecker creates a health Checker with dependencies for performing checks.

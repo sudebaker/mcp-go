@@ -19,9 +19,9 @@ type contextKey string
 const requestIDKey contextKey = "admin_request_id"
 
 var (
-	userIDPattern       = regexp.MustCompile(`^[^/]{1,255}$`)
-	collectionPattern   = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
-	requestIDPattern    = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,255}$`)
+	userIDPattern     = regexp.MustCompile(`^[^/]{1,255}$`)
+	collectionPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
+	requestIDPattern  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,255}$`)
 )
 
 func getRequestID(ctx context.Context) string {
@@ -226,9 +226,9 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 	if docsDeleted == 0 {
 		tx.Commit()
 		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:     true,
-			UserID:      userID,
-			DocsDeleted: 0,
+			Deleted:        true,
+			UserID:         userID,
+			DocsDeleted:    0,
 			DocsBytesFreed: 0,
 		})
 		return
@@ -265,9 +265,9 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 		Msg("admin: deleted user data")
 
 	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:     true,
-		UserID:      userID,
-		DocsDeleted: docsDeleted,
+		Deleted:        true,
+		UserID:         userID,
+		DocsDeleted:    docsDeleted,
 		DocsBytesFreed: bytesFreed,
 	})
 }
@@ -310,10 +310,10 @@ func (h *Handler) DeleteUserCollection(w http.ResponseWriter, r *http.Request) {
 	if docsDeleted == 0 {
 		tx.Commit()
 		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:     true,
-			UserID:      userID,
-			Collection:  collection,
-			DocsDeleted: 0,
+			Deleted:        true,
+			UserID:         userID,
+			Collection:     collection,
+			DocsDeleted:    0,
 			DocsBytesFreed: 0,
 		})
 		return
@@ -351,10 +351,10 @@ func (h *Handler) DeleteUserCollection(w http.ResponseWriter, r *http.Request) {
 		Msg("admin: deleted user collection")
 
 	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:     true,
-		UserID:      userID,
-		Collection:  collection,
-		DocsDeleted: docsDeleted,
+		Deleted:        true,
+		UserID:         userID,
+		Collection:     collection,
+		DocsDeleted:    docsDeleted,
 		DocsBytesFreed: bytesFreed,
 	})
 }
@@ -393,9 +393,9 @@ func (h *Handler) DeleteGlobalCollection(w http.ResponseWriter, r *http.Request)
 	if docsDeleted == 0 {
 		tx.Commit()
 		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:     true,
-			Collection:  collection,
-			DocsDeleted: 0,
+			Deleted:        true,
+			Collection:     collection,
+			DocsDeleted:    0,
 			DocsBytesFreed: 0,
 		})
 		return
@@ -432,9 +432,9 @@ func (h *Handler) DeleteGlobalCollection(w http.ResponseWriter, r *http.Request)
 		Msg("admin: deleted global collection")
 
 	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:     true,
-		Collection:  collection,
-		DocsDeleted: docsDeleted,
+		Deleted:        true,
+		Collection:     collection,
+		DocsDeleted:    docsDeleted,
 		DocsBytesFreed: bytesFreed,
 	})
 }

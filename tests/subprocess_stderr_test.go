@@ -39,20 +39,20 @@ func TestStderrLogging(t *testing.T) {
 
 	// Execute the test tool
 	result, err := exec.Execute(context.Background(), "test_stderr_logging", map[string]interface{}{})
-	
+
 	// Should not return an error for execution
 	require.NoError(t, err)
-	
+
 	// Should be successful (the tool itself succeeds even though it writes to stderr)
 	require.True(t, result.Success)
-	
+
 	// Should have stderr content
 	require.NotEmpty(t, result.Stderr)
-	
+
 	// Verify stderr contains our expected content
 	require.Contains(t, result.Stderr, "This is a test stderr message")
 	require.Contains(t, result.Stderr, "Error: Something went wrong!")
-	
+
 	// Log the result for verification
 	log.Info().Str("stderr_content", result.Stderr).Msg("Captured stderr content")
 }

@@ -342,7 +342,7 @@ func (s *MCPServer) Start() error {
 		})
 
 		// Method-aware rate limiting: GET 60/min, DELETE 10/min
-		adminGetLimiter := NewRateLimiter(1.0, 60)    // 60 req/min
+		adminGetLimiter := NewRateLimiter(1.0, 60)     // 60 req/min
 		adminDeleteLimiter := NewRateLimiter(0.17, 10) // 10 req/min
 		rateLimitedAdminMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {

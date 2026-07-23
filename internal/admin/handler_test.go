@@ -278,7 +278,7 @@ func TestDeleteUserData_WithDocs(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	if 	resp.DocsDeleted != 5 || resp.DocsBytesFreed != 2500 {
+	if resp.DocsDeleted != 5 || resp.DocsBytesFreed != 2500 {
 		t.Errorf("expected docs=5, bytes=2500, got %+v", resp)
 	}
 }
@@ -356,7 +356,7 @@ func TestDeleteGlobalCollection_WithDocs(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	if 	resp.DocsDeleted != 10 || resp.DocsBytesFreed != 50000 {
+	if resp.DocsDeleted != 10 || resp.DocsBytesFreed != 50000 {
 		t.Errorf("expected docs=10, bytes=50000, got %+v", resp)
 	}
 }

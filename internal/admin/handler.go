@@ -571,13 +571,28 @@ func (h *Handler) SetupMigrations(ctx context.Context) error {
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_audit_created_at ON admin_audit_log(created_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_kb_documents_user_collection ON kb_documents(user_id, collection)`,
 	}
 
 	for _, q := range queries {
 		if _, err := h.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("admin migration failed: %w", err)
 		}
+	}
+
+	kbIndexQuery := `
+		DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.tables
+				WHERE table_name = 'kb_documents'
+			) THEN
+				CREATE INDEX IF NOT EXISTS idx_kb_documents_user_collection
+				ON kb_documents(user_id, collection);
+			END IF;
+		END $$;
+	`
+	if _, err := h.db.ExecContext(ctx, kbIndexQuery); err != nil {
+		return fmt.Errorf("admin migration failed: %w", err)
 	}
 	log.Info().Msg("Admin migration applied")
 	return nil

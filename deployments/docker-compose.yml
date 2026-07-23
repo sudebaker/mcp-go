@@ -49,6 +49,7 @@ services:
       MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME}
       MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD}
       MCP_TOOLSET: ${MCP_TOOLSET:-default}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
     volumes:
       - mcp-data:/data
     # memgraph y opensearch solo se levantan con --profile ocu-investigacion.

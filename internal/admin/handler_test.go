@@ -117,7 +117,7 @@ func TestMiddleware_RespectsClientRequestID(t *testing.T) {
 func TestListUsers_Empty(t *testing.T) {
 	h, mock := newTestHandler(t)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(octet_length(content)), 0) as bytes FROM kb_documents GROUP BY user_id ORDER BY doc_count DESC`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(pg_column_size(metadata)), 0) as bytes FROM kb_documents GROUP BY user_id ORDER BY doc_count DESC`)).
 		WillReturnRows(sqlmock.NewRows([]string{"user_id", "doc_count", "bytes"}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/kb/users", nil)
@@ -140,7 +140,7 @@ func TestListUsers_Empty(t *testing.T) {
 func TestListUsers_WithData(t *testing.T) {
 	h, mock := newTestHandler(t)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(octet_length(content)), 0) as bytes FROM kb_documents GROUP BY user_id ORDER BY doc_count DESC`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(pg_column_size(metadata)), 0) as bytes FROM kb_documents GROUP BY user_id ORDER BY doc_count DESC`)).
 		WillReturnRows(sqlmock.NewRows([]string{"user_id", "doc_count", "bytes"}).
 			AddRow("user1", 10, int64(5000)).
 			AddRow("user2", 3, int64(1200)))
@@ -180,7 +180,7 @@ func TestGetUser_InvalidUserID(t *testing.T) {
 func TestGetUser_Valid(t *testing.T) {
 	h, mock := newTestHandler(t)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT collection, COUNT(*) as doc_count, COALESCE(SUM(octet_length(content)), 0) as bytes FROM kb_documents WHERE user_id = $1 GROUP BY collection`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT collection, COUNT(*) as doc_count, COALESCE(SUM(pg_column_size(metadata)), 0) as bytes FROM kb_documents WHERE user_id = $1 GROUP BY collection`)).
 		WithArgs("user1").
 		WillReturnRows(sqlmock.NewRows([]string{"collection", "doc_count", "bytes"}).
 			AddRow("default", 5, int64(2000)).
@@ -219,7 +219,7 @@ func TestDeleteUserData_NoDocs(t *testing.T) {
 	h, mock := newTestHandler(t)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
 		WithArgs("user1").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(0, int64(0)))
 	mock.ExpectCommit()
@@ -247,7 +247,7 @@ func TestDeleteUserData_WithDocs(t *testing.T) {
 	reqID := "test-request-id"
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1 FOR UPDATE`)).
 		WithArgs("user1").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(5, int64(2500)))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb_documents WHERE user_id = $1`)).
@@ -299,7 +299,7 @@ func TestDeleteGlobalCollection_Empty(t *testing.T) {
 	h, mock := newTestHandler(t)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
 		WithArgs("test-collection").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(0, int64(0)))
 	mock.ExpectCommit()
@@ -327,7 +327,7 @@ func TestDeleteGlobalCollection_WithDocs(t *testing.T) {
 	reqID := "test-req"
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1 FOR UPDATE`)).
 		WithArgs("global-col").
 		WillReturnRows(sqlmock.NewRows([]string{"count", "sum"}).AddRow(10, int64(50000)))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb_documents WHERE collection = $1`)).

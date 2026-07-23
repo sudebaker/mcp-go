@@ -111,7 +111,7 @@ type doc struct {
 // ListUsers returns all users with document counts and storage size.
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(octet_length(content)), 0) as bytes
+		SELECT user_id, COUNT(*) as doc_count, COALESCE(SUM(pg_column_size(metadata)), 0) as bytes
 		FROM kb_documents
 		GROUP BY user_id
 		ORDER BY doc_count DESC
@@ -159,7 +159,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT collection, COUNT(*) as doc_count, COALESCE(SUM(octet_length(content)), 0) as bytes
+		SELECT collection, COUNT(*) as doc_count, COALESCE(SUM(pg_column_size(metadata)), 0) as bytes
 		FROM kb_documents
 		WHERE user_id = $1
 		GROUP BY collection
@@ -213,7 +213,7 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 	var docsDeleted int
 	var bytesFreed int64
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
+		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE user_id = $1
 		FOR UPDATE
 	`, userID).Scan(&docsDeleted, &bytesFreed)
@@ -297,7 +297,7 @@ func (h *Handler) DeleteUserCollection(w http.ResponseWriter, r *http.Request) {
 	var docsDeleted int
 	var bytesFreed int64
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
+		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE user_id = $1 AND collection = $2
 		FOR UPDATE
 	`, userID, collection).Scan(&docsDeleted, &bytesFreed)
@@ -380,7 +380,7 @@ func (h *Handler) DeleteGlobalCollection(w http.ResponseWriter, r *http.Request)
 	var docsDeleted int
 	var bytesFreed int64
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
+		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE collection = $1
 		FOR UPDATE
 	`, collection).Scan(&docsDeleted, &bytesFreed)

@@ -215,7 +215,6 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRowContext(r.Context(), `
 		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE user_id = $1
-		FOR UPDATE
 	`, userID).Scan(&docsDeleted, &bytesFreed)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID).Msg("admin: failed to count documents")
@@ -299,7 +298,6 @@ func (h *Handler) DeleteUserCollection(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRowContext(r.Context(), `
 		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE user_id = $1 AND collection = $2
-		FOR UPDATE
 	`, userID, collection).Scan(&docsDeleted, &bytesFreed)
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID).Str("collection", collection).Msg("admin: failed to count documents")
@@ -382,7 +380,6 @@ func (h *Handler) DeleteGlobalCollection(w http.ResponseWriter, r *http.Request)
 	err = tx.QueryRowContext(r.Context(), `
 		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
 		FROM kb_documents WHERE collection = $1
-		FOR UPDATE
 	`, collection).Scan(&docsDeleted, &bytesFreed)
 	if err != nil {
 		log.Error().Err(err).Str("collection", collection).Msg("admin: failed to count documents")

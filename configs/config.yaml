@@ -207,7 +207,7 @@ tools:
           description: "Vision model provider: 'ollama' (local/self-hosted), 'vision' (remote LLM_VISION_API_URL), 'openrouter', 'openai', 'anthropic', 'deepseek'. Defaults to the LLM_API_URL/LLM_MODEL env vars."
         model:
           type: string
-          description: "Model name for the chosen provider. Examples: 'gemma4:e2b', 'llava:13b', 'gpt-4o-mini'. Defaults to LLM_MODEL env var or 'llava' (default for 'vision' provider: 'qwen3.5:9b')."
+          description: "Model name for the chosen provider. Examples: 'gemma4:e2b', 'llava:13b', 'gpt-4o-mini'. Defaults to LLM_MODEL env var or 'llava' (default for 'vision' provider: 'gemma4:e2b')."
       required:
         - image_path
         - task

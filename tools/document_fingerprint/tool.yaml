@@ -9,17 +9,19 @@ timeout: 30s
 input_schema:
   type: object
   properties:
-    image1_path:
+    file_uri_1:
       type: string
-      description: "Ruta a la primera imagen"
-    image2_path:
+      format: resource-uri
+      description: "URI del recurso de la primera imagen"
+    file_uri_2:
       type: string
-      description: "Ruta a la segunda imagen"
+      format: resource-uri
+      description: "URI del recurso de la segunda imagen"
     method:
       type: string
       enum: [phash, dhash, whash, average_hash]
       default: phash
       description: "Algoritmo de hash perceptual"
   required:
-  - image1_path
-  - image2_path
+  - file_uri_1
+  - file_uri_2

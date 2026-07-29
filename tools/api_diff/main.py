@@ -2,7 +2,7 @@
 """
 api_diff tool — compara dos OpenAPI specs y reporta cambios.
 
-Input: old_spec, new_spec (paths locales o URLs).
+Input: file_uri_old, file_uri_new (resource URIs o URLs).
 Output: endpoints añadidos/eliminados/modificados, breaking changes. 0 tokens LLM.
 """
 import json
@@ -14,6 +14,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 
 logger = get_logger(__name__, "api_diff")
@@ -41,6 +42,14 @@ def load_spec(spec_path: str) -> dict[str, Any]:
             content = resp.read().decode("utf-8")
 
     if spec_path.endswith((".yaml", ".yml")):
+        import yaml
+        return yaml.safe_load(content)
+    return json.loads(content)
+
+
+def load_spec_from_bytes(data: bytes, source_label: str) -> dict[str, Any]:
+    content = data.decode("utf-8")
+    if source_label.endswith((".yaml", ".yml")):
         import yaml
         return yaml.safe_load(content)
     return json.loads(content)
@@ -121,19 +130,34 @@ def main():
     try:
         request = read_request()
         args = request.get("arguments", {})
-        old_spec = args.get("old_spec", "")
-        new_spec = args.get("new_spec", "")
+        ctx = ToolContext(request)
 
-        if not old_spec or not new_spec:
-            write_response({
-                "success": False,
-                "error": {"code": "INVALID_INPUT", "message": "Both old_spec and new_spec are required and must be non-empty strings (file path or URL)."},
-                "request_id": request.get("request_id", ""),
-            })
-            return
+        old_spec = ""
+        new_spec = ""
+        old_data = None
+        new_data = None
 
-        old_data = load_spec(old_spec)
-        new_data = load_spec(new_spec)
+        try:
+            old_bytes = ctx.file("file_uri_old").read_bytes()
+            new_bytes = ctx.file("file_uri_new").read_bytes()
+            old_label = args.get("file_uri_old", "")
+            new_label = args.get("file_uri_new", "")
+            old_data = load_spec_from_bytes(old_bytes, old_label)
+            new_data = load_spec_from_bytes(new_bytes, new_label)
+        except (KeyError, TypeError):
+            old_spec = args.get("old_spec", "")
+            new_spec = args.get("new_spec", "")
+
+            if not old_spec or not new_spec:
+                write_response({
+                    "success": False,
+                    "error": {"code": "INVALID_INPUT", "message": "Both old_spec and new_spec are required and must be non-empty strings (file path or URL)."},
+                    "request_id": request.get("request_id", ""),
+                })
+                return
+
+            old_data = load_spec(old_spec)
+            new_data = load_spec(new_spec)
 
         result = diff_specs(old_data, new_data)
         s = result["summary"]

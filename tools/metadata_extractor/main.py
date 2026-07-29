@@ -7,10 +7,13 @@ Extracts forensic metadata from files: EXIF (GPS, camera, date), PDF/Word header
 """
 
 import hashlib
+import io
 import json
 import os
 import sys
 from typing import Any
+
+from common.resources import ToolContext
 
 try:
     from PIL import Image
@@ -36,24 +39,21 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def compute_sha256(file_path: str) -> str:
+def compute_sha256(data: bytes) -> str:
     h = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        while True:
-            chunk = f.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            h.update(chunk)
+    h.update(data)
     return h.hexdigest()
 
 
-def get_file_size(file_path: str) -> int:
-    return os.path.getsize(file_path)
+def get_file_size(data: bytes) -> int:
+    return len(data)
 
 
-def get_mime_type(file_path: str) -> str:
+def get_mime_type(file_path: str, data: bytes | None = None) -> str:
     if MAGIC_AVAILABLE:
         try:
+            if data is not None:
+                return magic.from_buffer(data, mime=True)
             return magic.from_file(file_path, mime=True)
         except Exception:
             pass
@@ -77,13 +77,13 @@ def get_mime_type(file_path: str) -> str:
     return mime_map.get(ext.lower(), "application/octet-stream")
 
 
-def extract_exif(file_path: str, extract_gps: bool) -> dict[str, Any]:
+def extract_exif(data: bytes, extract_gps: bool) -> dict[str, Any]:
     if not PIL_AVAILABLE:
         return {"error": "Pillow no está instalado"}
 
     result: dict[str, Any] = {}
     try:
-        img = Image.open(file_path)
+        img = Image.open(io.BytesIO(data))
         exif_data = img.getexif()
         if not exif_data:
             return {"exif_present": False}
@@ -139,11 +139,10 @@ def _extract_gps_coord(gps_data: dict[str, str], coord_key: str, ref_key: str) -
     return None
 
 
-def extract_pdf_metadata(file_path: str) -> dict[str, Any]:
+def extract_pdf_metadata(data: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {}
     try:
-        with open(file_path, "rb") as f:
-            content = f.read(65536)
+        content = data[:65536]
         text = content.decode("latin-1")
         for pattern in [r"/Title\((.*?)\)", r"/Author\((.*?)\)", r"/Subject\((.*?)\)",
                         r"/Creator\((.*?)\)", r"/Producer\((.*?)\)", r"/CreationDate\((.*?)\)"]:
@@ -157,12 +156,12 @@ def extract_pdf_metadata(file_path: str) -> dict[str, Any]:
     return result
 
 
-def extract_docx_metadata(file_path: str) -> dict[str, Any]:
+def extract_docx_metadata(data: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {}
     try:
         import zipfile
         import xml.etree.ElementTree as ET
-        with zipfile.ZipFile(file_path) as z:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
             if "docProps/core.xml" in z.namelist():
                 core = z.read("docProps/core.xml")
                 root = ET.fromstring(core)
@@ -191,47 +190,68 @@ def main() -> None:
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
 
-        file_path = arguments.get("file_path", "")
-        if not file_path:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": "'file_path' es requerido"},
-            })
-            return
+        file_uri = arguments.get("file_uri", "")
+        if not file_uri:
+            file_path = arguments.get("file_path", "")
+            if not file_path:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": "'file_uri' es requerido"},
+                })
+                return
+        else:
+            file_path = None
 
-        if not os.path.isfile(file_path):
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": f"El archivo no existe: {file_path}"},
-            })
-            return
+        ctx = ToolContext(request)
+        use_tool_context = False
+        try:
+            resource = ctx.file("file_uri")
+            data = resource.read_bytes()
+            file_name = resource.name
+            use_tool_context = True
+        except (KeyError, TypeError):
+            if file_path is None:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": "'file_path' es requerido"},
+                })
+                return
+            if not os.path.isfile(file_path):
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": f"El archivo no existe: {file_path}"},
+                })
+                return
+            data = open(file_path, "rb").read()
+            file_name = os.path.basename(file_path)
 
         extract_gps = bool(arguments.get("extract_gps", True))
         extract_history = bool(arguments.get("extract_history", True))
 
         metadata: dict[str, Any] = {
-            "file_name": os.path.basename(file_path),
-            "file_size_bytes": get_file_size(file_path),
-            "mime_type": get_mime_type(file_path),
-            "sha256": compute_sha256(file_path),
+            "file_name": file_name,
+            "file_size_bytes": get_file_size(data),
+            "mime_type": get_mime_type(file_name, data),
+            "sha256": compute_sha256(data),
         }
 
-        _, ext = os.path.splitext(file_path)
+        _, ext = os.path.splitext(file_name)
         ext_lower = ext.lower()
 
         if ext_lower in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".bmp"):
-            exif_data = extract_exif(file_path, extract_gps)
+            exif_data = extract_exif(data, extract_gps)
             metadata["exif"] = exif_data
 
         if ext_lower == ".pdf" and extract_history:
-            pdf_meta = extract_pdf_metadata(file_path)
+            pdf_meta = extract_pdf_metadata(data)
             if pdf_meta:
                 metadata["pdf_metadata"] = pdf_meta
 
         if ext_lower in (".docx", ".docm") and extract_history:
-            docx_meta = extract_docx_metadata(file_path)
+            docx_meta = extract_docx_metadata(data)
             if docx_meta:
                 metadata["docx_metadata"] = docx_meta
 

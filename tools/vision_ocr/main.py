@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import base64
+import tempfile
 import traceback
 import uuid
 from pathlib import Path
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.resources import ToolContext
 from common.validators import validate_file_path, validate_url_ssrf
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
@@ -218,7 +220,7 @@ def resolve_vision_provider(provider: str | None, model: str | None, context: di
                 raise ValueError("LLM_VISION_API_URL env var not set. To use the 'vision' provider, set this environment variable to your remote vision endpoint URL (e.g., http://192.168.1.100:11434/v1).")
             # Strip trailing slash and /v1 if present, then add /v1 for OpenAI-compat
             api_url = api_url.rstrip("/").removesuffix("/v1") + "/v1"
-            resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, vision-capable on Mac Mini)
+            resolved_model = model or "qwen3.5:9b"  # Default to qwen3.5:9b (multimodal, best balance)
             return api_url, resolved_model
 
         if provider_lower == "openrouter":
@@ -391,7 +393,32 @@ def main() -> None:
         arguments = request.get("arguments", {})
         context = request.get("context", {})
 
-        image_path = arguments.get("image_path")
+        # Resolve file_uri via ToolContext (backward compat: fall back to image_path)
+        ctx = ToolContext(request)
+        try:
+            resource = ctx.file("file_uri")
+            image_path = resource.uri
+        except (KeyError, TypeError):
+            image_path = arguments.get("image_path", "")
+
+        # If file_uri is a res:// URI, download to temp file
+        if image_path.startswith("res://"):
+            try:
+                data = resource.read_bytes()
+                tmp_dir = Path("/data/tmp")
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                suffix = Path(resource.name).suffix or ".jpg"
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir)) as tmp:
+                    tmp.write(data)
+                    image_path = tmp.name
+            except Exception as e:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "RESOURCE_ERROR", "message": str(e)},
+                })
+                return
+
         task = arguments.get("task")
         question = arguments.get("question")
 
@@ -408,21 +435,22 @@ def main() -> None:
             )
             return
 
-        # Handle URLs by downloading to /data/tmp
-        try:
-            image_path = download_image_if_url(image_path)
-        except ValueError as e:
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "INVALID_URL",
-                        "message": str(e),
-                    },
-                }
-            )
-            return
+        # Handle URLs by downloading to /data/tmp (skip for res:// which is already downloaded)
+        if not image_path.startswith("/"):
+            try:
+                image_path = download_image_if_url(image_path)
+            except ValueError as e:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_URL",
+                            "message": str(e),
+                        },
+                    }
+                )
+                return
 
         # Handle PDF files by converting to image
         pdf_page = 0

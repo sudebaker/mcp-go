@@ -12,9 +12,14 @@ input_schema:
     caso:
       type: string
       description: "Identificador del caso (ej. 'Caso-2026-042')"
+    file_uri:
+      type: string
+      format: resource-uri
+      description: Resource URI del documento (alternativa a file_url). Si se proporciona,
+        se lee directamente desde el contexto de recursos.
     file_url:
       type: string
-      description: URL publica del documento a descargar y almacenar
+      description: URL publica del documento a descargar y almacenar (alternativa a file_uri)
     tipo:
       type: string
       enum:
@@ -38,6 +43,5 @@ input_schema:
       description: "Metadatos adicionales (autor, fecha, descripcion, tags, etc.)"
   required:
   - caso
-  - file_url
   - tipo
   - clasificacion

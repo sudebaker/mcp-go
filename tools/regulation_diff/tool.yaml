@@ -1,6 +1,5 @@
 name: regulation_diff
-description: 'Compara dos versiones de documentos/regulaciones. Input: __files__ (2:
-  [0]=old, [1]=new). Output: unified diff + análisis + change counts.'
+description: 'Compara dos versiones de documentos/regulaciones. Input: file_uri_1 (old), file_uri_2 (new). Output: unified diff + análisis + change counts.'
 command: python3
 args:
 - main.py
@@ -8,18 +7,14 @@ timeout: 180s
 input_schema:
   type: object
   properties:
-    __files__:
-      type: array
-      minItems: 2
-      maxItems: 2
-      description: 'Two files: index 0 = old version, index 1 = new version'
-      items:
-        type: object
-        properties:
-          url:
-            type: string
-          name:
-            type: string
+    file_uri_1:
+      type: string
+      format: resource-uri
+      description: Old version of the document
+    file_uri_2:
+      type: string
+      format: resource-uri
+      description: New version of the document
     focus:
       type: string
       description: Optional focus area for analysis
@@ -31,4 +26,5 @@ input_schema:
       default: markdown
       description: Output format for analysis
   required:
-  - __files__
+  - file_uri_1
+  - file_uri_2

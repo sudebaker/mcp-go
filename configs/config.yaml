@@ -37,9 +37,6 @@ upload:
     - text/csv
     - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
     - application/vnd.ms-excel
-  default_ttl_seconds: 3600
-  max_ttl_seconds: 86400
-  upload_dir: /data/uploads
 
 execution:
   default_timeout: "60s"
@@ -154,6 +151,7 @@ tools:
       properties:
         file_url:
           type: string
+          format: resource-uri
           description: "HTTP URL to the data file (presigned S3 URL or direct download link). Supports .xlsx, .xls, .csv"
         file_name:
           type: string
@@ -176,6 +174,7 @@ tools:
                 type: string
               url:
                 type: string
+                format: resource-uri
               name:
                 type: string
               id:
@@ -194,6 +193,7 @@ tools:
       properties:
         image_path:
           type: string
+          format: resource-uri
           description: "URL or path to the image file. Supports JPEG, PNG, WebP, PDF pages"
         task:
           type: string
@@ -207,7 +207,7 @@ tools:
           description: "Vision model provider: 'ollama' (local/self-hosted), 'vision' (remote LLM_VISION_API_URL), 'openrouter', 'openai', 'anthropic', 'deepseek'. Defaults to the LLM_API_URL/LLM_MODEL env vars."
         model:
           type: string
-          description: "Model name for the chosen provider. Examples: 'qwen3.5:9b', 'llava:13b', 'gpt-4o-mini'. Defaults to LLM_MODEL env var or 'llava' (default for 'vision' provider: 'qwen3.5:9b')."
+          description: "Model name for the chosen provider. Examples: 'gemma4:e2b', 'llava:13b', 'gpt-4o-mini'. Defaults to LLM_MODEL env var or 'llava' (default for 'vision' provider: 'qwen3.5:9b')."
       required:
         - image_path
         - task
@@ -286,6 +286,7 @@ tools:
             properties:
               url:
                 type: string
+                format: resource-uri
               name:
                 type: string
         summary_type:
@@ -322,6 +323,7 @@ tools:
             properties:
               url:
                 type: string
+                format: resource-uri
               name:
                 type: string
         focus:
@@ -352,6 +354,7 @@ tools:
             properties:
               url:
                 type: string
+                format: resource-uri
               name:
                 type: string
         rules:
@@ -385,6 +388,7 @@ tools:
             properties:
               url:
                 type: string
+                format: resource-uri
               name:
                 type: string
         categories:
@@ -455,6 +459,7 @@ tools:
       properties:
         file_path:
           type: string
+          format: resource-uri
           description: "Absolute path to the audio file on the server (e.g. /data/recording.mp3)"
         audio_base64:
           type: string

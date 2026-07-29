@@ -1,6 +1,6 @@
 name: document_classifier
 description: 'Clasifica documentos (contrato, factura, informe, regulación, etc.).
-  Detecta idioma auto. Output: classification + confidence + keywords.'
+  Detecta idioma auto. Input: file_uris. Output: classification + confidence + keywords.'
 command: python3
 args:
 - main.py
@@ -8,16 +8,13 @@ timeout: 180s
 input_schema:
   type: object
   properties:
-    __files__:
+    file_uris:
       type: array
-      description: Documents to classify
+      description: Documents to classify (resource URIs)
       items:
-        type: object
-        properties:
-          url:
-            type: string
-          name:
-            type: string
+        type: string
+        format: resource-uri
+      minItems: 1
     categories:
       type: array
       items:
@@ -32,4 +29,4 @@ input_schema:
       default: auto
       description: Document language detection
   required:
-  - __files__
+  - file_uris

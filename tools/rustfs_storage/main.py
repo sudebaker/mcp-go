@@ -425,6 +425,11 @@ def operation_stat(client: Minio, bucket: str, key: str) -> dict:
 
 
 def main() -> None:
+    logger.warning(
+        "The rustfs_storage tool is deprecated. "
+        "All storage operations now go through the Go ResourceManager. "
+        "This tool remains available for backward compatibility but will be removed in a future release."
+    )
     request = {}
     try:
         request = read_request()

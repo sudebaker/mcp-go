@@ -1,4 +1,5 @@
 name: rustfs_storage
+deprecated: true
 description: 'Operaciones en RustFS/S3: upload, download, list, search, delete, stat.'
 command: python3
 args:

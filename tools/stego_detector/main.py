@@ -8,11 +8,14 @@ Detects steganography in images using multiple methods:
 - Entropy analysis: compression ratio vs entropy deviation
 """
 
+import io
 import json
 import math
 import os
 import sys
 from typing import Any
+
+from common.resources import ToolContext
 
 try:
     from PIL import Image
@@ -99,7 +102,7 @@ def analyze_chi_square(image: Image.Image) -> dict[str, Any]:
     }
 
 
-def analyze_entropy(image: Image.Image) -> dict[str, Any]:
+def analyze_entropy(image: Image.Image, data: bytes | None = None) -> dict[str, Any]:
     img_array = np.array(image.convert("L"))
     histogram = np.bincount(img_array.flatten(), minlength=256)[:256]
     total = img_array.size
@@ -121,12 +124,11 @@ def analyze_entropy(image: Image.Image) -> dict[str, Any]:
         score = 0
         verdict = "normal"
 
-    file_size = 0
     compressed_size = img_array.size
     compression_ratio = 0
-    if hasattr(image, "filename") and image.filename:
+    if data is not None:
         try:
-            file_size = os.path.getsize(image.filename)
+            file_size = len(data)
             compression_ratio = round(file_size / compressed_size, 4) if compressed_size > 0 else 0
         except Exception:
             pass
@@ -155,22 +157,43 @@ def main() -> None:
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
 
-        file_path = arguments.get("file_path", "")
-        if not file_path:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": "'file_path' es requerido"},
-            })
-            return
+        file_uri = arguments.get("file_uri", "")
+        if not file_uri:
+            file_path = arguments.get("file_path", "")
+            if not file_path:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": "'file_uri' es requerido"},
+                })
+                return
+        else:
+            file_path = None
 
-        if not os.path.isfile(file_path):
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": f"El archivo no existe: {file_path}"},
-            })
-            return
+        ctx = ToolContext(request)
+        use_tool_context = False
+        data: bytes | None = None
+        try:
+            resource = ctx.file("file_uri")
+            data = resource.read_bytes()
+            file_name = resource.name
+            use_tool_context = True
+        except (KeyError, TypeError):
+            if file_path is None:
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": "'file_path' es requerido"},
+                })
+                return
+            if not os.path.isfile(file_path):
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "INVALID_INPUT", "message": f"El archivo no existe: {file_path}"},
+                })
+                return
+            file_name = os.path.basename(file_path)
 
         allowed_methods = {"lsb", "chi_square", "entropy"}
         methods = arguments.get("methods", ["lsb", "chi_square", "entropy"])
@@ -180,7 +203,10 @@ def main() -> None:
             methods = ["lsb", "chi_square", "entropy"]
 
         try:
-            image = Image.open(file_path)
+            if use_tool_context:
+                image = Image.open(io.BytesIO(data))
+            else:
+                image = Image.open(file_path)
             image.load()
         except Exception as exc:
             write_response({
@@ -204,7 +230,7 @@ def main() -> None:
             overall_scores.append(chi_result["suspicion_score"])
 
         if "entropy" in methods:
-            ent_result = analyze_entropy(image)
+            ent_result = analyze_entropy(image, data if use_tool_context else None)
             results["entropy"] = ent_result
             overall_scores.append(ent_result["suspicion_score"])
 
@@ -219,7 +245,7 @@ def main() -> None:
         lines = [
             "**Stego Detector**",
             "",
-            f"**Archivo:** {os.path.basename(file_path)}",
+            f"**Archivo:** {file_name}",
             f"**Formato:** {image.format or 'Desconocido'}",
             f"**Dimensiones:** {image.size[0]}x{image.size[1]}",
             "",
@@ -257,7 +283,7 @@ def main() -> None:
             "request_id": request_id,
             "content": [{"type": "text", "text": "\n".join(lines)}],
             "structured_content": {
-                "file_name": os.path.basename(file_path),
+                "file_name": file_name,
                 "format": image.format,
                 "dimensions": {"width": image.size[0], "height": image.size[1]},
                 "overall_suspicion_score": overall_score,

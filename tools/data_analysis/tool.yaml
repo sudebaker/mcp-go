@@ -31,10 +31,17 @@ input_schema:
       default: text
       description: 'How to return results: ''text'' (plain), ''json'' (structured),
         ''markdown'' (tables), ''png'' (chart image)'
+    file_uris:
+      type: array
+      description: 'Alternative: resource URIs for attached files. The tool will
+        load them automatically.'
+      items:
+        type: string
+        format: resource-uri
     __files__:
       type: array
-      description: 'Alternative: attach files as __files__ parameter. The tool will
-        download them automatically.'
+      description: '[deprecated] Use file_uris instead. Alternative: attach files
+        as __files__ parameter.'
       items:
         type: object
         properties:

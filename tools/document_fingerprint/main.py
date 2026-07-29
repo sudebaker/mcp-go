@@ -6,10 +6,15 @@ Generates perceptual hashes (phash, dhash, whash, average_hash) for images
 and compares two images returning a similarity score 0-100.
 """
 
+import io
 import json
 import os
 import sys
 from typing import Any
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.resources import ToolContext
 
 try:
     from PIL import Image
@@ -35,9 +40,9 @@ def write_response(response: dict[str, Any]) -> None:
 HASH_METHODS: dict[str, Any] = {}
 
 
-def compute_hash(image_path: str, method: str) -> str | None:
+def compute_hash(image_data: bytes, method: str) -> str | None:
     try:
-        img = Image.open(image_path)
+        img = Image.open(io.BytesIO(image_data))
         img = img.convert("RGB")
         hash_fn = HASH_METHODS.get(method)
         if hash_fn is None:
@@ -47,11 +52,11 @@ def compute_hash(image_path: str, method: str) -> str | None:
         return None
 
 
-def compute_all_hashes(image_path: str) -> dict[str, str]:
+def compute_all_hashes(image_data: bytes) -> dict[str, str]:
     result = {}
     for name, fn in HASH_METHODS.items():
         try:
-            img = Image.open(image_path)
+            img = Image.open(io.BytesIO(image_data))
             img = img.convert("RGB")
             result[name] = str(fn(img))
         except Exception:
@@ -64,6 +69,17 @@ def hamming_distance(h1: str, h2: str) -> int:
     h1 = h1.zfill(max_len)
     h2 = h2.zfill(max_len)
     return sum(1 for a, b in zip(h1, h2) if a != b)
+
+
+def get_image_bytes(ctx, arg_name: str, arguments: dict, fallback_arg: str) -> bytes:
+    try:
+        return ctx.file(arg_name).read_bytes()
+    except (KeyError, TypeError):
+        path = arguments.get(fallback_arg, "")
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(f"{fallback_arg} not found: {path}")
+        with open(path, "rb") as f:
+            return f.read()
 
 
 def main() -> None:
@@ -97,8 +113,6 @@ def main() -> None:
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
 
-        image1 = arguments.get("image1_path", "")
-        image2 = arguments.get("image2_path", "")
         method = arguments.get("method", "phash")
 
         if method not in HASH_METHODS:
@@ -109,24 +123,12 @@ def main() -> None:
             })
             return
 
-        if not os.path.isfile(image1):
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": f"image1_path no existe: {image1}"},
-            })
-            return
+        ctx = ToolContext(request)
+        image1_data = get_image_bytes(ctx, "file_uri_1", arguments, "image1_path")
+        image2_data = get_image_bytes(ctx, "file_uri_2", arguments, "image2_path")
 
-        if not os.path.isfile(image2):
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "INVALID_INPUT", "message": f"image2_path no existe: {image2}"},
-            })
-            return
-
-        hash1 = compute_hash(image1, method)
-        hash2 = compute_hash(image2, method)
+        hash1 = compute_hash(image1_data, method)
+        hash2 = compute_hash(image2_data, method)
 
         if hash1 is None or hash2 is None:
             write_response({
@@ -140,8 +142,11 @@ def main() -> None:
         bits = len(hash1) * 4
         similarity = max(0, round((1 - distance / bits) * 100, 2))
 
-        all_hashes_1 = compute_all_hashes(image1)
-        all_hashes_2 = compute_all_hashes(image2)
+        all_hashes_1 = compute_all_hashes(image1_data)
+        all_hashes_2 = compute_all_hashes(image2_data)
+
+        file1_label = arguments.get("file_uri_1", arguments.get("image1_path", ""))
+        file2_label = arguments.get("file_uri_2", arguments.get("image2_path", ""))
 
         lines = [
             "**Document Fingerprint**",
@@ -153,8 +158,8 @@ def main() -> None:
             f"**Hash 1:** {hash1}",
             f"**Hash 2:** {hash2}",
             "",
-            f"**File 1:** {image1}",
-            f"**File 2:** {image2}",
+            f"**File 1:** {file1_label}",
+            f"**File 2:** {file2_label}",
         ]
 
         lines.append("\n**Todos los hashes:**")
@@ -181,8 +186,8 @@ def main() -> None:
                 "total_bits": bits,
                 "hash1": hash1,
                 "hash2": hash2,
-                "file1": image1,
-                "file2": image2,
+                "file1": file1_label,
+                "file2": file2_label,
                 "all_hashes": {
                     "image1": all_hashes_1,
                     "image2": all_hashes_2,

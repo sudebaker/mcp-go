@@ -16,6 +16,7 @@ Output:
 - classifications: array of {filename, category, confidence, justification, keywords, language}
 """
 
+import io
 import json
 import os
 import re
@@ -25,7 +26,8 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.doc_extractor import download_and_extract, extract_text_preview, extract_inline_file
+from common.doc_extractor import download_and_extract, extract_text_from_buffer, extract_text_preview, extract_inline_file
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.llm_cache import call_llm_with_cache
 
@@ -183,7 +185,15 @@ def main() -> None:
             )
             return
 
-        files_list = arguments.get("__files__", [])
+        ctx = ToolContext(request)
+        try:
+            resources = ctx.files("file_uris")
+            files_list = [
+                {"url": r.uri, "name": r.name, "_resource": r} for r in resources
+            ]
+        except (KeyError, TypeError):
+            files_list = arguments.get("__files__", [])
+
         if not files_list:
             write_response(
                 {
@@ -191,7 +201,7 @@ def main() -> None:
                     "request_id": request_id,
                     "error": {
                         "code": "NO_FILES",
-                        "message": "No files provided in __files__",
+                        "message": "No files provided in file_uris or __files__",
                     },
                 }
             )
@@ -227,6 +237,7 @@ def main() -> None:
             url = file_info.get("url", "")
             filename = file_info.get("name", "") or file_info.get("filename", "")
             data = file_info.get("data", "")
+            resource = file_info.get("_resource")
 
             if not filename:
                 errors.append(
@@ -237,18 +248,22 @@ def main() -> None:
                 )
                 continue
 
-            if not url and not data:
+            if not url and not data and not resource:
                 errors.append(
                     {
                         "filename": filename,
-                        "error": "Missing url or data (provide one)",
+                        "error": "Missing url, data, or resource (provide one)",
                     }
                 )
                 continue
 
             try:
                 logger.info(f"Classifying: {filename}")
-                if data:
+                if resource:
+                    extraction = extract_text_from_buffer(
+                        io.BytesIO(resource.read_bytes()), filename=resource.name
+                    )
+                elif data:
                     extraction = extract_inline_file(data, filename)
                 else:
                     extraction = download_and_extract(url, filename)

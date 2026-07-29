@@ -6,6 +6,7 @@ Compatible with OpenAI Whisper API format.
 """
 
 import binascii
+import io
 import json
 import sys
 import os
@@ -16,6 +17,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.validators import validate_read_path, PathValidationError, sanitize_filename
 
@@ -105,6 +107,50 @@ def transcribe_file(file_path: str, language: Optional[str] = None, response_for
         return None, f"Whisper request failed: {str(e)}"
 
 
+def transcribe_fileobj(fileobj, filename: str, mime_type: str, language: Optional[str] = None, response_format: str = "json") -> tuple[Optional[str], Optional[str]]:
+    """Send an in-memory file object to faster-whisper-server."""
+    if not REQUESTS_AVAILABLE:
+        return None, "requests library not available"
+
+    try:
+        files = {"file": (filename, fileobj, mime_type)}
+        data = {
+            "model": WHISPER_MODEL,
+            "response_format": response_format,
+        }
+        if language:
+            data["language"] = language
+
+        response = requests.post(
+            f"{WHISPER_URL}/v1/audio/transcriptions",
+            files=files,
+            data=data,
+            timeout=DEFAULT_TIMEOUT
+        )
+
+        if response.status_code != 200:
+            return None, f"Whisper server returned HTTP {response.status_code}"
+
+        if response_format == "json":
+            result = response.json()
+            text = result.get("text")
+            if not text:
+                return None, "Whisper response missing 'text' field"
+            return text, None
+        else:
+            text = response.text.strip()
+            if not text:
+                return None, "Whisper returned empty transcription"
+            return text, None
+
+    except requests.exceptions.Timeout:
+        return None, f"Transcription timed out after {DEFAULT_TIMEOUT}s"
+    except requests.exceptions.ConnectionError as e:
+        return None, f"Cannot connect to whisper server at {WHISPER_URL}: {str(e)}"
+    except requests.exceptions.RequestException as e:
+        return None, f"Whisper request failed: {str(e)}"
+
+
 def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
     """Decode base64 audio, save to temp file in /data and transcribe."""
     try:
@@ -141,22 +187,53 @@ def main() -> None:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
+        context = request.get("context", {})
 
-        file_path = arguments.get("file_path", "").strip()
         audio_b64 = arguments.get("audio_base64", "").strip()
         filename = sanitize_filename(arguments.get("filename", "audio.wav"))
         language = arguments.get("language", "") or None
 
-        if not file_path and not audio_b64:
+        # Resolve file_uri via ToolContext (backward compat: fall back to file_path)
+        ctx = ToolContext(request)
+        try:
+            resource = ctx.file("file_uri")
+            file_uri = resource.uri
+        except (KeyError, TypeError):
+            file_uri = arguments.get("file_path", "").strip()
+
+        if not file_uri and not audio_b64:
             write_response({
                 "success": False,
                 "request_id": request_id,
-                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_path' (path on server) or 'audio_base64' (base64-encoded audio)"}
+                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_uri' (res:// URI) or 'audio_base64' (base64-encoded audio)"}
             })
             return
 
-        if file_path:
-            text, error = transcribe_file(file_path, language=language)
+        if file_uri:
+            if file_uri.startswith("res://"):
+                # Use ToolContext to read bytes, pass to whisper as BytesIO
+                try:
+                    data = resource.read_bytes()
+                    suffix = Path(resource.name).suffix.lower()
+                    if suffix not in SUPPORTED_FORMATS:
+                        suffix = ".wav"
+                    mime_map = {
+                        ".mp3": "audio/mpeg", ".mp4": "audio/mp4", ".wav": "audio/wav",
+                        ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".webm": "audio/webm",
+                        ".flac": "audio/flac", ".opus": "audio/ogg", ".mpeg": "audio/mpeg",
+                        ".mpga": "audio/mpeg",
+                    }
+                    mime_type = mime_map.get(suffix, "audio/mpeg")
+                    text, error = transcribe_fileobj(io.BytesIO(data), resource.name, mime_type, language=language)
+                except Exception as e:
+                    write_response({
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "RESOURCE_ERROR", "message": str(e)},
+                    })
+                    return
+            else:
+                text, error = transcribe_file(file_uri, language=language)
         else:
             text, error = transcribe_base64(audio_b64, filename=filename, language=language)
 
@@ -183,7 +260,7 @@ def main() -> None:
                 "text": text,
                 "word_count": word_count,
                 "language": language,
-                "source": file_path or filename
+                "source": file_uri or filename
             }
         })
 

@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.safe_file_ops import SafeFileOperations
 from common.sandbox import execute_in_sandbox, SandboxConfig
@@ -265,7 +266,7 @@ def validate_request_input(
             output_format,
         )
 
-    # Validate file source (file_url, file_path, or __files__ must be provided)
+    # Validate file source (file_url, file_path, file_uris, or __files__ must be provided)
     has_file_path = file_path and isinstance(
         file_path, str) and file_path.strip()
     has_files_list = files_list and len(files_list) > 0
@@ -274,7 +275,7 @@ def validate_request_input(
     if not has_file_path and not has_files_list and not has_file_url:
         return (
             False,
-            "One of file_url, file_path, or __files__ must be provided",
+            "One of file_url, file_path, or file_uris must be provided",
             output_format,
         )
 
@@ -722,7 +723,18 @@ def main() -> None:
         question = arguments.get("question", "")
         output_format = arguments.get("output_format", "text")
         use_sandbox = arguments.get("use_sandbox", True)
-        files_list = arguments.get("__files__", [])
+
+        # Resolve file_uris via ToolContext (backward compat: __files__)
+        ctx = ToolContext(request)
+        files_list = None
+        try:
+            resources = ctx.files("file_uris")
+            files_list = [
+                {"name": r.name, "url": r.uri, "content": ""}
+                for r in resources
+            ]
+        except (KeyError, TypeError):
+            files_list = arguments.get("__files__", [])
 
         # Validate all inputs
         is_valid, error_msg, output_format = validate_request_input(
@@ -834,7 +846,7 @@ def main() -> None:
                 return
 
         elif files_list and len(files_list) > 0:
-            # Use __files__ parameter (file upload)
+            # Use file_uris parameter (file upload)
             emit_chunk("status", {"message": "Processing uploaded file"})
 
             # Find first suitable data file
@@ -854,7 +866,7 @@ def main() -> None:
                         "request_id": request_id,
                         "error": {
                             "code": "INVALID_INPUT",
-                            "message": f"No supported data file found in __files__. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                            "message": f"No supported data file found in file_uris. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
                         },
                     }
                 )
@@ -898,7 +910,7 @@ def main() -> None:
                             "request_id": request_id,
                             "error": {
                                 "code": "INVALID_INPUT",
-                                "message": "Neither 'content' (base64) nor 'url' provided in __files__",
+                                "message": "Neither 'content' (base64) nor 'url' provided in file_uris",
                             },
                         }
                     )

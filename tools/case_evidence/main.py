@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 
 logger = get_logger(__name__, "case_evidence")
@@ -320,6 +321,7 @@ def main() -> None:
 
         caso = arguments.get("caso", "").strip()
         file_url = arguments.get("file_url", "").strip()
+        file_uri = arguments.get("file_uri", "").strip()
         tipo = arguments.get("tipo", "").strip().lower()
         clasificacion = arguments.get("clasificacion", "").strip().lower()
         metadata = arguments.get("metadata") or {}
@@ -328,8 +330,8 @@ def main() -> None:
         errors: list[str] = []
         if not caso:
             errors.append("caso is required")
-        if not file_url:
-            errors.append("file_url is required")
+        if not file_url and not file_uri:
+            errors.append("file_url or file_uri is required")
         if tipo not in VALID_TIPOS:
             errors.append(
                 f"tipo '{tipo}' is invalid — must be one of: {', '.join(sorted(VALID_TIPOS))}"
@@ -349,33 +351,57 @@ def main() -> None:
             )
             return
 
-        # -- Validate URL (SSRF guard) ----------------------------------------
-        is_valid, err = validate_url(file_url)
-        if not is_valid:
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {"code": "INVALID_URL", "message": err},
-                }
-            )
-            return
+        # -- Step 1: Resolve file source --------------------------------------
+        raw_content: bytes | None = None
+        raw_filename: str | None = None
 
-        # -- Step 1: Download file --------------------------------------------
-        logger.info(
-            "Downloading file",
-            extra_data={"url": file_url, "caso": caso, "tipo": tipo},
-        )
-        raw_content, raw_filename, dl_err = download_file(file_url)
-        if dl_err:
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {"code": "DOWNLOAD_FAILED", "message": dl_err},
-                }
+        if file_uri:
+            ctx = ToolContext(request)
+            try:
+                resource = ctx.file("file_uri")
+                raw_content = resource.read_bytes()
+                raw_filename = resource.name
+                logger.info(
+                    "Loaded file from resource URI",
+                    extra_data={"uri": file_uri, "name": raw_filename, "size": len(raw_content)},
+                )
+            except (KeyError, TypeError) as e:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "RESOURCE_ERROR", "message": f"Resource not found: {e}"},
+                    }
+                )
+                return
+        elif file_url:
+            # Validate URL (SSRF guard)
+            is_valid, err = validate_url(file_url)
+            if not is_valid:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "INVALID_URL", "message": err},
+                    }
+                )
+                return
+
+            # Download file
+            logger.info(
+                "Downloading file",
+                extra_data={"url": file_url, "caso": caso, "tipo": tipo},
             )
-            return
+            raw_content, raw_filename, dl_err = download_file(file_url)
+            if dl_err:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {"code": "DOWNLOAD_FAILED", "message": dl_err},
+                    }
+                )
+                return
 
         # Type narrowing — download_file guarantees non-None when error is None
         assert raw_content is not None

@@ -8,9 +8,10 @@ timeout: 120s
 input_schema:
   type: object
   properties:
-    image_path:
+    file_uri:
       type: string
-      description: URL or path to the image file. Supports JPEG, PNG, WebP, PDF pages
+      format: resource-uri
+      description: URI (res://) or URL of the image file. Supports JPEG, PNG, WebP, PDF pages
     task:
       type: string
       enum:
@@ -35,5 +36,5 @@ input_schema:
       description: 'Model name for the chosen provider. Examples: ''gemma4:e2b'',
         ''llava:13b'', ''gpt-4o-mini''. Defaults to LLM_MODEL env var or ''llava''.'
   required:
-  - image_path
+  - file_uri
   - task

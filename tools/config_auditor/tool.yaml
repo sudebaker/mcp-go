@@ -1,0 +1,29 @@
+name: "config_auditor"
+description: "Audita archivos de configuracion en busca de problemas de seguridad: secretos hardcodeados, puertos peligrosos, debug mode, campos vacios, IPs hardcodeadas. Cero tokens LLM."
+command: "python3"
+args: ["main.py"]
+timeout: "60s"
+input_schema:
+  type: object
+  properties:
+    file_uris:
+      type: array
+      items:
+        type: string
+        format: resource-uri
+      minItems: 1
+      description: "Archivos de configuracion a auditar"
+    rules:
+      type: array
+      items:
+        type: string
+        enum: ["secrets", "dangerous_ports", "debug_mode", "empty_required", "hardcoded_ips"]
+      default: ["secrets", "dangerous_ports", "debug_mode", "empty_required", "hardcoded_ips"]
+      description: "Reglas de auditoria a aplicar"
+    severity_filter:
+      type: string
+      enum: ["all", "critical", "high", "medium"]
+      default: "all"
+      description: "Filtrar resultados por severidad"
+  required:
+    - file_uris

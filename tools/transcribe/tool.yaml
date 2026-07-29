@@ -8,12 +8,13 @@ timeout: 180s
 input_schema:
   type: object
   properties:
-    file_path:
+    file_uri:
       type: string
-      description: Absolute path to the audio file on the server (e.g. /data/recording.mp3)
+      format: resource-uri
+      description: URI (res://) or path to the audio file on the server (e.g. /data/recording.mp3)
     audio_base64:
       type: string
-      description: Base64-encoded audio content (alternative to file_path)
+      description: Base64-encoded audio content (alternative to file_uri)
     filename:
       type: string
       description: Filename with extension when using audio_base64 (e.g. recording.ogg)

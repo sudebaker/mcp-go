@@ -18,6 +18,7 @@ Output:
 """
 
 import difflib
+import io
 import json
 import os
 import sys
@@ -26,7 +27,8 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.doc_extractor import download_and_extract, extract_inline_file
+from common.doc_extractor import download_and_extract, extract_text_from_buffer, extract_inline_file
+from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.llm_cache import call_llm_with_cache
 
@@ -158,20 +160,26 @@ def main() -> None:
             )
             return
 
-        files_list = arguments.get("__files__", [])
-
-        if len(files_list) != 2:
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "INVALID_FILES",
-                        "message": f"Exactly 2 files required (old and new version), got {len(files_list)}",
-                    },
-                }
-            )
-            return
+        ctx = ToolContext(request)
+        use_tool_context = False
+        try:
+            old_resource = ctx.file("file_uri_1")
+            new_resource = ctx.file("file_uri_2")
+            use_tool_context = True
+        except (KeyError, TypeError):
+            files_list = arguments.get("__files__", [])
+            if len(files_list) != 2:
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "INVALID_FILES",
+                            "message": f"Exactly 2 files required (old and new version), got {len(files_list)}",
+                        },
+                    }
+                )
+                return
 
         output_format = arguments.get("output_format", "markdown")
         valid_formats = ["markdown", "structured"]
@@ -190,39 +198,51 @@ def main() -> None:
 
         focus = arguments.get("focus", "")
 
-        old_file = files_list[0]
-        new_file = files_list[1]
+        if use_tool_context:
+            old_filename = old_resource.name
+            new_filename = new_resource.name
+            old_data_bytes = old_resource.read_bytes()
+            new_data_bytes = new_resource.read_bytes()
+        else:
+            old_file = files_list[0]
+            new_file = files_list[1]
+            old_url = old_file.get("url", "")
+            new_url = new_file.get("url", "")
+            old_filename = old_file.get("name", "") or old_file.get("filename", "old_version")
+            new_filename = new_file.get("name", "") or new_file.get("filename", "new_version")
+            old_data = old_file.get("data", "")
+            new_data = new_file.get("data", "")
 
-        old_url = old_file.get("url", "")
-        new_url = new_file.get("url", "")
-        old_filename = old_file.get("name", "") or old_file.get("filename", "old_version")
-        new_filename = new_file.get("name", "") or new_file.get("filename", "new_version")
-        old_data = old_file.get("data", "")
-        new_data = new_file.get("data", "")
+            if not (old_url or old_data) or not (new_url or new_data):
+                write_response(
+                    {
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "MISSING_FILE_DATA",
+                            "message": "Both files must have url or data (base64), plus filename",
+                        },
+                    }
+                )
+                return
 
-        if not (old_url or old_data) or not (new_url or new_data):
-            write_response(
-                {
-                    "success": False,
-                    "request_id": request_id,
-                    "error": {
-                        "code": "MISSING_FILE_DATA",
-                        "message": "Both files must have url or data (base64), plus filename",
-                    },
-                }
-            )
-            return
+            old_data_bytes = None
+            new_data_bytes = None
 
         logger.info(f"Comparing {old_filename} -> {new_filename}")
 
-        if old_data:
+        if use_tool_context:
+            old_extraction = extract_text_from_buffer(
+                io.BytesIO(old_data_bytes), filename=old_filename
+            )
+            new_extraction = extract_text_from_buffer(
+                io.BytesIO(new_data_bytes), filename=new_filename
+            )
+        elif old_data:
             old_extraction = extract_inline_file(old_data, old_filename)
-        else:
-            old_extraction = download_and_extract(old_url, old_filename)
-
-        if new_data:
             new_extraction = extract_inline_file(new_data, new_filename)
         else:
+            old_extraction = download_and_extract(old_url, old_filename)
             new_extraction = download_and_extract(new_url, new_filename)
 
         diff_text, sections_changed, additions, deletions = calculate_diff(

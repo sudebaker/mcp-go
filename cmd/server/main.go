@@ -22,6 +22,7 @@ import (
 	"github.com/sudebaker/mcp-go/internal/executor"
 	"github.com/sudebaker/mcp-go/internal/health"
 	"github.com/sudebaker/mcp-go/internal/prompts"
+	"github.com/sudebaker/mcp-go/internal/resources"
 	"github.com/sudebaker/mcp-go/internal/session"
 	"github.com/sudebaker/mcp-go/internal/tracing"
 	"github.com/sudebaker/mcp-go/internal/transport"
@@ -70,7 +71,6 @@ func main() {
 
 	// Open PostgreSQL connection from DATABASE_URL if configured
 	var db *sql.DB
-	var adminDB *sql.DB
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL != "" {
 		// Ensure sslmode=disable for internal Docker connections
@@ -90,18 +90,6 @@ func main() {
 			db.SetMaxOpenConns(2) // Health checks only need minimal connections
 			db.SetMaxIdleConns(1)
 			log.Info().Msg("PostgreSQL health check connection initialized")
-		}
-
-		// Dedicated connection pool for admin endpoints (delete/export)
-		adminDB, dbErr = sql.Open("postgres", databaseURL)
-		if dbErr != nil {
-			log.Error().Err(dbErr).Msg("Failed to open PostgreSQL connection for admin endpoints")
-			adminDB = nil
-		} else {
-			adminDB.SetMaxOpenConns(10)
-			adminDB.SetMaxIdleConns(5)
-			adminDB.SetConnMaxLifetime(5 * time.Minute)
-			log.Info().Msg("Admin database connection pool initialized (max 10 conns)")
 		}
 	}
 
@@ -132,6 +120,13 @@ func main() {
 	// Initialize session store for user_id tracking
 	sessionStore := session.New()
 
+	// Initialize RustFS storage for resource management
+	rustfsStorage, err := resources.NewRustFSStorage()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create RustFS storage")
+	}
+	resourceManager := resources.NewResourceManager(rustfsStorage, sessionStore)
+
 	// Initialize hooks for session management
 	hooks := &server.Hooks{}
 	hooks.AddOnRegisterSession(func(ctx context.Context, sess server.ClientSession) {
@@ -141,6 +136,24 @@ func main() {
 		sessionStore.Delete(sess.SessionID())
 		log.Debug().Str("session_id", sess.SessionID()).Msg("Session unregistered, user_id removed")
 	})
+
+	// Create MCP server (with hooks, before resourceHandler references it)
+	mcpServer := server.NewMCPServer(
+		cfg.Server.Name,
+		Version,
+		server.WithToolCapabilities(true),
+		server.WithPromptCapabilities(true),
+		server.WithResourceCapabilities(true, false),
+		server.WithLogging(),
+		server.WithRecovery(),
+		server.WithHooks(hooks),
+	)
+
+	// Create resource handler and register the read handler
+	resourceHandler := resources.NewResourceHandler(resourceManager, mcpServer)
+	resourceHandler.RegisterHandler()
+
+	// Add after-initialize hook to associate user IDs and register resources
 	hooks.AddAfterInitialize(func(ctx context.Context, id any, message *mcp.InitializeRequest, result *mcp.InitializeResult) {
 		if message == nil || message.Params.Capabilities.Experimental == nil {
 			return
@@ -149,6 +162,11 @@ func main() {
 			if sess := server.ClientSessionFromContext(ctx); sess != nil {
 				sessionStore.Set(sess.SessionID(), userID)
 				log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with user")
+
+				// Register this user's resources after successful initialization
+				if _, err := resourceHandler.RegisterForSession(context.Background(), sess.SessionID()); err != nil {
+					log.Error().Err(err).Str("session_id", sess.SessionID()).Msg("Failed to register resources for session")
+				}
 			}
 		}
 	})
@@ -157,17 +175,6 @@ func main() {
 	// and persistent process pool for KB tools (kb_ingest, kb_search).
 	// Pool keeps 5 persistent Python processes per tool, avoiding model reloads.
 	exec := executor.NewWithTracerSessionStoreAndPool(cfg, tracer, sessionStore, 5)
-
-	// Create MCP server
-	mcpServer := server.NewMCPServer(
-		cfg.Server.Name,
-		Version,
-		server.WithToolCapabilities(true),
-		server.WithPromptCapabilities(true),
-		server.WithLogging(),
-		server.WithRecovery(),
-		server.WithHooks(hooks),
-	)
 
 	// Validate and register tools from configuration
 	for _, toolCfg := range cfg.Tools {
@@ -190,9 +197,6 @@ func main() {
 
 	log.Info().Msg("Server started with static configuration")
 
-	// Read ADMIN_API_KEY from environment (optional)
-	adminKey := os.Getenv("ADMIN_API_KEY")
-
 	// Create SSE server
 	sseServer := transport.NewMCPServer(mcpServer, transport.MCPConfig{
 		Host:              cfg.Server.Host,
@@ -209,9 +213,10 @@ func main() {
 		Upload:            cfg.Upload,
 		FilesDir:          filepath.Join(cfg.Execution.WorkingDir, cfg.Execution.ReportsDir),
 		HealthChecker:     healthChecker,
-		AdminKey:          adminKey,
-		DB:                adminDB,
 	})
+
+	// Wire resource manager into the transport server for internal resource streaming
+	sseServer.SetResourceManager(resourceManager)
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

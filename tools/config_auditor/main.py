@@ -12,6 +12,8 @@ import re
 import sys
 from typing import Dict, Pattern, Optional
 
+from common.resources import ToolContext
+
 # Rule definitions
 AUDIT_RULES: Dict[str, Dict] = {
     "secrets": {
@@ -78,7 +80,11 @@ def main() -> None:
         request = read_request()
         request_id = request.get("request_id", "")
         arguments = request.get("arguments", {})
-        files = arguments.get("__files__", [])
+        ctx = ToolContext(request)
+        try:
+            files = [r.read_text() for r in ctx.files("file_uris")]
+        except (KeyError, TypeError):
+            files = arguments.get("__files__", [])
         rules = arguments.get("rules", list(AUDIT_RULES.keys()))
         severity_filter = arguments.get("severity_filter", "all")
 

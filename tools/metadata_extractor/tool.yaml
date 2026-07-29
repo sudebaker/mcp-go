@@ -10,9 +10,10 @@ timeout: 30s
 input_schema:
   type: object
   properties:
-    file_path:
+    file_uri:
       type: string
-      description: "Ruta absoluta al archivo en el servidor"
+      format: resource-uri
+      description: "URI del recurso a analizar"
     extract_gps:
       type: boolean
       default: true
@@ -22,4 +23,4 @@ input_schema:
       default: true
       description: "Extraer historial de metadatos internos"
   required:
-  - file_path
+  - file_uri

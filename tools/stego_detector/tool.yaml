@@ -10,9 +10,10 @@ timeout: 60s
 input_schema:
   type: object
   properties:
-    file_path:
+    file_uri:
       type: string
-      description: "Ruta absoluta a la imagen en el servidor"
+      format: resource-uri
+      description: "URI del recurso de imagen a analizar"
     methods:
       type: array
       items:
@@ -21,4 +22,4 @@ input_schema:
       default: [lsb, chi_square, entropy]
       description: "Métodos de detección a aplicar"
   required:
-  - file_path
+  - file_uri

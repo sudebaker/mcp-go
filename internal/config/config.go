@@ -159,12 +159,6 @@ type UploadConfig struct {
 	MaxSizeMB int64 `yaml:"max_size_mb"`
 	// AllowedTypes is the whitelist of MIME types
 	AllowedTypes []string `yaml:"allowed_types"`
-	// DefaultTTLSeconds is the default time-to-live for uploaded files (default: 3600)
-	DefaultTTLSeconds int `yaml:"default_ttl_seconds"`
-	// MaxTTLSeconds is the maximum TTL a client can request (default: 86400)
-	MaxTTLSeconds int `yaml:"max_ttl_seconds"`
-	// UploadDir is the base directory for storing uploads (default: /data/uploads)
-	UploadDir string `yaml:"upload_dir"`
 }
 
 // envVarRegex matches ${VAR_NAME} or ${VAR_NAME:-default} patterns for expansion

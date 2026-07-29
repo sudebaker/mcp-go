@@ -6,70 +6,25 @@ package transport
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/sudebaker/mcp-go/internal/resources"
 )
 
-// UploadConfig holds configuration for the upload endpoint.
-type UploadConfig struct {
-	// Enabled indicates if upload endpoint is active (default: true)
-	Enabled bool
-	// MaxSizeMB is the maximum file size in megabytes (default: 50)
-	MaxSizeMB int64
-	// AllowedTypes is the whitelist of MIME types
-	AllowedTypes []string
-	// DefaultTTLSeconds is the default time-to-live for uploaded files (default: 3600)
-	DefaultTTLSeconds int
-	// MaxTTLSeconds is the maximum TTL a client can request (default: 86400)
-	MaxTTLSeconds int
-	// UploadDir is the base directory for storing uploads (default: /data/uploads)
-	UploadDir string
-}
-
-// DefaultUploadConfig returns sensible defaults for upload configuration.
-func DefaultUploadConfig() UploadConfig {
-	return UploadConfig{
-		Enabled:   true,
-		MaxSizeMB: 50,
-		AllowedTypes: []string{
-			"image/jpeg",
-			"image/png",
-			"image/webp",
-			"image/gif",
-			"application/pdf",
-			"audio/mpeg",
-			"audio/wav",
-			"audio/ogg",
-			"audio/webm",
-			"audio/flac",
-			"text/csv",
-			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-			"application/vnd.ms-excel",
-		},
-		DefaultTTLSeconds: 3600,
-		MaxTTLSeconds:     86400,
-		UploadDir:         "/data/uploads",
-	}
-}
-
-// UploadResponse is the JSON response for successful uploads.
+// UploadResponse is the JSON response for upload operations.
 type UploadResponse struct {
-	Success     bool   `json:"success"`
-	Path        string `json:"path,omitempty"`
-	Filename    string `json:"filename,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 // generateRandomFilename creates a unique filename with the original extension.
@@ -99,13 +54,12 @@ func sanitizeFilename(name string) string {
 //
 // Request:
 //   - Content-Type: multipart/form-data
+//   - Header: X-Session-ID (required) - identifies the authenticated session
 //   - Field: file (required) - the binary file
-//   - Field: ttl (optional) - time-to-live in seconds (default: 3600)
-//   - Field: collection (optional) - subdirectory for organization
 //
 // Response (200):
 //
-//	{"success": true, "path": "/data/uploads/abc123.jpg", "filename": "...", "size": N, "content_type": "...", "expires_at": "..."}
+//	{"success": true, "uri": "res://...", "sha256": "...", "size": N, "content_type": "...", "name": "..."}
 //
 // Response (413):
 //
@@ -120,22 +74,33 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID := r.Header.Get("X-Session-ID")
+	if sessionID == "" {
+		http.Error(w, "Missing X-Session-ID", http.StatusUnauthorized)
+		return
+	}
+
 	// Get upload config from server (use defaults if not configured)
 	cfg := s.uploadConfig
 	if cfg.MaxSizeMB == 0 {
 		cfg.MaxSizeMB = 50
 	}
 	if len(cfg.AllowedTypes) == 0 {
-		cfg.AllowedTypes = DefaultUploadConfig().AllowedTypes
-	}
-	if cfg.DefaultTTLSeconds == 0 {
-		cfg.DefaultTTLSeconds = 3600
-	}
-	if cfg.MaxTTLSeconds == 0 {
-		cfg.MaxTTLSeconds = 86400
-	}
-	if cfg.UploadDir == "" {
-		cfg.UploadDir = "/data/uploads"
+		cfg.AllowedTypes = []string{
+			"image/jpeg",
+			"image/png",
+			"image/webp",
+			"image/gif",
+			"application/pdf",
+			"audio/mpeg",
+			"audio/wav",
+			"audio/ogg",
+			"audio/webm",
+			"audio/flac",
+			"text/csv",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			"application/vnd.ms-excel",
+		}
 	}
 
 	// Parse multipart form with max size limit
@@ -234,230 +199,58 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get TTL from form (optional)
-	ttl := cfg.DefaultTTLSeconds
-	if ttlStr := r.FormValue("ttl"); ttlStr != "" {
-		var parsed int
-		if _, err := fmt.Sscanf(ttlStr, "%d", &parsed); err == nil {
-			if parsed > cfg.MaxTTLSeconds {
-				parsed = cfg.MaxTTLSeconds
-			}
-			if parsed > 0 {
-				ttl = parsed
-			}
-		}
-	}
+	// Wrap the stream so we can compute SHA256 while it is being stored.
+	hasher := sha256.New()
+	teeReader := io.TeeReader(fileReader, hasher)
 
-	// Get collection from form (optional)
-	collection := strings.TrimSpace(r.FormValue("collection"))
-	if collection != "" {
-		// Sanitize collection name - only allow alphanumeric and hyphens
-		collection = strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-				return r
-			}
-			return -1
-		}, collection)
-		// SECURITY: Limit collection name length and reject path separators
-		if len(collection) > 64 || strings.Contains(collection, "..") {
+	// Enforce the configured size limit while still streaming. The limit reader
+	// allows one extra byte so we can detect when the upload exceeds the limit.
+	limitedReader := io.LimitReader(teeReader, maxSize+1)
+
+	res, err := s.resourceManager.PutForUser(r.Context(), sessionID, uniqueName, limitedReader, -1, contentType)
+	if err != nil {
+		if errors.Is(err, resources.ErrUnauthenticated) {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(UploadResponse{
 				Success: false,
-				Error:   "Invalid collection name: max 64 chars, no path traversal",
+				Error:   "Missing or invalid X-Session-ID",
 			})
 			return
 		}
-	}
-
-	// Build upload path
-	uploadDir := cfg.UploadDir
-	if collection != "" {
-		uploadDir = filepath.Join(uploadDir, collection)
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		log.Error().Err(err).Str("dir", uploadDir).Msg("Failed to create upload directory")
-		http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
-		return
-	}
-
-	// Create destination file
-	destPath := filepath.Join(uploadDir, uniqueName)
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		log.Error().Err(err).Str("path", destPath).Msg("Failed to create destination file")
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		return
-	}
-	defer destFile.Close()
-
-	// Copy file content
-	written, err := io.Copy(destFile, fileReader)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to write file content")
-		os.Remove(destPath) // Clean up partial file
+		log.Error().Err(err).Msg("Failed to upload to storage")
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
 
-	// Calculate expiration time
-	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	if res.Size > maxSize {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		json.NewEncoder(w).Encode(UploadResponse{
+			Success: false,
+			Error:   fmt.Sprintf("File exceeds maximum size limit (%dMB)", cfg.MaxSizeMB),
+		})
+		return
+	}
 
-	// Write expiration metadata as sidecar file for the cleanup goroutine
-	metaPath := destPath + ".meta"
-	metaData := map[string]string{
-		"expires_at":    expiresAt.Format(time.RFC3339),
-		"content_type":  contentType,
-		"original_name": originalFilename,
-	}
-	metaJSON, _ := json.Marshal(metaData)
-	if err := os.WriteFile(metaPath, metaJSON, 0644); err != nil {
-		log.Warn().Err(err).Str("path", metaPath).Msg("Failed to write upload metadata (file won't be auto-cleaned)")
-	}
+	sha := hex.EncodeToString(hasher.Sum(nil))
 
 	log.Info().
-		Str("path", destPath).
+		Str("uri", res.URI).
 		Str("content_type", contentType).
-		Int64("size", written).
-		Time("expires_at", expiresAt).
+		Int64("size", res.Size).
+		Str("sha256", sha).
 		Msg("File uploaded successfully")
 
 	// Send success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(UploadResponse{
-		Success:     true,
-		Path:        destPath,
-		Filename:    originalFilename,
-		Size:        written,
-		ContentType: contentType,
-		ExpiresAt:   expiresAt.Format(time.RFC3339),
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":      true,
+		"uri":          res.URI,
+		"sha256":       sha,
+		"size":         res.Size,
+		"content_type": res.MIMEType,
+		"name":         originalFilename,
 	})
-}
-
-// startUploadCleanup runs a background goroutine that periodically scans
-// the upload directory and removes files whose TTL has expired.
-func (s *MCPServer) startUploadCleanup() {
-	cfg := s.uploadConfig
-	if cfg.UploadDir == "" {
-		cfg.UploadDir = "/data/uploads"
-	}
-	ticker := time.NewTicker(10 * time.Minute)
-	defer ticker.Stop()
-
-	log.Info().Str("dir", cfg.UploadDir).Msg("Upload TTL cleanup goroutine started")
-
-	for {
-		select {
-		case <-ticker.C:
-			s.cleanExpiredUploads(cfg.UploadDir)
-		case <-s.stopCh:
-			log.Debug().Msg("Upload cleanup goroutine stopped")
-			return
-		}
-	}
-}
-
-// cleanExpiredUploads removes uploaded files and their .meta sidecars whose
-// expiration time has passed.
-func (s *MCPServer) cleanExpiredUploads(uploadDir string) {
-	now := time.Now()
-	removed := 0
-	errors := 0
-
-	entries, err := os.ReadDir(uploadDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Warn().Err(err).Str("dir", uploadDir).Msg("Failed to scan upload directory")
-		}
-		return
-	}
-
-	for _, entry := range entries {
-		// Skip .meta sidecar files (we clean them alongside their parent)
-		if strings.HasSuffix(entry.Name(), ".meta") {
-			continue
-		}
-
-		metaPath := filepath.Join(uploadDir, entry.Name()+".meta")
-		metaBytes, err := os.ReadFile(metaPath)
-		if err != nil {
-			// No .meta file — legacy file without metadata, skip
-			continue
-		}
-
-		var meta map[string]string
-		if err := json.Unmarshal(metaBytes, &meta); err != nil {
-			continue
-		}
-
-		expiresAtStr, ok := meta["expires_at"]
-		if !ok {
-			continue
-		}
-
-		expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
-		if err != nil {
-			continue
-		}
-
-		if now.After(expiresAt) {
-			filePath := filepath.Join(uploadDir, entry.Name())
-			if err := os.Remove(filePath); err != nil {
-				errors++
-				log.Warn().Err(err).Str("path", filePath).Msg("Failed to remove expired upload")
-			} else {
-				os.Remove(metaPath) // best-effort sidecar cleanup
-				removed++
-			}
-		}
-	}
-
-	// Recurse into collection subdirectories (depth 1 only)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			subDir := filepath.Join(uploadDir, entry.Name())
-			subEntries, err := os.ReadDir(subDir)
-			if err != nil {
-				continue
-			}
-			for _, subEntry := range subEntries {
-				if strings.HasSuffix(subEntry.Name(), ".meta") {
-					continue
-				}
-				metaPath := filepath.Join(subDir, subEntry.Name()+".meta")
-				metaBytes, err := os.ReadFile(metaPath)
-				if err != nil {
-					continue
-				}
-				var meta map[string]string
-				if json.Unmarshal(metaBytes, &meta) != nil {
-					continue
-				}
-				expiresAtStr, ok := meta["expires_at"]
-				if !ok {
-					continue
-				}
-				expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
-				if err != nil {
-					continue
-				}
-				if now.After(expiresAt) {
-					filePath := filepath.Join(subDir, subEntry.Name())
-					if os.Remove(filePath) == nil {
-						os.Remove(metaPath)
-						removed++
-					} else {
-						errors++
-					}
-				}
-			}
-		}
-	}
-
-	if removed > 0 || errors > 0 {
-		log.Info().Int("removed", removed).Int("errors", errors).Msg("Upload TTL cleanup completed")
-	}
 }

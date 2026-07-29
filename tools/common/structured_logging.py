@@ -8,10 +8,8 @@ import json
 import logging
 import re
 import sys
-import time
 from datetime import datetime, timezone
-from functools import wraps
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 
 class StructuredLogger:
@@ -185,74 +183,6 @@ class StructuredLogger:
         **kwargs: Any,
     ) -> None:
         self.log(logging.CRITICAL, msg, extra_data, **kwargs)
-
-
-def timed_operation(
-    operation_name: Optional[str] = None,
-    log_result: bool = True,
-    log_args: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator to log function execution time.
-
-    Args:
-        operation_name: Name for the operation in logs. If None, uses function name.
-        log_result: Whether to log the result.
-        log_args: Whether to log function arguments (sanitized).
-
-    Returns:
-        Decorated function.
-
-    """
-
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            logger = StructuredLogger(func.__module__)
-            start_time = time.perf_counter()
-            op_name = operation_name or func.__name__
-
-            extra_data = {}
-            if log_args:
-                extra_data["args"] = logger._sanitize_value(str(args), 500)
-                extra_data["kwargs"] = logger._sanitize_dict(kwargs, 500)
-
-            logger.info(f"Starting operation: {op_name}", extra_data=extra_data)
-
-            try:
-                result = func(*args, **kwargs)
-                duration = time.perf_counter() - start_time
-
-                success_data = {
-                    "operation": op_name,
-                    "duration_seconds": round(duration, 4),
-                    "success": True,
-                }
-                if log_result:
-                    result_str = str(result)
-                    if len(result_str) > 1000:
-                        result_str = result_str[:1000] + "...[truncated]"
-                    success_data["result"] = result_str
-
-                logger.info(f"Completed operation: {op_name}", extra_data=success_data)
-                return result
-
-            except Exception as e:
-                duration = time.perf_counter() - start_time
-                error_data = {
-                    "operation": op_name,
-                    "duration_seconds": round(duration, 4),
-                    "success": False,
-                    "error_type": type(e).__name__,
-                    "error_message": logger._sanitize_value(str(e), 1000),
-                }
-                logger.error(
-                    f"Failed operation: {op_name}", extra_data=error_data, exc_info=True
-                )
-                raise
-
-        return wrapper
-
-    return decorator
 
 
 class RequestLogger:

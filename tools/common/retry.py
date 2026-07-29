@@ -109,13 +109,6 @@ def is_transient_error(exception: Exception) -> bool:
     return False
 
 
-def is_rate_limit_error(exception: Exception) -> bool:
-    """Detecta errores de rate limiting."""
-    if isinstance(exception, requests.HTTPError):
-        return exception.response.status_code == 429
-    return False
-
-
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),

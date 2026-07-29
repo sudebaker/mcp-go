@@ -787,63 +787,114 @@ def main() -> None:
         actual_filename = "data"
 
         if file_url_direct:
-            # Direct HTTP URL (presigned S3 or any HTTP URL) - preferred path
-            emit_chunk("status", {"message": "Downloading file from URL"})
-
-            # Determine filename for format detection
-            if file_name_direct:
-                actual_filename = file_name_direct
-            else:
-                # Extract filename from URL path (strips query string)
-                url_path = urlparse(file_url_direct).path
-                actual_filename = Path(url_path).name
-                # Strip UUID prefix if present: "uuid_realname.xlsx" -> "realname.xlsx"
-                actual_filename = (
-                    re.sub(
-                        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_",
-                        "",
-                        actual_filename,
-                        flags=re.IGNORECASE,
-                    )
-                    or actual_filename
-                )
-
-            # Validate extension
-            if Path(actual_filename).suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
-                write_response(
-                    {
-                        "success": False,
-                        "request_id": request_id,
-                        "error": {
-                            "code": "INVALID_INPUT",
-                            "message": f"Unsupported file type: '{actual_filename}'. "
-                            f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+            if file_url_direct.startswith("res://"):
+                # Resolve res:// URI via internal streaming endpoint
+                emit_chunk("status", {"message": "Reading file from resource URI"})
+                try:
+                    # First try _resources metadata (from Go injection)
+                    try:
+                        resource = ctx.file("file_url")
+                        data_bytes = resource.read_bytes()
+                    except (KeyError, TypeError):
+                        # Fallback: construct internal URL directly from token
+                        host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+                        token = file_url_direct[len("res://"):]
+                        import urllib.request
+                        resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
+                        data_bytes = resp.read()
+                    if file_name_direct:
+                        actual_filename = file_name_direct
+                    else:
+                        actual_filename = "data.csv"
+                    if Path(actual_filename).suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
+                        write_response(
+                            {
+                                "success": False,
+                                "request_id": request_id,
+                                "error": {
+                                    "code": "INVALID_INPUT",
+                                    "message": f"Unsupported file type: '{actual_filename}'. "
+                                    f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                                },
+                            }
+                        )
+                        return
+                    df = load_data_from_buffer(BytesIO(data_bytes), actual_filename)
+                    emit_chunk(
+                        "data_loaded",
+                        {
+                            "rows": df.shape[0],
+                            "columns": df.shape[1],
+                            "source": "res_url",
                         },
-                    }
-                )
-                return
+                    )
+                except Exception as e:
+                    write_response(
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            "error": {"code": "FILE_LOAD_ERROR", "message": str(e)},
+                        }
+                    )
+                    return
+            else:
+                # Direct HTTP URL (presigned S3 or any HTTP URL) - preferred path
+                emit_chunk("status", {"message": "Downloading file from URL"})
 
-            try:
-                buffer = download_file_from_url(
-                    file_url_direct, actual_filename)
-                df = load_data_from_buffer(buffer, actual_filename)
-                emit_chunk(
-                    "data_loaded",
-                    {
-                        "rows": df.shape[0],
-                        "columns": df.shape[1],
-                        "source": "file_url",
-                    },
-                )
-            except Exception as e:
-                write_response(
-                    {
-                        "success": False,
-                        "request_id": request_id,
-                        "error": {"code": "FILE_DOWNLOAD_ERROR", "message": str(e)},
-                    }
-                )
-                return
+                # Determine filename for format detection
+                if file_name_direct:
+                    actual_filename = file_name_direct
+                else:
+                    # Extract filename from URL path (strips query string)
+                    url_path = urlparse(file_url_direct).path
+                    actual_filename = Path(url_path).name
+                    # Strip UUID prefix if present: "uuid_realname.xlsx" -> "realname.xlsx"
+                    actual_filename = (
+                        re.sub(
+                            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_",
+                            "",
+                            actual_filename,
+                            flags=re.IGNORECASE,
+                        )
+                        or actual_filename
+                    )
+
+                # Validate extension
+                if Path(actual_filename).suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
+                    write_response(
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            "error": {
+                                "code": "INVALID_INPUT",
+                                "message": f"Unsupported file type: '{actual_filename}'. "
+                                f"Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                            },
+                        }
+                    )
+                    return
+
+                try:
+                    buffer = download_file_from_url(
+                        file_url_direct, actual_filename)
+                    df = load_data_from_buffer(buffer, actual_filename)
+                    emit_chunk(
+                        "data_loaded",
+                        {
+                            "rows": df.shape[0],
+                            "columns": df.shape[1],
+                            "source": "file_url",
+                        },
+                    )
+                except Exception as e:
+                    write_response(
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            "error": {"code": "FILE_DOWNLOAD_ERROR", "message": str(e)},
+                        }
+                    )
+                    return
 
         elif files_list and len(files_list) > 0:
             # Use file_uris parameter (file upload)

@@ -344,7 +344,6 @@ func buildInputSchema(toolCfg config.ToolConfig) *mcp.ToolInputSchema {
 	return schema
 }
 
-// createToolHandler creates a tool handler that delegates to the executor.
 func createToolHandler(exec *executor.Executor, toolName string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		log.Debug().

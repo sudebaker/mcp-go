@@ -173,7 +173,7 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Detect actual content type from magic bytes
 	detectedType := http.DetectContentType(buffer[:n])
-	if detectedType != contentType {
+	if !matchMIME(contentType, detectedType) {
 		log.Warn().
 			Str("declared", contentType).
 			Str("detected", detectedType).
@@ -253,4 +253,25 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		"content_type": res.MIMEType,
 		"name":         originalFilename,
 	})
+}
+
+// matchMIME compares declared vs detected content type with relaxed rules
+// for types that Go's DetectContentType cannot distinguish.
+func matchMIME(declared, detected string) bool {
+	if declared == detected {
+		return true
+	}
+	// text/csv is detected as text/plain; charset=utf-8 by Go's http.DetectContentType
+	if declared == "text/csv" && strings.HasPrefix(detected, "text/plain") {
+		return true
+	}
+	// .xlsx (ZIP-based) is detected as application/zip
+	if declared == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" && detected == "application/zip" {
+		return true
+	}
+	// .xls (OLE2-based) is detected as application/octet-stream
+	if declared == "application/vnd.ms-excel" && detected == "application/octet-stream" {
+		return true
+	}
+	return false
 }

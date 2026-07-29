@@ -1,11 +1,32 @@
 package resources
 
 import (
+	"net"
 	"os"
 	"testing"
+	"time"
 )
 
+func skipIfNoRustFS(t *testing.T) {
+	t.Helper()
+	// If RUSTFS_TEST_SKIP is set, skip this test (no RustFS available in unit test env)
+	if os.Getenv("RUSTFS_TEST_SKIP") != "" {
+		t.Skip("Skipping RustFS integration test (RUSTFS_TEST_SKIP set)")
+	}
+	// Try to connect to RustFS
+	endpoint := os.Getenv("RUSTFS_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "rustfs:9000"
+	}
+	// Quick DNS check to see if RustFS is reachable
+	_, err := net.DialTimeout("tcp", endpoint, 100*time.Millisecond)
+	if err != nil {
+		t.Skip("Skipping RustFS integration test: " + err.Error())
+	}
+}
+
 func TestNewRustFSStorage_DefaultEndpoint(t *testing.T) {
+	skipIfNoRustFS(t)
 	envVars := []string{
 		"RUSTFS_ENDPOINT",
 		"RUSTFS_ACCESS_KEY_ID",
@@ -33,6 +54,7 @@ func TestNewRustFSStorage_DefaultEndpoint(t *testing.T) {
 }
 
 func TestNewRustFSStorage_EnvironmentVariables(t *testing.T) {
+	skipIfNoRustFS(t)
 	envVars := map[string]string{
 		"RUSTFS_ENDPOINT":          "custom.example.com:9000",
 		"RUSTFS_ACCESS_KEY_ID":     "test-access-key",

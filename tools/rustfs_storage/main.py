@@ -32,7 +32,7 @@ except ImportError:
 
 MAX_UPLOAD_SIZE_MB = 100
 ALLOWED_OPERATIONS = ["upload", "download", "list", "search", "delete", "stat"]
-DEFAULT_BUCKET = "default"
+DEFAULT_BUCKET = "users"
 # Presigned URL TTL (Time To Live) in seconds, configurable via RUSTFS_PRESIGNED_TTL_SECONDS env var
 PRESIGNED_URL_TTL_SECONDS = int(os.environ.get("RUSTFS_PRESIGNED_TTL_SECONDS", "3600"))
 

@@ -2,12 +2,15 @@ package resources
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/rs/zerolog/log"
 )
 
 type RustFSStorage struct {
@@ -32,10 +35,40 @@ func NewRustFSStorage() (*RustFSStorage, error) {
 		return nil, err
 	}
 
+	// Ensure the default bucket exists with retry (RustFS may not be ready yet)
+	bucket := defaultBucket
+	if err := ensureBucketWithRetry(client, bucket); err != nil {
+		return nil, err
+	}
+
 	return &RustFSStorage{
 		client:    client,
 		publicURL: os.Getenv("RUSTFS_PUBLIC_URL"),
 	}, nil
+}
+
+// ensureBucketWithRetry checks if the bucket exists and creates it if not,
+// retrying up to 30 seconds with 1-second intervals.
+func ensureBucketWithRetry(client *minio.Client, bucket string) error {
+	ctx := context.Background()
+	var lastErr error
+	for i := 0; i < 30; i++ {
+		exists, err := client.BucketExists(ctx, bucket)
+		if err == nil {
+			if !exists {
+				if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+					return fmt.Errorf("create bucket %q: %w", bucket, err)
+				}
+			}
+			return nil
+		}
+		lastErr = err
+		if i < 29 {
+			log.Warn().Err(err).Str("bucket", bucket).Int("attempt", i+1).Msg("Failed to check bucket, retrying")
+			time.Sleep(time.Second)
+		}
+	}
+	return fmt.Errorf("check bucket %q after 30 attempts: %w", bucket, lastErr)
 }
 
 func (s *RustFSStorage) Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) (ObjectInfo, error) {

@@ -57,6 +57,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs:
+        condition: service_healthy
       crawl4ai:
         condition: service_healthy
       whisper:

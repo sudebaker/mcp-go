@@ -145,7 +145,10 @@ def main() -> None:
                 {"url": r.uri, "name": r.name, "_resource": r} for r in resources
             ]
         except (KeyError, TypeError):
-            files_list = arguments.get("__files__", [])
+            files_list = [
+                f if isinstance(f, dict) else {"url": f}
+                for f in arguments.get("__files__", [])
+            ]
 
         if not files_list:
             write_response(

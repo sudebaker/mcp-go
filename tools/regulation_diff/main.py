@@ -167,7 +167,10 @@ def main() -> None:
             new_resource = ctx.file("file_uri_2")
             use_tool_context = True
         except (KeyError, TypeError):
-            files_list = arguments.get("__files__", [])
+            files_list = [
+                f if isinstance(f, dict) else {"url": f}
+                for f in arguments.get("__files__", [])
+            ]
             if len(files_list) != 2:
                 write_response(
                     {

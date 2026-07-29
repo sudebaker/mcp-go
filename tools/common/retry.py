@@ -54,7 +54,7 @@ def detect_api_format_and_key(llm_api_url: str) -> Tuple[str, Optional[str]]:
     if api_format == "openai":
         return "openai", os.environ.get("OPENROUTER_API_KEY")
 
-    return "ollama", None
+    return "ollama", os.environ.get("OLLAMA_API_KEY")
 
 
 class TransientError(Exception):
@@ -173,11 +173,11 @@ def call_llm_with_retry(
 
     headers = {"Content-Type": "application/json"}
 
-    if api_format == "openai":
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
-        # Build message content — if images provided, use multi-part content for vision
+    if api_format == "openai":
+        # OpenAI-compatible format: /chat/completions with messages
         if images:
             content_parts = [{"type": "text", "text": prompt}]
             for img_b64 in images:
@@ -198,9 +198,12 @@ def call_llm_with_retry(
 
         endpoint = f"{llm_api_url}/chat/completions"
     else:
+        # Ollama native format: /api/chat with messages
+        messages = [{"role": "user", "content": prompt}]
+
         payload = {
             "model": llm_model,
-            "prompt": prompt,
+            "messages": messages,
             "stream": False,
             "options": {
                 "temperature": max(0.0, min(1.0, temperature)),
@@ -213,7 +216,7 @@ def call_llm_with_retry(
                 raise ValueError("Maximum 10 images allowed")
             payload["images"] = images
 
-        endpoint = f"{llm_api_url}/api/generate"
+        endpoint = f"{llm_api_url}/api/chat"
 
     try:
         response = requests.post(
@@ -238,7 +241,8 @@ def call_llm_with_retry(
 
             return choice["message"]["content"]
         else:
-            return result.get("response", "")
+            msg = result.get("message", {})
+            return msg.get("content", "")
 
     except requests.HTTPError as e:
         status_code = e.response.status_code

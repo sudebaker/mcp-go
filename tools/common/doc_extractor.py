@@ -15,6 +15,8 @@ Provides functions to extract text from various document formats:
 
 import io
 import json
+import os
+import urllib.request
 import yaml
 import ipaddress
 from dataclasses import dataclass, field
@@ -77,8 +79,8 @@ def validate_url_for_download(url: str) -> tuple[bool, str]:
     try:
         parsed = urlparse(url)
         
-        # Only allow HTTP and HTTPS
-        if parsed.scheme not in ('http', 'https'):
+        # Only allow HTTP, HTTPS, and internal res:// URIs
+        if parsed.scheme not in ('http', 'https', 'res'):
             return False, f"Protocol '{parsed.scheme}' not allowed. Only HTTP and HTTPS permitted."
         
         # Extract hostname
@@ -154,6 +156,15 @@ def download_file(url: str) -> io.BytesIO:
         Exception: If download fails
 
     """
+    if url.startswith("res://"):
+        token = url[len("res://"):]
+        host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+        try:
+            resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
+            return io.BytesIO(resp.read())
+        except Exception as e:
+            raise Exception(f"Failed to resolve resource: {str(e)}") from e
+
     if httpx is None:
         raise ImportError("httpx is not installed. Install with: pip install httpx")
 

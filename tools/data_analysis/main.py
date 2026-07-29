@@ -230,7 +230,6 @@ def write_response(response: dict[str, Any]) -> None:
 
 
 def validate_request_input(
-    file_path: Optional[str],
     question: str,
     output_format: str,
     files_list: Optional[list] = None,
@@ -266,28 +265,16 @@ def validate_request_input(
             output_format,
         )
 
-    # Validate file source (file_url, file_path, file_uris, or __files__ must be provided)
-    has_file_path = file_path and isinstance(
-        file_path, str) and file_path.strip()
+    # Validate file source (file_url, file_uris, or __files__ must be provided)
     has_files_list = files_list and len(files_list) > 0
     has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
-    if not has_file_path and not has_files_list and not has_file_url:
+    if not has_files_list and not has_file_url:
         return (
             False,
-            "One of file_url, file_path, or file_uris must be provided",
+            "One of file_url, file_uris, or __files__ must be provided",
             output_format,
         )
-
-    # If file_path is provided, validate extension
-    if has_file_path:
-        path = Path(file_path)
-        if path.suffix.lower() not in SUPPORTED_FILE_EXTENSIONS:
-            return (
-                False,
-                f"Unsupported file extension. Allowed: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
-                output_format,
-            )
 
     return True, None, output_format
 
@@ -717,7 +704,6 @@ def main() -> None:
         arguments = request.get("arguments", {})
         context = request.get("context", {})
 
-        file_path = arguments.get("file_path", "")
         file_url_direct = arguments.get("file_url", "")
         file_name_direct = arguments.get("file_name", "")
         question = arguments.get("question", "")
@@ -734,11 +720,19 @@ def main() -> None:
                 for r in resources
             ]
         except (KeyError, TypeError):
-            files_list = arguments.get("__files__", [])
+            files_list = []
+            for f in arguments.get("__files__", []):
+                if isinstance(f, dict):
+                    files_list.append(f)
+                else:
+                    entry = {"url": f}
+                    if file_name_direct:
+                        entry["name"] = file_name_direct
+                    files_list.append(entry)
 
         # Validate all inputs
         is_valid, error_msg, output_format = validate_request_input(
-            file_path, question, output_format, files_list, file_url_direct
+            question, output_format, files_list, file_url_direct
         )
         if not is_valid:
             write_response(
@@ -946,7 +940,14 @@ def main() -> None:
                     # Download file from URL
                     emit_chunk(
                         "status", {"message": "Downloading file from URL"})
-                    buffer = download_file_from_url(file_url, actual_filename)
+                    if file_url.startswith("res://"):
+                        import urllib.request
+                        host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+                        token = file_url[len("res://"):]
+                        resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
+                        buffer = BytesIO(resp.read())
+                    else:
+                        buffer = download_file_from_url(file_url, actual_filename)
                     df = load_data_from_buffer(buffer, actual_filename)
                     emit_chunk(
                         "data_loaded",
@@ -979,20 +980,7 @@ def main() -> None:
                 )
                 return
 
-        elif file_path:
-            # Use traditional file_path (legacy support)
-            emit_chunk(
-                "status", {"message": "Loading data file", "file": file_path})
-            actual_filename = Path(file_path).name
-            df = load_data(file_path, safe_ops)
-            emit_chunk(
-                "data_loaded",
-                {"rows": df.shape[0], "columns": df.shape[1],
-                    "source": "file_path"},
-            )
-
         else:
-            # This should not happen due to validation, but just in case
             write_response(
                 {
                     "success": False,
@@ -1151,7 +1139,6 @@ def main() -> None:
 
         structured = {
             "question": question,
-            "file_path": file_path,
             "generated_code": code,
             "result": result
             if isinstance(result, (str, int, float, bool, list, dict))

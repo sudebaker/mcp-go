@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultBucket = "users"
-	tokenTTL      = 60 * time.Second
+	tokenTTL      = 300 * time.Second
 	maxLocalFile  = 50 * 1024 * 1024
 )
 

@@ -35,6 +35,9 @@ upload:
     - audio/webm
     - audio/flac
     - text/csv
+    - text/plain
+    - text/yaml
+    - application/json
     - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
     - application/vnd.ms-excel
 
@@ -53,6 +56,7 @@ execution:
     LLM_MODEL: "${LLM_MODEL:-llama3}"
     LLM_API_FORMAT: "${LLM_API_FORMAT:-ollama}"
     OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+    OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
     OPENCODE_API_KEY: "${OPENCODE_API_KEY:-}"
     OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
     GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
@@ -734,7 +738,7 @@ prompts:
           4. Summarize any relevant findings or patterns
           5. Flag any anomalies or points of interest
 
-  - name: "generate_report"
+  - name: "generate_report_prompt"
     description: "Generate formal PDF reports from structured data"
     arguments:
       - name: "report_type"
@@ -786,10 +790,10 @@ prompts:
   - name: "forecast"
     description: "Get weather forecasts ready to use"
     arguments:
-      - name: "location"
-        description: "Geographic location (city, coordinates, or region)"
+      - name: "locations"
+        description: "Array of city names (e.g., ['Madrid', 'Barcelona', 'Valencia'])"
         required: true
-      - name: "days"
+      - name: "max_days"
         description: "Number of forecast days: 1-7 (default 3)"
         required: false
     messages:
@@ -797,7 +801,7 @@ prompts:
         content: "You are a weather specialist with expertise in meteorological data interpretation and forecast analysis."
       - role: "user"
         content: |
-          Please provide a weather forecast for {{location}} for the next {{days}} days.
+          Please provide a weather forecast for {{locations}} for the next {{max_days}} days.
           
           Include:
           - Temperature (min/max)

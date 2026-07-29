@@ -8,9 +8,12 @@ debug mode, empty required fields, hardcoded IPs.
 This module exports AUDIT_RULES and get_compiled_regex used by security tests.
 """
 
+import os
 import re
 import sys
 from typing import Dict, Pattern, Optional
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.resources import ToolContext
 

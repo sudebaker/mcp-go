@@ -98,6 +98,9 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 			"audio/webm",
 			"audio/flac",
 			"text/csv",
+			"text/plain",
+			"text/yaml",
+			"application/json",
 			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			"application/vnd.ms-excel",
 		}
@@ -261,8 +264,20 @@ func matchMIME(declared, detected string) bool {
 	if declared == detected {
 		return true
 	}
+	// text/plain and variants are detected as text/plain; charset=utf-8
+	if declared == "text/plain" && strings.HasPrefix(detected, "text/plain") {
+		return true
+	}
 	// text/csv is detected as text/plain; charset=utf-8 by Go's http.DetectContentType
 	if declared == "text/csv" && strings.HasPrefix(detected, "text/plain") {
+		return true
+	}
+	// text/yaml is detected as text/plain; charset=utf-8
+	if declared == "text/yaml" && strings.HasPrefix(detected, "text/plain") {
+		return true
+	}
+	// application/json is detected as text/plain; charset=utf-8
+	if declared == "application/json" && strings.HasPrefix(detected, "text/plain") {
 		return true
 	}
 	// .xlsx (ZIP-based) is detected as application/zip

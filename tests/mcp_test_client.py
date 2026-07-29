@@ -45,8 +45,6 @@ EXTERNAL_DEPENDENCY_TOOLS = {
     "browser_scraper",     # Needs Crawl4ai service
     "kb_ingest",           # Needs PostgreSQL + pgvector
     "kb_search",           # Needs PostgreSQL + pgvector
-    "communication_graph", # Needs Memgraph
-    "financial_flow",      # Needs Memgraph
 }
 
 # Tools that need internet access
@@ -54,7 +52,6 @@ INTERNET_DEPENDENT_TOOLS = {
     "weather_forecast",
     "web_scraper",
     "rss_reader",
-    "geolocation_mapper",
 }
 
 # Tools that need Docker access
@@ -87,6 +84,7 @@ class ToolTest:
     dependencies: list[str] = field(default_factory=list)
     timeout: int = DEFAULT_TIMEOUT
     category: str = "general"
+    expect_error: bool = False
 
 
 @dataclass
@@ -175,12 +173,21 @@ class MCPClient:
         }, timeout=timeout)
         return result
 
+    def upload_file(self, file_path: str, mime_type: str = None) -> str:
+        """Upload a file via /upload endpoint, returns res:// URI."""
+        upload_url = self.base_url.rsplit("/mcp", 1)[0] + "/upload"
+        with open(file_path, "rb") as f:
+            files = {"file": (os.path.basename(file_path), f, mime_type)}
+            headers = {"X-Session-ID": self.session_id} if self.session_id else {}
+            resp = self.session.post(upload_url, files=files, headers=headers, timeout=120)
+        resp.raise_for_status()
+        return resp.json()["uri"]
+
     def health_check(self) -> bool:
-        """Check if MCP server is healthy."""
-        health_url = self.base_url.replace("/mcp", "/health")
+        """Check if MCP server is healthy by probing the MCP endpoint."""
         try:
-            resp = self.session.get(health_url, timeout=10)
-            return resp.status_code == 200
+            resp = self.session.post(self.base_url, json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 0}, timeout=10)
+            return resp.status_code in (200, 202)
         except requests.RequestException:
             return False
 
@@ -204,21 +211,18 @@ class TestDataGenerator:
         except Exception:
             pass
 
-    def create_excel(self, filename: str = "test_data.xlsx") -> str:
-        """Create a simple Excel file for testing."""
-        try:
-            import pandas as pd
-            filepath = os.path.join(self.temp_dir, filename)
-            df = pd.DataFrame({
-                "product": ["Widget A", "Widget B", "Widget C"],
-                "price": [10.5, 20.0, 15.75],
-                "quantity": [100, 50, 75],
-            })
-            df.to_excel(filepath, index=False)
-            self.created_files.append(filepath)
-            return filepath
-        except ImportError:
-            return ""
+    def create_csv(self, filename: str = "test_data.csv") -> str:
+        """Create a simple CSV file for testing."""
+        import csv
+        filepath = os.path.join(self.temp_dir, filename)
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["product", "price", "quantity"])
+            writer.writerow(["Widget A", 10.5, 100])
+            writer.writerow(["Widget B", 20.0, 50])
+            writer.writerow(["Widget C", 15.75, 75])
+        self.created_files.append(filepath)
+        return filepath
 
     def create_image(self, filename: str = "test_image.png") -> str:
         """Create a simple PNG image for testing."""
@@ -280,348 +284,237 @@ logging:
 # Tool Test Definitions
 # ============================================================================
 
-def get_tool_tests(data_gen: TestDataGenerator) -> list[ToolTest]:
-    """Get all tool test definitions."""
-    excel_path = data_gen.create_excel()
-    image_path = data_gen.create_image()
-    config_path = data_gen.create_config_yaml()
-    text_path = data_gen.create_text_file("This is a test document for classification.")
-    audio_path = data_gen.create_audio_dummy()
+def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
+    """Get all tool test definitions.
+
+    Args:
+        uris: Optional dict of file keys to res:// URIs for tools needing uploaded files.
+    """
+    if uris is None:
+        uris = {}
+
+    csv_uri = uris.get("csv", "res://placeholder")
+    csv_uri2 = uris.get("csv2", "res://placeholder2")
+    txt_uri = uris.get("txt", "res://placeholder")
+    config_uri = uris.get("config", "res://placeholder")
+    image_uri = uris.get("image", "res://placeholder")
+    image2_uri = uris.get("image2", "res://placeholder2")
+    old_uri = uris.get("old_txt", "res://placeholder")
+    new_uri = uris.get("new_txt", "res://placeholder")
+    old_uri2 = uris.get("old_txt2", "res://placeholder2")
+    new_uri2 = uris.get("new_txt2", "res://placeholder2")
 
     tests = [
-        # System tools (no external dependencies)
-        ToolTest(
-            name="echo",
-            description="Echo text back",
-            arguments={"text": "Hello MCP Test!"},
-            category="system",
-        ),
-        ToolTest(
-            name="datetime",
-            description="Get current datetime",
-            arguments={"format": "iso", "timezone": "utc"},
-            category="system",
-        ),
-        ToolTest(
-            name="canvas_diagram",
-            description="Create a canvas diagram",
-            arguments={"description": "User -> Login -> Dashboard", "layout": "horizontal"},
-            category="system",
-        ),
-        ToolTest(
-            name="api_diff",
-            description="Compare two OpenAPI specs (same file = no diff)",
-            arguments={
-                "old_spec": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/swagger.json",
-                "new_spec": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/openapi-spec/swagger.json",
-            },
-            category="system",
-            dependencies=["internet"],
-        ),
-        ToolTest(
-            name="changelog_generator",
-            description="Generate changelog from git repo",
-            arguments={"repo_path": ".", "format": "markdown", "max_commits": 5},
-            category="system",
-        ),
-        ToolTest(
-            name="codebase_scan",
-            description="Scan codebase for dead code",
-            arguments={"project_root": ".", "scan_type": "dead_code"},
-            category="system",
-        ),
-        ToolTest(
-            name="dependency_audit",
-            description="Audit Python and Go dependencies",
-            arguments={"project_root": "."},
-            category="system",
-        ),
-        ToolTest(
-            name="doc_generator",
-            description="Generate documentation from docstrings",
-            arguments={"project_root": "."},
-            category="system",
-        ),
-        ToolTest(
-            name="format_checker",
-            description="Check code formatting with ruff and gofmt",
-            arguments={"project_root": "."},
-            category="system",
-        ),
-        ToolTest(
-            name="license_auditor",
-            description="Audit dependency licenses",
-            arguments={"project_root": "."},
-            category="system",
-        ),
-        ToolTest(
-            name="opencode_context",
-            description="Generate optimized file list for OpenCode",
-            arguments={"project_root": ".", "task_description": "debug codebase_scan tool"},
-            category="system",
-        ),
-        ToolTest(
-            name="refactor_suggester",
-            description="Detect code duplication and complexity",
-            arguments={"project_root": "."},
-            category="system",
-        ),
-        ToolTest(
-            name="security_lint",
-            description="Detect insecure patterns in codebase",
-            arguments={"project_root": "."},
-            category="system",
-        ),
+        # ── echo ───────────────────────────────────────────────────────────────
+        ToolTest(name="echo", description="happy: echo text back",
+            arguments={"text": "Hello MCP Test!"}, category="system"),
+        ToolTest(name="echo", description="edge: empty text",
+            arguments={"text": ""}, category="system"),
+        ToolTest(name="echo", description="error: missing text",
+            arguments={}, category="system", expect_error=True),
 
-        # Knowledge Base tools
-        ToolTest(
-            name="kb_ingest",
-            description="Ingest content into knowledge base",
-            arguments={
-                "content": "MCP (Model Context Protocol) is a standard for connecting AI models to tools.",
-                "collection": "test_collection",
-                "metadata": {"source": "test_client", "test": True},
-            },
-            category="kb",
-            dependencies=["postgresql"],
-        ),
-        ToolTest(
-            name="kb_search",
-            description="Search knowledge base",
-            arguments={
-                "query": "MCP protocol",
-                "collection": "test_collection",
-                "top_k": 5,
-                "search_type": "hybrid",
-            },
-            category="kb",
-            dependencies=["postgresql"],
-        ),
+        # ── datetime ───────────────────────────────────────────────────────────
+        ToolTest(name="datetime", description="happy: iso utc",
+            arguments={"format": "iso", "timezone": "utc"}, category="system"),
+        ToolTest(name="datetime", description="edge: defaults",
+            arguments={}, category="system"),
+        ToolTest(name="datetime", description="error: invalid format",
+            arguments={"format": "invalid"}, category="system", expect_error=True),
 
-        # Web tools
-        ToolTest(
-            name="weather_forecast",
-            description="Get weather forecast",
-            arguments={"locations": ["Madrid"], "max_days": 3},
-            category="web",
-            dependencies=["internet"],
-        ),
-        ToolTest(
-            name="web_scraper",
-            description="Scrape web page",
+        # ── generate_report ────────────────────────────────────────────────────
+        ToolTest(name="generate_report", description="happy: llm_response report",
+            arguments={"report_type": "llm_response",
+                       "data": {"title": "Test", "content": "# Test Report\n\nHello.",
+                                "author": "MCP Test Client"}},
+            category="system", dependencies=["pdf"]),
+        ToolTest(name="generate_report", description="edge: incident report",
+            arguments={"report_type": "incident",
+                       "data": {"title": "Incident", "date": "2025-01-01",
+                                "description": "Test incident", "severity": "low",
+                                "location": "Office", "reported_by": "Bot"}},
+            category="system", dependencies=["pdf"]),
+        ToolTest(name="generate_report", description="error: missing data",
+            arguments={"report_type": "llm_response"},
+            category="system", dependencies=["pdf"], expect_error=True),
+
+        # ── analyze_data ───────────────────────────────────────────────────────
+        ToolTest(name="analyze_data", description="happy: file_url with CSV",
+            arguments={"file_url": csv_uri, "file_name": "test.csv",
+                       "question": "How many rows?", "output_format": "text",
+                       "use_sandbox": False},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="analyze_data", description="edge: __files__ with string",
+            arguments={"__files__": [csv_uri2],
+                       "question": "List columns", "output_format": "text",
+                       "file_name": "test.csv",
+                       "use_sandbox": False},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="analyze_data", description="error: no file source",
+            arguments={"question": "test"},
+            category="ai", expect_error=True),
+
+        # ── analyze_image ──────────────────────────────────────────────────────
+        ToolTest(name="analyze_image", description="happy: describe",
+            arguments={"image_path": image_uri,
+                       "task": "describe"},
+            category="ai", dependencies=["llm", "vision"]),
+        ToolTest(name="analyze_image", description="edge: ocr task",
+            arguments={"image_path": image2_uri,
+                       "task": "ocr"},
+            category="ai", dependencies=["llm", "vision"]),
+        ToolTest(name="analyze_image", description="error: missing image_path",
+            arguments={"task": "describe"},
+            category="ai", expect_error=True),
+
+        # ── kb_ingest ──────────────────────────────────────────────────────────
+        ToolTest(name="kb_ingest", description="happy: store content",
+            arguments={"content": "Test KB content for battery.", "collection": "test_battery",
+                       "metadata": {"source": "battery"}},
+            category="kb", dependencies=["postgresql"]),
+        ToolTest(name="kb_ingest", description="edge: with empty metadata",
+            arguments={"content": "x", "metadata": {"key": "val"}},
+            category="kb", dependencies=["postgresql"]),
+        ToolTest(name="kb_ingest", description="error: missing content",
+            arguments={}, category="kb", dependencies=["postgresql"], expect_error=True),
+
+        # ── kb_search ──────────────────────────────────────────────────────────
+        ToolTest(name="kb_search", description="happy: search stored content",
+            arguments={"query": "test battery", "collection": "test_battery", "top_k": 3},
+            category="kb", dependencies=["postgresql"]),
+        ToolTest(name="kb_search", description="edge: no results",
+            arguments={"query": "nonexistent_xyzabc123", "top_k": 1},
+            category="kb", dependencies=["postgresql"]),
+        ToolTest(name="kb_search", description="error: missing query",
+            arguments={}, category="kb", dependencies=["postgresql"], expect_error=True),
+
+        # ── batch_summarize ────────────────────────────────────────────────────
+        ToolTest(name="batch_summarize", description="happy: dict __files__",
+            arguments={"__files__": [{"url": txt_uri, "name": "doc.txt"}],
+                       "summary_type": "individual", "max_length": 200},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="batch_summarize", description="edge: string __files__",
+            arguments={"__files__": [txt_uri], "summary_type": "individual", "max_length": 100},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="batch_summarize", description="error: empty __files__",
+            arguments={"__files__": [], "summary_type": "individual"},
+            category="ai", expect_error=True),
+
+        # ── regulation_diff ────────────────────────────────────────────────────
+        ToolTest(name="regulation_diff", description="happy: dict __files__",
+            arguments={"__files__": [{"url": old_uri, "name": "old.txt"},
+                                     {"url": new_uri, "name": "new.txt"}]},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="regulation_diff", description="edge: string __files__",
+            arguments={"__files__": [old_uri2, new_uri2]},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="regulation_diff", description="error: single file",
+            arguments={"__files__": [old_uri]},
+            category="ai", expect_error=True),
+
+        # ── config_auditor ─────────────────────────────────────────────────────
+        ToolTest(name="config_auditor", description="happy: audit config",
+            arguments={"__files__": [{"url": config_uri, "name": "config.yaml"}],
+                       "rules": ["secrets", "debug_mode"]},
+            category="ai"),
+        ToolTest(name="config_auditor", description="edge: string __files__",
+            arguments={"__files__": [config_uri], "rules": ["secrets"]},
+            category="ai"),
+        ToolTest(name="config_auditor", description="error: missing __files__",
+            arguments={"rules": ["secrets"]}, category="ai", expect_error=True),
+
+        # ── document_classifier ────────────────────────────────────────────────
+        ToolTest(name="document_classifier", description="happy: classify text",
+            arguments={"__files__": [{"url": txt_uri, "name": "doc.txt"}]},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="document_classifier", description="edge: string __files__",
+            arguments={"__files__": [txt_uri]},
+            category="ai", dependencies=["llm"]),
+        ToolTest(name="document_classifier", description="error: missing __files__",
+            arguments={"language": "auto"}, category="ai", expect_error=True),
+
+        # ── weather_forecast ───────────────────────────────────────────────────
+        ToolTest(name="weather_forecast", description="happy: single city",
+            arguments={"locations": ["Madrid"], "max_days": 1},
+            category="web", dependencies=["internet"]),
+        ToolTest(name="weather_forecast", description="edge: multiple cities",
+            arguments={"locations": ["Madrid", "Barcelona"], "max_days": 3},
+            category="web", dependencies=["internet"]),
+        ToolTest(name="weather_forecast", description="error: empty locations",
+            arguments={"locations": []}, category="web", dependencies=["internet"], expect_error=True),
+
+        # ── web_scraper ────────────────────────────────────────────────────────
+        ToolTest(name="web_scraper", description="happy: extract text",
             arguments={"url": "https://example.com", "extract_type": "text"},
-            category="web",
-            dependencies=["internet"],
-        ),
-        ToolTest(
-            name="rss_reader",
-            description="Read RSS feeds",
-            arguments={"limit": 5, "extract": "titles"},
-            category="web",
-            dependencies=["internet"],
-        ),
+            category="web", dependencies=["internet"]),
+        ToolTest(name="web_scraper", description="edge: extract links",
+            arguments={"url": "https://example.com", "extract_type": "links"},
+            category="web", dependencies=["internet"]),
+        ToolTest(name="web_scraper", description="error: missing url",
+            arguments={"extract_type": "text"},
+            category="web", dependencies=["internet"], expect_error=True),
 
-        # AI/LLM tools
-        ToolTest(
-            name="analyze_data",
-            description="Analyze Excel data",
-            arguments={
-                "question": "What is the total quantity?",
-                "output_format": "text",
-                "__files__": [{"url": f"file://{excel_path}", "name": "test_data.xlsx"}] if excel_path else [],
-            },
-            category="ai",
-            dependencies=["llm", "files"],
-        ),
-        ToolTest(
-            name="analyze_image",
-            description="Analyze image with OCR",
-            arguments={
-                "image_path": f"file://{image_path}" if image_path else "",
-                "task": "describe",
-            },
-            category="ai",
-            dependencies=["llm", "vision", "files"],
-        ),
-        ToolTest(
-            name="batch_summarize",
-            description="Summarize documents",
-            arguments={
-                "__files__": [{"url": f"file://{text_path}", "name": "test_document.txt"}] if text_path else [],
-                "summary_type": "individual",
-                "max_length": 200,
-            },
-            category="ai",
-            dependencies=["llm", "files"],
-        ),
-        ToolTest(
-            name="regulation_diff",
-            description="Compare document versions",
-            arguments={
-                "__files__": [
-                    {"url": f"file://{text_path}", "name": "old_version.txt"},
-                    {"url": f"file://{text_path}", "name": "new_version.txt"},
-                ] if text_path else [],
-                "output_format": "markdown",
-            },
-            category="ai",
-            dependencies=["llm", "files"],
-        ),
-        ToolTest(
-            name="document_classifier",
-            description="Classify document",
-            arguments={
-                "__files__": [{"url": f"file://{text_path}", "name": "test_document.txt"}] if text_path else [],
-                "language": "auto",
-            },
-            category="ai",
-            dependencies=["llm", "files"],
-        ),
-        ToolTest(
-            name="config_auditor",
-            description="Audit configuration file",
-            arguments={
-                "__files__": [{"url": f"file://{config_path}", "name": "test_config.yaml"}] if config_path else [],
-                "rules": ["secrets", "debug_mode"],
-                "severity_filter": "all",
-            },
-            category="ai",
-            dependencies=["files"],
-        ),
+        # ── transcribe ────────────────────────────────────────────────────────
+        ToolTest(name="transcribe", description="happy: file_path",
+            arguments={"file_path": uris.get("audio", "res://placeholder"), "language": "en"},
+            category="media", dependencies=["whisper"]),
+        ToolTest(name="transcribe", description="edge: audio_base64",
+            arguments={"audio_base64": "AAAA", "filename": "test.mp3", "language": "en"},
+            category="media", dependencies=["whisper"]),
+        ToolTest(name="transcribe", description="error: no input",
+            arguments={"language": "en"},
+            category="media", dependencies=["whisper"], expect_error=True),
 
-        # Search tools
-        ToolTest(
-            name="searxng_search",
-            description="Search with SearXNG",
-            arguments={"query": "MCP protocol AI", "count": 5, "language": "en-US"},
-            category="search",
-            dependencies=["searxng"],
-        ),
-        ToolTest(
-            name="browser_scraper",
-            description="Scrape with headless browser",
+        # ── searxng_search ─────────────────────────────────────────────────────
+        ToolTest(name="searxng_search", description="happy: search web",
+            arguments={"query": "python programming", "count": 3},
+            category="search", dependencies=["searxng"]),
+        ToolTest(name="searxng_search", description="edge: filtered search",
+            arguments={"query": "test", "count": 1, "categories": "news"},
+            category="search", dependencies=["searxng"]),
+        ToolTest(name="searxng_search", description="error: missing query",
+            arguments={}, category="search", dependencies=["searxng"], expect_error=True),
+
+        # ── browser_scraper ────────────────────────────────────────────────────
+        ToolTest(name="browser_scraper", description="happy: scrape page",
             arguments={"url": "https://example.com", "extract_type": "text", "wait_ms": 1000},
-            category="web",
-            dependencies=["crawl4ai"],
-        ),
+            category="web", dependencies=["crawl4ai"]),
+        ToolTest(name="browser_scraper", description="edge: truncated output",
+            arguments={"url": "https://example.com", "max_chars": 100, "wait_ms": 500},
+            category="web", dependencies=["crawl4ai"]),
+        ToolTest(name="browser_scraper", description="error: missing url",
+            arguments={"extract_type": "text"}, category="web", dependencies=["crawl4ai"], expect_error=True),
 
-        # Media tools
-        ToolTest(
-            name="transcribe",
-            description="Transcribe audio",
-            arguments={
-                "file_path": audio_path if audio_path else "/nonexistent.mp3",
-                "language": "en",
-            },
-            category="media",
-            dependencies=["whisper", "files"],
-        ),
+        # ── rss_reader ─────────────────────────────────────────────────────────
+        ToolTest(name="rss_reader", description="happy: read titles",
+            arguments={"limit": 5, "extract": "titles"},
+            category="web", dependencies=["internet"]),
+        ToolTest(name="rss_reader", description="edge: single item content",
+            arguments={"limit": 1, "extract": "content"},
+            category="web", dependencies=["internet"]),
+        ToolTest(name="rss_reader", description="error: invalid extract",
+            arguments={"extract": "invalid"},
+            category="web", dependencies=["internet"], expect_error=True),
 
-        # Storage tools
-        ToolTest(
-            name="rustfs_storage",
-            description="List RustFS storage",
-            arguments={"operation": "list", "bucket": "default", "prefix": ""},
-            category="storage",
-            dependencies=["rustfs"],
-        ),
+        # ── canvas_diagram ─────────────────────────────────────────────────────
+        ToolTest(name="canvas_diagram", description="happy: simple diagram",
+            arguments={"description": "A -> B -> C", "layout": "horizontal"},
+            category="system"),
+        ToolTest(name="canvas_diagram", description="edge: complex diagram",
+            arguments={"description": "Start -> Process -> End -> Decision -> Stop", "layout": "auto"},
+            category="system"),
+        ToolTest(name="canvas_diagram", description="error: missing description",
+            arguments={"layout": "horizontal"}, category="system", expect_error=True),
 
-        # Forensic tools - in-memory
-        ToolTest(
-            name="timeline_generator",
-            description="Generate timeline from events",
-            arguments={
-                "events": [
-                    {"timestamp": "2024-01-15T10:30:00Z", "description": "Llamada", "importance": "high"},
-                    {"timestamp": "2024-01-15T11:00:00Z", "description": "Transferencia", "importance": "critical"},
-                ],
-                "format": "markdown",
-            },
-            category="forensic",
-        ),
-        ToolTest(
-            name="entity_resolution",
-            description="Detect duplicate entities",
-            arguments={
-                "entities": [
-                    {"id": "A", "name": "Juan Pérez", "phone": "+34 612 345 678"},
-                    {"id": "B", "name": "J. Pérez", "phone": "612345678"},
-                ],
-                "threshold": 0.8,
-            },
-            category="forensic",
-        ),
-
-        # Forensic tools - file I/O
-        ToolTest(
-            name="metadata_extractor",
-            description="Extract metadata from file",
-            arguments={"file_path": text_path if text_path else "/nonexistent.txt", "extract_gps": False},
-            category="forensic",
-            dependencies=["files"],
-        ),
-        ToolTest(
-            name="stego_detector",
-            description="Detect steganography in image",
-            arguments={"file_path": image_path if image_path else "/nonexistent.png"},
-            category="forensic",
-            dependencies=["files"],
-        ),
-        ToolTest(
-            name="document_fingerprint",
-            description="Compare two images perceptual hash",
-            arguments={
-                "image1_path": image_path if image_path else "/nonexistent1.png",
-                "image2_path": image_path if image_path else "/nonexistent2.png",
-            },
-            category="forensic",
-            dependencies=["files"],
-        ),
-
-        # Forensic tools - network
-        ToolTest(
-            name="geolocation_mapper",
-            description="Generate map from IPs",
-            arguments={
-                "points": [{"type": "gps", "lat": 40.4168, "lon": -3.7038, "label": "Madrid"}],
-                "output_path": "/tmp/test_map.html",
-                "max_points": 10,
-            },
-            category="forensic",
-            dependencies=["internet"],
-        ),
-
-        # Forensic tools - Memgraph
-        ToolTest(
-            name="communication_graph",
-            description="Analyze communication graph",
-            arguments={"query_type": "metrics", "case_id": "TEST-001", "limit": 10},
-            category="forensic",
-            dependencies=["memgraph"],
-        ),
-        ToolTest(
-            name="financial_flow",
-            description="Detect money flow patterns",
-            arguments={"pattern": "structuring", "case_id": "TEST-001", "threshold_eur": 10000, "time_window_days": 30},
-            category="forensic",
-            dependencies=["memgraph"],
-        ),
-
-        # PDF Reports
-        ToolTest(
-            name="generate_report",
-            description="Generate PDF report",
-            arguments={
-                "report_type": "llm_response",
-                "data": {
-                    "title": "Test Report",
-                    "content": "# Test Report\n\nThis is a test report generated by the MCP test client.",
-                    "author": "MCP Test Client",
-                },
-            },
-            category="system",
-            dependencies=["pdf"],
-        ),
+        # ── rustfs_storage ────────────────────────────────────────────────────
+        ToolTest(name="rustfs_storage", description="happy: list root",
+            arguments={"operation": "list", "bucket": "users", "prefix": ""},
+            category="storage", dependencies=["rustfs"]),
+        ToolTest(name="rustfs_storage", description="edge: upload and stat",
+            arguments={"operation": "list", "bucket": "users", "prefix": ""},
+            category="storage", dependencies=["rustfs"]),
+        ToolTest(name="rustfs_storage", description="error: invalid operation",
+            arguments={"operation": "invalid_op"},
+            category="storage", dependencies=["rustfs"], expect_error=True),
     ]
 
     return tests
@@ -640,6 +533,7 @@ class TestRunner:
         self.tool_filter = tool_filter
         self.results: list[TestResult] = []
         self.data_gen = TestDataGenerator()
+        self.uris: dict[str, str] = {}
 
     def _check_dependencies(self, test: ToolTest) -> tuple[bool, str]:
         """Check if all dependencies are available."""
@@ -664,11 +558,9 @@ class TestRunner:
                 return False, "RUSTFS_ENDPOINT not configured"
 
         if "llm" in test.dependencies:
-            llm_url = os.environ.get("LLM_API_URL", "http://localhost:11434")
-            try:
-                requests.get(f"{llm_url}/api/tags", timeout=5)
-            except requests.RequestException:
-                return False, f"LLM service not available at {llm_url}"
+            llm_url = os.environ.get("LLM_API_URL")
+            if not llm_url:
+                return False, "LLM_API_URL not configured"
 
         if "postgresql" in test.dependencies:
             if not os.environ.get("DATABASE_URL"):
@@ -719,8 +611,58 @@ class TestRunner:
 
         return True, ""
 
+    def setup(self) -> None:
+        """Generate test data files and upload them to the MCP server."""
+        file_tasks = [
+            ("csv", self.data_gen.create_csv(), "text/csv"),
+            ("csv2", self.data_gen.create_csv("test_data2.csv"), "text/csv"),
+            ("txt", self.data_gen.create_text_file(
+                "This is a test document for classification and summarization."), "text/plain"),
+            ("config", self.data_gen.create_config_yaml(), "text/yaml"),
+            ("image", self.data_gen.create_image(), "image/png"),
+            ("image2", self.data_gen.create_image("test_image2.png"), "image/png"),
+            ("audio", self.data_gen.create_audio_dummy(), "audio/mpeg"),
+            ("old_txt", self.data_gen.create_text_file(
+                "Version 1: The quick brown fox jumps over the lazy dog."), "text/plain"),
+            ("new_txt", self.data_gen.create_text_file(
+                "Version 2: The quick brown fox leaps over the lazy dog near the river."), "text/plain"),
+            ("old_txt2", self.data_gen.create_text_file(
+                "Version 1: The quick brown fox jumps over the lazy dog."), "text/plain"),
+            ("new_txt2", self.data_gen.create_text_file(
+                "Version 2: The quick brown fox leaps over the lazy dog near the river."), "text/plain"),
+        ]
+        for key, path, mime in file_tasks:
+            if path:
+                try:
+                    self.uris[key] = self.client.upload_file(path, mime)
+                except Exception as e:
+                    print(f"  ⚠ Upload {key} failed: {e}")
+                    self.uris[key] = f"res://{key}"
+
+    def _protocol_test(self, name: str, description: str, method: str, params: dict = None,
+                        expect_error: bool = False) -> TestResult:
+        """Run a protocol-level test (prompts/list, prompts/get, resources/list)."""
+        start = time.time()
+        try:
+            result = self.client._send_request(method, params)
+            has_error = "error" in result
+            if expect_error and has_error:
+                return TestResult(name=name, status=TestStatus.PASSED, duration=time.time() - start,
+                                  message="Expected error OK", category="protocol")
+            elif expect_error and not has_error:
+                return TestResult(name=name, status=TestStatus.FAILED, duration=time.time() - start,
+                                  error="Expected error but got success", category="protocol")
+            elif not expect_error and has_error:
+                return TestResult(name=name, status=TestStatus.FAILED, duration=time.time() - start,
+                                  error=result.get("error", {}).get("message", ""), category="protocol")
+            return TestResult(name=name, status=TestStatus.PASSED, duration=time.time() - start,
+                              message="OK", category="protocol")
+        except Exception as e:
+            return TestResult(name=name, status=TestStatus.FAILED, duration=time.time() - start,
+                              error=str(e), category="protocol")
+
     def run_test(self, test: ToolTest) -> TestResult:
-        """Run a single tool test."""
+        """Run a single tool test. Handles expect_error and response validation."""
         start_time = time.time()
 
         deps_ok, skip_reason = self._check_dependencies(test)
@@ -733,39 +675,50 @@ class TestRunner:
                 category=test.category,
             )
 
-        if test.name in ("analyze_data", "batch_summarize", "regulation_diff", "document_classifier", "config_auditor"):
-            if not test.arguments.get("__files__"):
-                return TestResult(
-                    name=test.name,
-                    status=TestStatus.SKIPPED,
-                    duration=time.time() - start_time,
-                    message="Test data generation failed (missing dependencies: pandas, PIL)",
-                    category=test.category,
-                )
-
-        if test.name == "analyze_image" and not test.arguments.get("image_path"):
-            return TestResult(
-                name=test.name,
-                status=TestStatus.SKIPPED,
-                duration=time.time() - start_time,
-                message="Test image generation failed (missing dependency: PIL)",
-                category=test.category,
-            )
-
-        if test.name == "transcribe" and not os.path.exists(test.arguments.get("file_path", "")):
-            return TestResult(
-                name=test.name,
-                status=TestStatus.SKIPPED,
-                duration=time.time() - start_time,
-                message="Test audio file not found",
-                category=test.category,
-            )
-
         try:
             result = self.client.call_tool(test.name, test.arguments, timeout=test.timeout)
 
+            # Determine if tool returned an error
+            has_error = False
+            error_msg = ""
+
             if "error" in result:
+                has_error = True
                 error_msg = result.get("error", {}).get("message", "Unknown error")
+            else:
+                tool_result = result.get("result", {})
+                content = tool_result.get("content", [])
+                if tool_result.get("isError", False):
+                    has_error = True
+                    error_msg = content[0].get("text", "Tool returned error") if content else "isError"
+                else:
+                    for item in content:
+                        if item.get("type") == "error" or item.get("isError", False):
+                            has_error = True
+                            error_msg = item.get("text", "Tool returned error")
+                            break
+                if not content and not has_error:
+                    has_error = True
+                    error_msg = "Empty response from tool"
+
+            # Evaluate test result based on expect_error flag
+            if test.expect_error and has_error:
+                return TestResult(
+                    name=test.name,
+                    status=TestStatus.PASSED,
+                    duration=time.time() - start_time,
+                    message=f"Expected error OK: {error_msg[:80]}",
+                    category=test.category,
+                )
+            elif test.expect_error and not has_error:
+                return TestResult(
+                    name=test.name,
+                    status=TestStatus.FAILED,
+                    duration=time.time() - start_time,
+                    error="Expected error but tool succeeded",
+                    category=test.category,
+                )
+            elif not test.expect_error and has_error:
                 return TestResult(
                     name=test.name,
                     status=TestStatus.FAILED,
@@ -774,33 +727,11 @@ class TestRunner:
                     category=test.category,
                 )
 
-            tool_result = result.get("result", {})
-            content = tool_result.get("content", [])
-
-            for item in content:
-                if item.get("type") == "error" or item.get("isError", False):
-                    return TestResult(
-                        name=test.name,
-                        status=TestStatus.FAILED,
-                        duration=time.time() - start_time,
-                        error=item.get("text", "Tool returned error"),
-                        category=test.category,
-                    )
-
-            if not content:
-                return TestResult(
-                    name=test.name,
-                    status=TestStatus.FAILED,
-                    duration=time.time() - start_time,
-                    error="Empty response from tool",
-                    category=test.category,
-                )
-
             return TestResult(
                 name=test.name,
                 status=TestStatus.PASSED,
                 duration=time.time() - start_time,
-                message=f"OK ({len(content)} content items)",
+                message=f"OK ({len(result.get('result', {}).get('content', []))} items)",
                 category=test.category,
             )
 
@@ -822,31 +753,63 @@ class TestRunner:
             )
 
     def run_all(self) -> list[TestResult]:
-        """Run all tool tests."""
-        tests = get_tool_tests(self.data_gen)
+        """Run all tool tests (setup → tool tests → protocol tests)."""
+        # Phase 1: Setup — generate and upload test data
+        print("\n\033[36m=== Setup: generating & uploading test data ===\033[0m")
+        self.setup()
+        print(f"  Uploaded {len(self.uris)} files: {', '.join(self.uris.keys())}")
+
+        # Phase 2: Tool tests
+        tests = get_tool_tests(self.uris)
 
         if self.tool_filter:
             tests = [t for t in tests if t.name in self.tool_filter]
 
-        print(f"\n{'='*60}")
-        print(f"  MCP Test Client - Testing {len(tests)} tools")
+        # Count unique tools
+        tools_set = set(t.name for t in tests)
+        print(f"\n\033[36m=== Tool Tests: {len(tests)} tests across {len(tools_set)} tools ===\033[0m")
         print(f"  Server: {self.client.base_url}")
         print(f"  User ID: {self.client.user_id}")
         if self.skip_external:
             print("  Mode: Skip external dependencies")
-        print(f"{'='*60}\n")
+        print()
 
         for i, test in enumerate(tests, 1):
-            print(f"[{i}/{len(tests)}] Testing {test.name}... ", end="", flush=True)
+            prefix = f"[{i}/{len(tests)}]"
+            label = f"  {test.description:40s}"
+            print(f"{prefix} {label} ", end="", flush=True)
             result = self.run_test(test)
             self.results.append(result)
 
             if result.status == TestStatus.PASSED:
-                print(f"\033[32m✓ PASSED\033[0m ({result.duration:.2f}s)")
+                print(f"\033[32m✓\033[0m ({result.duration:.2f}s)")
             elif result.status == TestStatus.SKIPPED:
-                print(f"\033[33m⊘ SKIPPED\033[0m - {result.message}")
+                print(f"\033[33m⊘\033[0m {result.message}")
             else:
-                print(f"\033[31m✗ FAILED\033[0m - {result.error}")
+                print(f"\033[31m✗\033[0m {result.error[:80]}")
+
+        # Phase 3: Protocol tests (prompts, resources)
+        print(f"\n\033[36m=== Protocol Tests ===\033[0m")
+        protocol_tests = [
+            ("prompts/list", "prompts/list", "prompts/list"),
+            ("prompts/get-report", "prompts/get generate_report_prompt",
+             "prompts/get", {"name": "generate_report_prompt",
+                            "arguments": {"report_type": "test", "data_summary": "test"}}),
+            ("prompts/get-unknown", "prompts/get nonexistent prompt",
+             "prompts/get", {"name": "nonexistent_prompt"}, True),
+            ("resources/list", "resources/list", "resources/list"),
+        ]
+        for pname, pdesc, pmethod, *prest in protocol_tests:
+            pparams = prest[0] if prest else None
+            perror = prest[1] if len(prest) > 1 else False
+            prefix = f"  {pdesc:52s}"
+            print(f"{prefix} ", end="", flush=True)
+            result = self._protocol_test(pname, pdesc, pmethod, pparams, perror)
+            self.results.append(result)
+            if result.status == TestStatus.PASSED:
+                print(f"\033[32m✓\033[0m ({result.duration:.2f}s)")
+            else:
+                print(f"\033[31m✗\033[0m {result.error[:60]}")
 
         return self.results
 

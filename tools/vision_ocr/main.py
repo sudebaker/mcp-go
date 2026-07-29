@@ -395,19 +395,28 @@ def main() -> None:
 
         # Resolve file_uri via ToolContext (backward compat: fall back to image_path)
         ctx = ToolContext(request)
+        resource = None
         try:
             resource = ctx.file("file_uri")
             image_path = resource.uri
         except (KeyError, TypeError):
             image_path = arguments.get("image_path", "")
 
-        # If file_uri is a res:// URI, download to temp file
+        # If image_path is a res:// URI, download to temp file via internal API
         if image_path.startswith("res://"):
             try:
-                data = resource.read_bytes()
+                if resource:
+                    data = resource.read_bytes()
+                    suffix = Path(resource.name).suffix or ".jpg"
+                else:
+                    host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+                    token = image_path[len("res://"):]
+                    import urllib.request
+                    resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
+                    data = resp.read()
+                    suffix = ".jpg"
                 tmp_dir = Path("/data/tmp")
                 tmp_dir.mkdir(parents=True, exist_ok=True)
-                suffix = Path(resource.name).suffix or ".jpg"
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir)) as tmp:
                     tmp.write(data)
                     image_path = tmp.name

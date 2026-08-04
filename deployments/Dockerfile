@@ -13,6 +13,7 @@ RUN go mod download
 # Copy source code
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+COPY .git/ /tmp/build/.git/
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mcp-server ./cmd/server
@@ -146,8 +147,13 @@ COPY configs/ /app/configs/
 COPY tools/ /app/tools/
 COPY templates/ /app/templates/
 
-# Copy .git history for git-based tools (changelog_generator)
-COPY .git/ /app/.git/
+# Generate a lightweight git-log snapshot for tools that need commit history.
+# Avoids copying the entire .git/ directory into the final image.
+RUN if [ -d /tmp/build/.git ]; then \
+        git -C /tmp/build log --pretty=format:'%H %s' -n 100 > /app/.git-log.txt; \
+    else \
+        touch /app/.git-log.txt; \
+    fi
 
 # Create data directory
 RUN mkdir -p /data/reports

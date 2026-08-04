@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,7 +56,8 @@ type Executor struct {
 	sessionStore interface {     // Session store for user_id lookup
 		Get(sessionID string) (string, bool)
 	}
-	pool *ProcessPool // Pool of persistent processes for KB tools
+	pool        *ProcessPool // Pool of persistent processes for KB tools
+	schemaCache sync.Map     // Cached compiled ToolProperty schemas by tool name
 }
 
 // New creates a new Executor with no-op tracing enabled.
@@ -218,7 +220,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	}
 
 	// Validate arguments against the tool's input schema
-	if err := validateInputArguments(toolCfg.InputSchema, arguments); err != nil {
+	if err := e.validateArguments(toolCfg, arguments); err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
@@ -255,6 +257,7 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 			DatabaseURL: e.config.Execution.Environment["DATABASE_URL"],
 			WorkingDir:  e.config.Execution.WorkingDir,
 			UserID:      userID,
+			RequestID:   requestID,
 		},
 	}
 
@@ -520,168 +523,27 @@ func buildEnvironment(envMap map[string]string) []string {
 	return env
 }
 
-// validateInputArguments validates that provided arguments match the tool's input schema.
-//
-// The validation is best-effort and allows extra fields. It checks:
-//   - Required fields are present
-//   - Types match the schema (string, number, integer, boolean, array, object)
-//   - Enum values are in the allowed list
-//
-// Parameters:
-//   - inputSchema: the JSON schema to validate against (nil = skip validation)
-//   - args: the arguments provided by the client
-//
-// Returns:
-//
-//	error: if validation fails, including which field failed
-func validateInputArguments(inputSchema map[string]interface{}, args map[string]interface{}) error {
-	if inputSchema == nil {
-		// No schema defined, accept anything
+// validateArguments validates arguments against a tool's input schema using the
+// compiled schema cache. Schemas are compiled once per tool to avoid ReDoS and
+// redundant regex compilation on every request.
+func (e *Executor) validateArguments(toolCfg *config.ToolConfig, args map[string]interface{}) error {
+	if toolCfg.InputSchema == nil {
 		return nil
 	}
 
-	// Check for required fields
-	if required, ok := inputSchema["required"].([]interface{}); ok {
-		for _, r := range required {
-			field, ok := r.(string)
-			if !ok {
-				continue
-			}
-			if _, exists := args[field]; !exists {
-				return fmt.Errorf("required field '%s' is missing", field)
-			}
+	if cached, ok := e.schemaCache.Load(toolCfg.Name); ok {
+		if schema, ok := cached.(ToolProperty); ok {
+			return ValidateArguments(&schema, args)
 		}
 	}
 
-	// Get properties schema if defined
-	properties, ok := inputSchema["properties"].(map[string]interface{})
-	if !ok || properties == nil {
-		// No properties defined, accept anything
-		return nil
+	schema, err := inputSchemaToRootProperty(toolCfg.InputSchema)
+	if err != nil {
+		return fmt.Errorf("invalid schema for tool %q: %w", toolCfg.Name, err)
 	}
 
-	// Validate each provided argument against its property schema
-	for argName, argValue := range args {
-		prop, exists := properties[argName]
-		if !exists {
-			// Extra fields are allowed (best effort validation)
-			continue
-		}
-
-		propSchema, ok := prop.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Validate type if specified
-		if expectedType, ok := propSchema["type"].(string); ok {
-			if !validateType(argValue, expectedType) {
-				return fmt.Errorf("argument '%s' has invalid type: expected %s, got %T", argName, expectedType, argValue)
-			}
-		}
-
-		// Validate enum if specified
-		if enumVals, ok := propSchema["enum"].([]interface{}); ok {
-			if !validateEnum(argValue, enumVals) {
-				return fmt.Errorf("argument '%s' has invalid value: not in allowed enum values", argName)
-			}
-		}
-	}
-
-	return nil
-}
-
-// validateType checks if a value matches the expected JSON schema type.
-//
-// JSON numbers are unmarshaled as float64 in Go, so integer values may
-// appear as float64. This function handles that conversion.
-//
-// Parameters:
-//   - value: the actual value to check
-//   - schemaType: the expected JSON schema type (string, number, integer, boolean, array, object, null)
-//
-// Returns:
-//
-//	true if the value matches the expected type
-func validateType(value interface{}, schemaType string) bool {
-	switch schemaType {
-	case "string":
-		_, ok := value.(string)
-		return ok
-	case "number":
-		_, ok := value.(float64)
-		return ok
-	case "integer":
-		f, ok := value.(float64)
-		if !ok {
-			return false
-		}
-		return f == float64(int64(f))
-	case "boolean":
-		_, ok := value.(bool)
-		return ok
-	case "array":
-		_, ok := value.([]interface{})
-		return ok
-	case "object":
-		_, ok := value.(map[string]interface{})
-		return ok
-	case "null":
-		return value == nil
-	default:
-		return true // Unknown type, accept
-	}
-}
-
-// validateEnum checks if a value is in the allowed enum values.
-//
-// Type coercion is performed for numeric types (float64 vs int).
-//
-// Parameters:
-//   - value: the value to check
-//   - enumVals: the list of allowed values
-//
-// Returns:
-//
-//	true if the value is in the enum list
-func validateEnum(value interface{}, enumVals []interface{}) bool {
-	for _, enumVal := range enumVals {
-		if compareValues(value, enumVal) {
-			return true
-		}
-	}
-	return false
-}
-
-// compareValues compares two values for equality with type coercion.
-//
-// Handles string, float64, and bool comparisons. Floats are compared
-// numerically, not by exact representation.
-//
-// Parameters:
-//   - a: first value
-//   - b: second value
-//
-// Returns:
-//
-//	true if the values are equal
-func compareValues(a, b interface{}) bool {
-	switch av := a.(type) {
-	case string:
-		bv, ok := b.(string)
-		return ok && av == bv
-	case float64:
-		switch bv := b.(type) {
-		case float64:
-			return av == bv
-		case int:
-			return av == float64(bv)
-		}
-	case bool:
-		bv, ok := b.(bool)
-		return ok && av == bv
-	}
-	return false
+	e.schemaCache.Store(toolCfg.Name, schema)
+	return ValidateArguments(&schema, args)
 }
 
 // Close shuts down the process pool if it exists.

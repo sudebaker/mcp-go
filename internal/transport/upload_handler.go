@@ -14,9 +14,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	cleanupRestartCount atomic.Int32
+	cleanupDisabled     atomic.Bool
 )
 
 // UploadConfig holds configuration for the upload endpoint.
@@ -340,6 +346,32 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 // startUploadCleanup runs a background goroutine that periodically scans
 // the upload directory and removes files whose TTL has expired.
 func (s *MCPServer) startUploadCleanup() {
+	if cleanupDisabled.Load() {
+		log.Warn().Msg("Upload cleanup previously disabled after repeated panics, not restarting")
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			count := cleanupRestartCount.Add(1)
+			if count > 10 {
+				log.Error().
+					Int32("restart_count", count).
+					Msg("Upload cleanup failed 10+ times, disabling permanently")
+				cleanupDisabled.Store(true)
+				return
+			}
+			delay := time.Duration(min(5*count, 300)) * time.Second
+			log.Error().
+				Interface("panic", r).
+				Int32("restart_count", count).
+				Dur("delay", delay).
+				Msg("Upload cleanup panicked, restarting with delay")
+			time.Sleep(delay)
+			go s.startUploadCleanup()
+		}
+	}()
+
 	cfg := s.uploadConfig
 	if cfg.UploadDir == "" {
 		cfg.UploadDir = "/data/uploads"

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -193,6 +194,9 @@ func main() {
 	// Read ADMIN_API_KEY from environment (optional)
 	adminKey := os.Getenv("ADMIN_API_KEY")
 
+	// Max request body size for MCP endpoints (MB), 0 = default 10MB
+	maxBodyMB, _ := strconv.ParseInt(os.Getenv("MCP_MAX_BODY_SIZE_MB"), 10, 64)
+
 	// Create SSE server
 	sseServer := transport.NewMCPServer(mcpServer, transport.MCPConfig{
 		Host:              cfg.Server.Host,
@@ -211,6 +215,7 @@ func main() {
 		HealthChecker:     healthChecker,
 		AdminKey:          adminKey,
 		DB:                adminDB,
+		MaxMCPBodySizeMB:  maxBodyMB,
 	})
 
 	// Setup graceful shutdown

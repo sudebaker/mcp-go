@@ -10,65 +10,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/sudebaker/mcp-go/internal/auth"
 )
-
-type contextKey string
-
-const requestIDKey contextKey = "admin_request_id"
 
 var (
 	userIDPattern     = regexp.MustCompile(`^[^/]{1,255}$`)
 	collectionPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,100}$`)
-	requestIDPattern  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,255}$`)
 )
-
-func getRequestID(ctx context.Context) string {
-	if id, ok := ctx.Value(requestIDKey).(string); ok {
-		return id
-	}
-	return ""
-}
-
-// Middleware wraps a handler with ADMIN_API_KEY authentication.
-func Middleware(adminKey string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if adminKey == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"error": "admin endpoints disabled: ADMIN_API_KEY not set"})
-			return
-		}
-
-		auth := r.Header.Get("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "missing or invalid authorization header"})
-			return
-		}
-
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token != adminKey {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid admin key"})
-			return
-		}
-
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" || !requestIDPattern.MatchString(requestID) {
-			requestID = uuid.New().String()
-		}
-		if len(requestID) > 255 {
-			requestID = requestID[:255]
-		}
-		w.Header().Set("X-Request-ID", requestID)
-		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
 
 // Handler holds database access for admin endpoints.
 type Handler struct {
@@ -188,19 +139,21 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DeleteUserData hard-deletes all documents for a user.
-func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
-	userID := strings.TrimPrefix(r.URL.Path, "/admin/kb/users/")
-	if idx := strings.Index(userID, "/"); idx > 0 {
-		userID = userID[:idx]
-	}
+// deleteQuery defines the variable parts of a delete operation.
+type deleteQuery struct {
+	CountSQL   string
+	CountArgs  []any
+	DeleteSQL  string
+	DeleteArgs []any
+	AuditSQL   string
+	AuditArgs  func(int, int64, string) []any
+	Response   func(int, int64) deleteResponse
+	LogEvent   func(*zerolog.Event, int, int64) *zerolog.Event
+}
 
-	if !userIDPattern.MatchString(userID) {
-		writeError(w, http.StatusBadRequest, "invalid user_id format")
-		return
-	}
-
-	reqID := getRequestID(r.Context())
+// executeDelete runs a transactional delete: count docs, delete if any, audit log.
+func (h *Handler) executeDelete(w http.ResponseWriter, r *http.Request, q deleteQuery) {
+	reqID := auth.GetRequestID(r.Context())
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -212,38 +165,27 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 
 	var docsDeleted int
 	var bytesFreed int64
-	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
-		FROM kb_documents WHERE user_id = $1
-	`, userID).Scan(&docsDeleted, &bytesFreed)
+	err = tx.QueryRowContext(r.Context(), q.CountSQL, q.CountArgs...).Scan(&docsDeleted, &bytesFreed)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID).Msg("admin: failed to count documents")
+		log.Error().Err(err).Interface("args", q.CountArgs).Msg("admin: failed to count documents")
 		writeError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
 	if docsDeleted == 0 {
 		tx.Commit()
-		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:        true,
-			UserID:         userID,
-			DocsDeleted:    0,
-			DocsBytesFreed: 0,
-		})
+		writeJSON(w, http.StatusOK, q.Response(0, 0))
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(), `DELETE FROM kb_documents WHERE user_id = $1`, userID)
+	_, err = tx.ExecContext(r.Context(), q.DeleteSQL, q.DeleteArgs...)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID).Msg("admin: failed to delete documents")
+		log.Error().Err(err).Interface("args", q.DeleteArgs).Msg("admin: failed to delete documents")
 		writeError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO admin_audit_log(admin_action, target_user_id, docs_deleted, bytes_freed, request_id)
-		VALUES ('delete_user', $1, $2, $3, $4)
-	`, userID, docsDeleted, bytesFreed, reqID)
+	_, err = tx.ExecContext(r.Context(), q.AuditSQL, q.AuditArgs(docsDeleted, bytesFreed, reqID)...)
 	if err != nil {
 		log.Error().Err(err).Msg("admin: failed to write audit log")
 		writeError(w, http.StatusInternalServerError, "database error")
@@ -256,19 +198,82 @@ func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info().
-		Str("user_id", userID).
-		Int("docs_deleted", docsDeleted).
-		Int64("bytes_freed", bytesFreed).
-		Str("request_id", reqID).
-		Msg("admin: deleted user data")
+	e := log.Info().Int("docs_deleted", docsDeleted).Int64("bytes_freed", bytesFreed).Str("request_id", reqID)
+	if q.LogEvent != nil {
+		e = q.LogEvent(e, docsDeleted, bytesFreed)
+	}
+	e.Msg("admin: delete completed")
 
-	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:        true,
-		UserID:         userID,
-		DocsDeleted:    docsDeleted,
-		DocsBytesFreed: bytesFreed,
-	})
+	writeJSON(w, http.StatusOK, q.Response(docsDeleted, bytesFreed))
+}
+
+// deleteUserDataQuery returns the query configuration for DeleteUserData.
+func deleteUserDataQuery(userID string) deleteQuery {
+	return deleteQuery{
+		CountSQL:   `SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1`,
+		CountArgs:  []any{userID},
+		DeleteSQL:  `DELETE FROM kb_documents WHERE user_id = $1`,
+		DeleteArgs: []any{userID},
+		AuditSQL:   `INSERT INTO admin_audit_log(admin_action, target_user_id, docs_deleted, bytes_freed, request_id) VALUES ('delete_user', $1, $2, $3, $4)`,
+		AuditArgs:  func(count int, bytes int64, reqID string) []any { return []any{userID, count, bytes, reqID} },
+		Response: func(count int, bytes int64) deleteResponse {
+			return deleteResponse{Deleted: true, UserID: userID, DocsDeleted: count, DocsBytesFreed: bytes}
+		},
+		LogEvent: func(e *zerolog.Event, count int, bytes int64) *zerolog.Event {
+			return e.Str("user_id", userID)
+		},
+	}
+}
+
+// deleteUserCollectionQuery returns the query configuration for DeleteUserCollection.
+func deleteUserCollectionQuery(userID, collection string) deleteQuery {
+	return deleteQuery{
+		CountSQL:   `SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE user_id = $1 AND collection = $2`,
+		CountArgs:  []any{userID, collection},
+		DeleteSQL:  `DELETE FROM kb_documents WHERE user_id = $1 AND collection = $2`,
+		DeleteArgs: []any{userID, collection},
+		AuditSQL:   `INSERT INTO admin_audit_log(admin_action, target_user_id, target_collection, docs_deleted, bytes_freed, request_id) VALUES ('delete_user_collection', $1, $2, $3, $4, $5)`,
+		AuditArgs: func(count int, bytes int64, reqID string) []any {
+			return []any{userID, collection, count, bytes, reqID}
+		},
+		Response: func(count int, bytes int64) deleteResponse {
+			return deleteResponse{Deleted: true, UserID: userID, Collection: collection, DocsDeleted: count, DocsBytesFreed: bytes}
+		},
+		LogEvent: func(e *zerolog.Event, count int, bytes int64) *zerolog.Event {
+			return e.Str("user_id", userID).Str("collection", collection)
+		},
+	}
+}
+
+// deleteGlobalCollectionQuery returns the query configuration for DeleteGlobalCollection.
+func deleteGlobalCollectionQuery(collection string) deleteQuery {
+	return deleteQuery{
+		CountSQL:   `SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0) FROM kb_documents WHERE collection = $1`,
+		CountArgs:  []any{collection},
+		DeleteSQL:  `DELETE FROM kb_documents WHERE collection = $1`,
+		DeleteArgs: []any{collection},
+		AuditSQL:   `INSERT INTO admin_audit_log(admin_action, target_collection, docs_deleted, bytes_freed, request_id) VALUES ('delete_global_collection', $1, $2, $3, $4)`,
+		AuditArgs:  func(count int, bytes int64, reqID string) []any { return []any{collection, count, bytes, reqID} },
+		Response: func(count int, bytes int64) deleteResponse {
+			return deleteResponse{Deleted: true, Collection: collection, DocsDeleted: count, DocsBytesFreed: bytes}
+		},
+		LogEvent: func(e *zerolog.Event, count int, bytes int64) *zerolog.Event {
+			return e.Str("collection", collection)
+		},
+	}
+}
+
+// DeleteUserData hard-deletes all documents for a user.
+func (h *Handler) DeleteUserData(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimPrefix(r.URL.Path, "/admin/kb/users/")
+	if idx := strings.Index(userID, "/"); idx > 0 {
+		userID = userID[:idx]
+	}
+	if !userIDPattern.MatchString(userID) {
+		writeError(w, http.StatusBadRequest, "invalid user_id format")
+		return
+	}
+	h.executeDelete(w, r, deleteUserDataQuery(userID))
 }
 
 // DeleteUserCollection hard-deletes a specific collection for a user.
@@ -282,79 +287,7 @@ func (h *Handler) DeleteUserCollection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid collection name format")
 		return
 	}
-
-	reqID := getRequestID(r.Context())
-
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		log.Error().Err(err).Msg("admin: failed to begin transaction")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	defer tx.Rollback()
-
-	var docsDeleted int
-	var bytesFreed int64
-	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
-		FROM kb_documents WHERE user_id = $1 AND collection = $2
-	`, userID, collection).Scan(&docsDeleted, &bytesFreed)
-	if err != nil {
-		log.Error().Err(err).Str("user_id", userID).Str("collection", collection).Msg("admin: failed to count documents")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if docsDeleted == 0 {
-		tx.Commit()
-		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:        true,
-			UserID:         userID,
-			Collection:     collection,
-			DocsDeleted:    0,
-			DocsBytesFreed: 0,
-		})
-		return
-	}
-
-	_, err = tx.ExecContext(r.Context(), `DELETE FROM kb_documents WHERE user_id = $1 AND collection = $2`, userID, collection)
-	if err != nil {
-		log.Error().Err(err).Str("user_id", userID).Str("collection", collection).Msg("admin: failed to delete collection")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO admin_audit_log(admin_action, target_user_id, target_collection, docs_deleted, bytes_freed, request_id)
-		VALUES ('delete_user_collection', $1, $2, $3, $4, $5)
-	`, userID, collection, docsDeleted, bytesFreed, reqID)
-	if err != nil {
-		log.Error().Err(err).Msg("admin: failed to write audit log")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Error().Err(err).Msg("admin: failed to commit transaction")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	log.Info().
-		Str("user_id", userID).
-		Str("collection", collection).
-		Int("docs_deleted", docsDeleted).
-		Int64("bytes_freed", bytesFreed).
-		Str("request_id", reqID).
-		Msg("admin: deleted user collection")
-
-	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:        true,
-		UserID:         userID,
-		Collection:     collection,
-		DocsDeleted:    docsDeleted,
-		DocsBytesFreed: bytesFreed,
-	})
+	h.executeDelete(w, r, deleteUserCollectionQuery(userID, collection))
 }
 
 // DeleteGlobalCollection hard-deletes a collection for all users.
@@ -364,76 +297,7 @@ func (h *Handler) DeleteGlobalCollection(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid collection name format")
 		return
 	}
-
-	reqID := getRequestID(r.Context())
-
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		log.Error().Err(err).Msg("admin: failed to begin transaction")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	defer tx.Rollback()
-
-	var docsDeleted int
-	var bytesFreed int64
-	err = tx.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(pg_column_size(metadata)), 0)
-		FROM kb_documents WHERE collection = $1
-	`, collection).Scan(&docsDeleted, &bytesFreed)
-	if err != nil {
-		log.Error().Err(err).Str("collection", collection).Msg("admin: failed to count documents")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if docsDeleted == 0 {
-		tx.Commit()
-		writeJSON(w, http.StatusOK, deleteResponse{
-			Deleted:        true,
-			Collection:     collection,
-			DocsDeleted:    0,
-			DocsBytesFreed: 0,
-		})
-		return
-	}
-
-	_, err = tx.ExecContext(r.Context(), `DELETE FROM kb_documents WHERE collection = $1`, collection)
-	if err != nil {
-		log.Error().Err(err).Str("collection", collection).Msg("admin: failed to delete global collection")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO admin_audit_log(admin_action, target_collection, docs_deleted, bytes_freed, request_id)
-		VALUES ('delete_global_collection', $1, $2, $3, $4)
-	`, collection, docsDeleted, bytesFreed, reqID)
-	if err != nil {
-		log.Error().Err(err).Msg("admin: failed to write audit log")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Error().Err(err).Msg("admin: failed to commit transaction")
-		writeError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	log.Info().
-		Str("collection", collection).
-		Int("docs_deleted", docsDeleted).
-		Int64("bytes_freed", bytesFreed).
-		Str("request_id", reqID).
-		Msg("admin: deleted global collection")
-
-	writeJSON(w, http.StatusOK, deleteResponse{
-		Deleted:        true,
-		Collection:     collection,
-		DocsDeleted:    docsDeleted,
-		DocsBytesFreed: bytesFreed,
-	})
+	h.executeDelete(w, r, deleteGlobalCollectionQuery(collection))
 }
 
 // ExportUser returns all documents for a user as JSON (paginado).

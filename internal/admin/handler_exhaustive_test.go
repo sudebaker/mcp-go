@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,13 +13,14 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/sudebaker/mcp-go/internal/auth"
 )
 
 // --- Middleware ---
 
 func TestMiddleware_TruncatesLongRequestID(t *testing.T) {
 	longID := strings.Repeat("a", 300)
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := w.Header().Get("X-Request-ID")
 		if len(rid) > 255 {
 			t.Errorf("request ID was not truncated: len=%d", len(rid))
@@ -37,7 +39,7 @@ func TestMiddleware_TruncatesLongRequestID(t *testing.T) {
 }
 
 func TestMiddleware_InvalidRequestID_GeneratesNew(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -56,7 +58,7 @@ func TestMiddleware_InvalidRequestID_GeneratesNew(t *testing.T) {
 }
 
 func TestMiddleware_EmptyBearer(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/admin/kb/users", nil)
@@ -69,7 +71,7 @@ func TestMiddleware_EmptyBearer(t *testing.T) {
 }
 
 func TestMiddleware_NoBearerPrefix(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/admin/kb/users", nil)
@@ -82,7 +84,7 @@ func TestMiddleware_NoBearerPrefix(t *testing.T) {
 }
 
 func TestMiddleware_SetsRequestIDOnResponse(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/admin/kb/users", nil)
@@ -276,7 +278,7 @@ func TestDeleteUserData_AuditLogInsertError(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/admin/kb/users/user1", nil)
-	mw := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/admin/kb/users/user1"
 		h.DeleteUserData(w, r)
 	}))
@@ -305,7 +307,7 @@ func TestDeleteUserData_CommitError(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/admin/kb/users/user1", nil)
-	mw := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/admin/kb/users/user1"
 		h.DeleteUserData(w, r)
 	}))
@@ -336,7 +338,7 @@ func TestDeleteUserCollection_ValidWithDocs(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/admin/kb/users/user1/collections/research", nil)
-	mw := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/admin/kb/users/user1/collections/research"
 		h.DeleteUserCollection(w, r)
 	}))
@@ -1043,7 +1045,11 @@ func makeAdminMux(t *testing.T, db *sql.DB, adminKey string) http.Handler {
 	adminMux.HandleFunc("/admin/audit/", func(w http.ResponseWriter, r *http.Request) {
 		adminHandler.AuditLog(w, r)
 	})
-	return Middleware(adminKey, adminMux)
+	var keyHash [32]byte
+	if adminKey != "" {
+		keyHash = sha256.Sum256([]byte(adminKey))
+	}
+	return auth.BearerAuth(keyHash, auth.OnEmpty503, adminMux)
 }
 
 func TestAdminMux_ListUsers(t *testing.T) {

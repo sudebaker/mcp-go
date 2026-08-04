@@ -29,24 +29,69 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def get_commits(repo_path: str, from_ref: str | None, to_ref: str | None) -> list[dict[str, Any]]:
-    if from_ref and to_ref:
-        spec = f"{from_ref}..{to_ref}"
-    elif from_ref:
-        spec = f"{from_ref}..HEAD"
-    elif to_ref:
-        spec = f"{to_ref}"
-    else:
-        spec = "-30"
+def read_git_log_file(repo_path: str, max_commits: int = 100) -> str | None:
+    # Try the configured repo_path first
+    log_file = Path(repo_path) / ".git-log.txt"
+    if log_file.exists():
+        return _parse_git_log_file(log_file, max_commits)
+    # Fallback to the canonical production path (Docker WORKDIR /app/)
+    log_file = Path("/app/.git-log.txt")
+    if log_file.exists():
+        return _parse_git_log_file(log_file, max_commits)
+    return None
 
-    cmd = ["git", "-C", repo_path, "log", spec, "--pretty=format:%H|%s|%ad|%an", "--date=short"]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-    if result.returncode != 0:
-        raise RuntimeError(f"git error: {result.stderr.strip() or 'unknown'}")
-
+def _parse_git_log_file(log_file: Path, max_commits: int) -> str | None:
+    lines = log_file.read_text().strip().split("\n")
+    # .git-log.txt lines are "<hash> <subject>"; adapt to expected parser format
     commits = []
-    for line in result.stdout.strip().split("\n"):
+    for line in lines[:max_commits]:
+        parts = line.strip().split(" ", 1)
+        if len(parts) < 2:
+            continue
+        hash_, subject = parts
+        commits.append(f"{hash_}|{subject}|N/A|unknown")
+    return "\n".join(commits)
+    lines = log_file.read_text().strip().split("\n")
+    # .git-log.txt lines are "<hash> <subject>"; adapt to expected parser format
+    commits = []
+    for line in lines[:max_commits]:
+        parts = line.strip().split(" ", 1)
+        if len(parts) < 2:
+            continue
+        hash_, subject = parts
+        commits.append(f"{hash_}|{subject}|N/A|unknown")
+    return "\n".join(commits)
+
+
+def get_commits(repo_path: str, from_ref: str | None, to_ref: str | None) -> list[dict[str, Any]]:
+    # Prefer live git if available (development with .git/)
+    if Path(repo_path, ".git").exists():
+        if from_ref and to_ref:
+            spec = f"{from_ref}..{to_ref}"
+        elif from_ref:
+            spec = f"{from_ref}..HEAD"
+        elif to_ref:
+            spec = f"{to_ref}"
+        else:
+            spec = "-30"
+
+        cmd = ["git", "-C", repo_path, "log", spec, "--pretty=format:%H|%s|%ad|%an", "--date=short"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return parse_commit_log(result.stdout)
+        # fall through to .git-log.txt fallback
+
+    # Fallback for production images without .git/
+    log_text = read_git_log_file(repo_path, max_commits=100)
+    if log_text is None:
+        raise RuntimeError("no git history available (.git/ missing and .git-log.txt not found)")
+    return parse_commit_log(log_text)
+
+
+def parse_commit_log(text: str) -> list[dict[str, Any]]:
+    commits = []
+    for line in text.strip().split("\n"):
         if not line or "|" not in line:
             continue
         parts = line.split("|", 3)

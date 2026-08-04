@@ -139,6 +139,11 @@ func resolveAndValidateArgs(toolDir string, tool *ToolConfig) error {
 		if arg == "" || strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
 			continue
 		}
+		// Positional arguments like "search", "ingest", etc. are subcommands,
+		// not file paths. Skip them if they contain no slash or dot.
+		if !strings.Contains(arg, "/") && !strings.Contains(arg, ".") {
+			continue
+		}
 
 		// Resolve relative path against tool directory.
 		resolved := filepath.Join(toolDir, arg)

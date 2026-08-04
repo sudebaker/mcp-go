@@ -151,6 +151,40 @@ func TestDiscoverToolsFromDirectory_ResolveRelativeArgs(t *testing.T) {
 	}
 }
 
+func TestDiscoverToolsFromDirectory_SkipPositionalSubcommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := map[string]interface{}{
+		"name":        "kb_like",
+		"description": "subcommand tool",
+		"command":     "python3",
+		"args":        []string{"main.py", "search"},
+		"input_schema": map[string]interface{}{
+			"type": "object",
+		},
+	}
+	b, _ := yaml.Marshal(m)
+	dir := createTempToolDir(t, tmpDir, "kb_like", b)
+	writeDummyScript(t, dir, "main.py")
+
+	tools, err := DiscoverToolsFromDirectory(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	if len(tools[0].Args) != 2 {
+		t.Fatalf("expected 2 args, got %d", len(tools[0].Args))
+	}
+	// main.py resolves to an absolute path; "search" stays untouched (subcommand).
+	if tools[0].Args[0] != filepath.Join(dir, "main.py") {
+		t.Errorf("expected resolved main.py, got %s", tools[0].Args[0])
+	}
+	if tools[0].Args[1] != "search" {
+		t.Errorf("expected subcommand 'search' untouched, got %q", tools[0].Args[1])
+	}
+}
+
 func TestDiscoverToolsFromDirectory_BlockPathTraversal(t *testing.T) {
 	tmpDir := t.TempDir()
 	manifest := map[string]interface{}{

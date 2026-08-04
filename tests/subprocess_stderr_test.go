@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -11,8 +12,12 @@ import (
 	"github.com/sudebaker/mcp-go/internal/executor"
 )
 
-// TestStderrLogging tests that stderr output from subprocess tools is properly captured and logged
+// TestStderrLogging tests that stderr output from subprocess tools is properly captured and logged.
+// Requires python3 to be available in PATH; skipped otherwise (integration test).
 func TestStderrLogging(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not found in PATH — skipping subprocess stderr integration test")
+	}
 	cfg := &config.Config{
 		Execution: config.ExecutionConfig{
 			DefaultTimeout: 10 * time.Second,

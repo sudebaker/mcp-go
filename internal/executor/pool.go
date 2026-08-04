@@ -291,6 +291,7 @@ func (p *ProcessPool) Execute(ctx context.Context, toolName string, arguments ma
 			DatabaseURL: p.config.Execution.Environment["DATABASE_URL"],
 			WorkingDir:  p.config.Execution.WorkingDir,
 			UserID:      userID,
+			RequestID:   requestID,
 		},
 	}
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/sudebaker/mcp-go/internal/auth"
 )
 
 func newTestHandler(t *testing.T) (*Handler, sqlmock.Sqlmock) {
@@ -21,7 +23,7 @@ func newTestHandler(t *testing.T) (*Handler, sqlmock.Sqlmock) {
 }
 
 func TestMiddleware_NoAdminKey(t *testing.T) {
-	handler := Middleware("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth([32]byte{}, auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	}))
 
@@ -37,13 +39,13 @@ func TestMiddleware_NoAdminKey(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if body["error"] != "admin endpoints disabled: ADMIN_API_KEY not set" {
+	if body["error"] != "endpoints disabled: API key not set" {
 		t.Errorf("unexpected error message: %s", body["error"])
 	}
 }
 
 func TestMiddleware_NoAuthHeader(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	}))
 
@@ -57,7 +59,7 @@ func TestMiddleware_NoAuthHeader(t *testing.T) {
 }
 
 func TestMiddleware_InvalidKey(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	}))
 
@@ -73,9 +75,9 @@ func TestMiddleware_InvalidKey(t *testing.T) {
 
 func TestMiddleware_ValidKey(t *testing.T) {
 	called := false
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		requestID := getRequestID(r.Context())
+		requestID := auth.GetRequestID(r.Context())
 		if requestID == "" {
 			t.Error("expected request_id in context")
 		}
@@ -99,7 +101,7 @@ func TestMiddleware_ValidKey(t *testing.T) {
 }
 
 func TestMiddleware_RespectsClientRequestID(t *testing.T) {
-	handler := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -262,7 +264,7 @@ func TestDeleteUserData_WithDocs(t *testing.T) {
 	r := httptest.NewRequest(http.MethodDelete, "/admin/kb/users/user1", nil)
 
 	// Wrap with middleware to inject request_id, then call DeleteUserData
-	mw := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/admin/kb/users/user1"
 		h.DeleteUserData(w, r)
 	}))
@@ -340,7 +342,7 @@ func TestDeleteGlobalCollection_WithDocs(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/admin/kb/collections/global-col", nil)
-	mw := Middleware("test-key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := auth.BearerAuth(sha256.Sum256([]byte("test-key")), auth.OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/admin/kb/collections/global-col"
 		h.DeleteGlobalCollection(w, r)
 	}))

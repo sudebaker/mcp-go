@@ -13,15 +13,65 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/sudebaker/mcp-go/internal/resources"
 )
 
-// UploadResponse is the JSON response for upload operations.
+var (
+	cleanupRestartCount atomic.Int32
+	cleanupDisabled     atomic.Bool
+)
+
+// UploadConfig holds configuration for the upload endpoint.
+type UploadConfig struct {
+	// Enabled indicates if upload endpoint is active (default: true)
+	Enabled bool
+	// MaxSizeMB is the maximum file size in megabytes (default: 50)
+	MaxSizeMB int64
+	// AllowedTypes is the whitelist of MIME types
+	AllowedTypes []string
+	// DefaultTTLSeconds is the default time-to-live for uploaded files (default: 3600)
+	DefaultTTLSeconds int
+	// MaxTTLSeconds is the maximum TTL a client can request (default: 86400)
+	MaxTTLSeconds int
+	// UploadDir is the base directory for storing uploads (default: /data/uploads)
+	UploadDir string
+}
+
+// DefaultUploadConfig returns sensible defaults for upload configuration.
+func DefaultUploadConfig() UploadConfig {
+	return UploadConfig{
+		Enabled:   true,
+		MaxSizeMB: 50,
+		AllowedTypes: []string{
+			"image/jpeg",
+			"image/png",
+			"image/webp",
+			"image/gif",
+			"application/pdf",
+			"audio/mpeg",
+			"audio/wav",
+			"audio/ogg",
+			"audio/webm",
+			"audio/flac",
+			"text/csv",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			"application/vnd.ms-excel",
+		},
+		DefaultTTLSeconds: 3600,
+		MaxTTLSeconds:     86400,
+		UploadDir:         "/data/uploads",
+	}
+}
+
+// UploadResponse is the JSON response for successful uploads.
 type UploadResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
@@ -289,4 +339,155 @@ func matchMIME(declared, detected string) bool {
 		return true
 	}
 	return false
+}
+
+// startUploadCleanup runs a background goroutine that periodically scans
+// the upload directory and removes files whose TTL has expired.
+func (s *MCPServer) startUploadCleanup() {
+	if cleanupDisabled.Load() {
+		log.Warn().Msg("Upload cleanup previously disabled after repeated panics, not restarting")
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			count := cleanupRestartCount.Add(1)
+			if count > 10 {
+				log.Error().
+					Int32("restart_count", count).
+					Msg("Upload cleanup failed 10+ times, disabling permanently")
+				cleanupDisabled.Store(true)
+				return
+			}
+			delay := time.Duration(min(5*count, 300)) * time.Second
+			log.Error().
+				Interface("panic", r).
+				Int32("restart_count", count).
+				Dur("delay", delay).
+				Msg("Upload cleanup panicked, restarting with delay")
+			time.Sleep(delay)
+			go s.startUploadCleanup()
+		}
+	}()
+
+	cfg := s.uploadConfig
+	if cfg.UploadDir == "" {
+		cfg.UploadDir = "/data/uploads"
+	}
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	log.Info().Str("dir", cfg.UploadDir).Msg("Upload TTL cleanup goroutine started")
+
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanExpiredUploads(cfg.UploadDir)
+		case <-s.stopCh:
+			log.Debug().Msg("Upload cleanup goroutine stopped")
+			return
+		}
+	}
+}
+
+// cleanExpiredUploads removes uploaded files and their .meta sidecars whose
+// expiration time has passed.
+func (s *MCPServer) cleanExpiredUploads(uploadDir string) {
+	now := time.Now()
+	removed := 0
+	errors := 0
+
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn().Err(err).Str("dir", uploadDir).Msg("Failed to scan upload directory")
+		}
+		return
+	}
+
+	for _, entry := range entries {
+		// Skip .meta sidecar files (we clean them alongside their parent)
+		if strings.HasSuffix(entry.Name(), ".meta") {
+			continue
+		}
+
+		metaPath := filepath.Join(uploadDir, entry.Name()+".meta")
+		metaBytes, err := os.ReadFile(metaPath)
+		if err != nil {
+			// No .meta file — legacy file without metadata, skip
+			continue
+		}
+
+		var meta map[string]string
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			continue
+		}
+
+		expiresAtStr, ok := meta["expires_at"]
+		if !ok {
+			continue
+		}
+
+		expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+		if err != nil {
+			continue
+		}
+
+		if now.After(expiresAt) {
+			filePath := filepath.Join(uploadDir, entry.Name())
+			if err := os.Remove(filePath); err != nil {
+				errors++
+				log.Warn().Err(err).Str("path", filePath).Msg("Failed to remove expired upload")
+			} else {
+				os.Remove(metaPath) // best-effort sidecar cleanup
+				removed++
+			}
+		}
+	}
+
+	// Recurse into collection subdirectories (depth 1 only)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(uploadDir, entry.Name())
+			subEntries, err := os.ReadDir(subDir)
+			if err != nil {
+				continue
+			}
+			for _, subEntry := range subEntries {
+				if strings.HasSuffix(subEntry.Name(), ".meta") {
+					continue
+				}
+				metaPath := filepath.Join(subDir, subEntry.Name()+".meta")
+				metaBytes, err := os.ReadFile(metaPath)
+				if err != nil {
+					continue
+				}
+				var meta map[string]string
+				if json.Unmarshal(metaBytes, &meta) != nil {
+					continue
+				}
+				expiresAtStr, ok := meta["expires_at"]
+				if !ok {
+					continue
+				}
+				expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+				if err != nil {
+					continue
+				}
+				if now.After(expiresAt) {
+					filePath := filepath.Join(subDir, subEntry.Name())
+					if os.Remove(filePath) == nil {
+						os.Remove(metaPath)
+						removed++
+					} else {
+						errors++
+					}
+				}
+			}
+		}
+	}
+
+	if removed > 0 || errors > 0 {
+		log.Info().Int("removed", removed).Int("errors", errors).Msg("Upload TTL cleanup completed")
+	}
 }

@@ -129,3 +129,17 @@ func RecordLLMRequest(provider string, success bool, durationSeconds float64) {
 	LLMRequestTotal.WithLabelValues(provider, status).Inc()
 	LLMRequestDuration.WithLabelValues(provider).Observe(durationSeconds)
 }
+
+// AdminOperationTotal counts admin endpoint operations by action, method and status.
+var AdminOperationTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "mcp_admin_operations_total",
+		Help: "Total number of admin endpoint operations",
+	},
+	[]string{"action", "method", "status"},
+)
+
+// RecordAdminOperation increments the admin operation counter.
+func RecordAdminOperation(action, method, status string) {
+	AdminOperationTotal.WithLabelValues(action, method, status).Inc()
+}

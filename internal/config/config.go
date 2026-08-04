@@ -159,6 +159,12 @@ type UploadConfig struct {
 	MaxSizeMB int64 `yaml:"max_size_mb"`
 	// AllowedTypes is the whitelist of MIME types
 	AllowedTypes []string `yaml:"allowed_types"`
+	// DefaultTTLSeconds is the default time-to-live for uploaded files (default: 3600)
+	DefaultTTLSeconds int `yaml:"default_ttl_seconds"`
+	// MaxTTLSeconds is the maximum TTL a client can request (default: 86400)
+	MaxTTLSeconds int `yaml:"max_ttl_seconds"`
+	// UploadDir is the base directory for storing uploads (default: /data/uploads)
+	UploadDir string `yaml:"upload_dir"`
 }
 
 // envVarRegex matches ${VAR_NAME} or ${VAR_NAME:-default} patterns for expansion
@@ -214,47 +220,31 @@ func expandEnvVarsInMap(m map[string]string) map[string]string {
 	return result
 }
 
-// Load reads and parses the configuration file from the specified path.
-//
-// The function performs the following steps:
-//  1. Read the entire file contents
-//  2. Expand environment variables in the raw YAML
-//  3. Unmarshal YAML into Config struct (type-safe, no arbitrary objects)
-//  4. Apply default values for unset fields
-//  5. Expand environment variables in the execution environment map
-//  6. Set default timeouts for tools that don't specify one
-//
-// Parameters:
-//   - path: absolute or relative path to the YAML configuration file
-//
-// Returns:
-//   - *Config: the parsed and validated configuration
-//   - error: any failure during reading, parsing, or validation
-//
-// Example:
-//
-//	cfg, err := config.Load("/app/configs/config.yaml")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-func Load(path string) (*Config, error) {
+// readConfigFile reads the YAML configuration file from the given path.
+// Returns raw bytes for downstream processing.
+func readConfigFile(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+	return data, nil
+}
 
-	// Expand environment variables in the raw YAML
-	expandedData := expandEnvVars(string(data))
-
+// expandAndUnmarshal expands env vars in raw YAML and unmarshals into Config.
+// SECURITY: yaml.Unmarshal uses SafeDecoder by default in gopkg.in/yaml.v3
+// which prevents deserialization of arbitrary Go objects.
+func expandAndUnmarshal(raw []byte) (*Config, error) {
+	expandedData := expandEnvVars(string(raw))
 	var cfg Config
-	// SECURITY: yaml.Unmarshal uses SafeDecoder by default in gopkg.in/yaml.v3
-	// which prevents deserialization of arbitrary Go objects. No unsafe
-	// deserialization possible.
 	if err := yaml.Unmarshal([]byte(expandedData), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config YAML: %w", err)
 	}
+	return &cfg, nil
+}
 
-	// Apply defaults
+// applyDefaults fills zero-value fields with sensible defaults.
+// POST: cfg.Server.Port != 0, cfg.Server.Name != "", etc.
+func applyDefaults(cfg *Config) {
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "0.0.0.0"
 	}
@@ -282,54 +272,119 @@ func Load(path string) (*Config, error) {
 	if cfg.Execution.MaxConcurrency <= 0 {
 		cfg.Execution.MaxConcurrency = 5
 	}
+}
 
-	// Expand environment variables in the environment map
+// expandEnvMap expands ${VAR} patterns in the execution environment map.
+// PRE: applyDefaults has run (defaults ensure consistency).
+// POST: no value in Environment contains unresolved ${VAR} patterns.
+func expandEnvMap(cfg *Config) {
 	if cfg.Execution.Environment != nil {
 		cfg.Execution.Environment = expandEnvVarsInMap(cfg.Execution.Environment)
 	}
+}
 
-	// Set default timeouts for tools
+// setToolDefaults applies the default timeout to tools that don't specify one.
+func setToolDefaults(cfg *Config) {
 	for i := range cfg.Tools {
 		if cfg.Tools[i].Timeout == 0 {
 			cfg.Tools[i].Timeout = cfg.Execution.DefaultTimeout
 		}
 	}
+}
 
-	// Tool discovery: scan directory for manifest-based tools if enabled
-	if cfg.Execution.ToolsDiscovery == "manifest" {
-		if cfg.Execution.ToolsDir == "" {
-			return nil, fmt.Errorf("tools_discovery is 'manifest' but tools_dir is empty")
-		}
-		discovered, err := DiscoverToolsFromDirectory(cfg.Execution.ToolsDir)
-		if err != nil {
-			return nil, fmt.Errorf("tool discovery failed for %s: %w", cfg.Execution.ToolsDir, err)
-		}
-		for i := range discovered {
-			if discovered[i].Timeout == 0 {
-				discovered[i].Timeout = cfg.Execution.DefaultTimeout
-			}
-		}
-		cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
+// applyDiscovery scans the tools directory for manifest-based tools and merges
+// them into cfg.Tools. Only runs when ToolsDiscovery == "manifest".
+// PRE: cfg.Tools has tools declared in YAML (if any).
+// POST: cfg.Tools includes discovered tools merged per ToolsAppend policy.
+func applyDiscovery(cfg *Config, configDir string) error {
+	if cfg.Execution.ToolsDiscovery != "manifest" {
+		return nil
 	}
+	if cfg.Execution.ToolsDir == "" {
+		return fmt.Errorf("tools_discovery is 'manifest' but tools_dir is empty")
+	}
+	toolsDir := cfg.Execution.ToolsDir
+	if !filepath.IsAbs(toolsDir) {
+		toolsDir = filepath.Join(configDir, toolsDir)
+	}
+	discovered, err := DiscoverToolsFromDirectory(toolsDir)
+	if err != nil {
+		return fmt.Errorf("tool discovery failed for %s: %w", toolsDir, err)
+	}
+	for i := range discovered {
+		if discovered[i].Timeout == 0 {
+			discovered[i].Timeout = cfg.Execution.DefaultTimeout
+		}
+	}
+	cfg.Tools = mergeTools(cfg.Tools, discovered, cfg.Execution.ToolsAppend)
+	return nil
+}
 
-	// Determine active toolset: MCP_TOOLSET env var, or "default" if not set.
+// applyToolsets filters the tool list based on the active toolset from the
+// MCP_TOOLSET env var (default: "default"). Reads toolsets.yaml from the
+// config directory. The file is optional — if it doesn't exist, all tools pass.
+// PRE: cfg.Tools has the full tool list (applyDiscovery has run).
+// POST: cfg.Tools is filtered to only the active toolset.
+func applyToolsets(cfg *Config, configDir string) error {
 	toolsetEnv := os.Getenv("MCP_TOOLSET")
 	if toolsetEnv == "" {
 		toolsetEnv = "default"
 	}
 
-	toolsetsPath := filepath.Join(filepath.Dir(path), "toolsets.yaml")
+	toolsetsPath := filepath.Join(configDir, "toolsets.yaml")
 	if _, err := os.Stat(toolsetsPath); err == nil {
 		tc, err := loadToolsets(toolsetsPath)
 		if err != nil {
-			return nil, fmt.Errorf("loading toolsets config: %w", err)
+			return fmt.Errorf("loading toolsets config: %w", err)
 		}
 		cfg.Tools = filterToolsByToolset(cfg.Tools, toolsetEnv, tc.Toolsets)
 	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("stat toolsets file: %w", err)
+		return fmt.Errorf("stat toolsets file: %w", err)
+	}
+	return nil
+}
+
+// Load reads and parses the configuration file from the specified path.
+//
+// Pipeline (stages run in order):
+//  1. readConfigFile — read raw bytes from disk
+//  2. expandAndUnmarshal — expand ${VAR} in YAML + unmarshal into Config
+//  3. applyDefaults — fill zero-value fields with defaults
+//  4. expandEnvMap — expand ${VAR} in execution environment map
+//  5. setToolDefaults — apply default timeout to tools
+//  6. applyDiscovery — scan tools directory for manifest tools
+//  7. applyToolsets — filter tools by active toolset
+//  8. Validate — check for conflicting configuration
+//
+// Parameters:
+//   - path: absolute or relative path to the YAML configuration file
+//
+// Returns:
+//   - *Config: the parsed and validated configuration
+//   - error: any failure during reading, parsing, or validation
+func Load(path string) (*Config, error) {
+	raw, err := readConfigFile(path)
+	if err != nil {
+		return nil, err
 	}
 
-	return &cfg, nil
+	cfg, err := expandAndUnmarshal(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	applyDefaults(cfg)
+	expandEnvMap(cfg)
+	setToolDefaults(cfg)
+
+	if err := applyDiscovery(cfg, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	if err := applyToolsets(cfg, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // mergeTools merges discovered tools with configured tools.

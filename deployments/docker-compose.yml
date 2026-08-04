@@ -109,6 +109,10 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - mcp-internal
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=50"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]

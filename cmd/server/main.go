@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -71,6 +72,7 @@ func main() {
 
 	// Open PostgreSQL connection from DATABASE_URL if configured
 	var db *sql.DB
+	var adminDB *sql.DB
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL != "" {
 		// Ensure sslmode=disable for internal Docker connections
@@ -90,6 +92,18 @@ func main() {
 			db.SetMaxOpenConns(2) // Health checks only need minimal connections
 			db.SetMaxIdleConns(1)
 			log.Info().Msg("PostgreSQL health check connection initialized")
+		}
+
+		// Dedicated connection pool for admin endpoints (delete/export)
+		adminDB, dbErr = sql.Open("postgres", databaseURL)
+		if dbErr != nil {
+			log.Error().Err(dbErr).Msg("Failed to open PostgreSQL connection for admin endpoints")
+			adminDB = nil
+		} else {
+			adminDB.SetMaxOpenConns(10)
+			adminDB.SetMaxIdleConns(5)
+			adminDB.SetConnMaxLifetime(5 * time.Minute)
+			log.Info().Msg("Admin database connection pool initialized (max 10 conns)")
 		}
 	}
 
@@ -197,6 +211,12 @@ func main() {
 
 	log.Info().Msg("Server started with static configuration")
 
+	// Read ADMIN_API_KEY from environment (optional)
+	adminKey := os.Getenv("ADMIN_API_KEY")
+
+	// Max request body size for MCP endpoints (MB), 0 = default 10MB
+	maxBodyMB, _ := strconv.ParseInt(os.Getenv("MCP_MAX_BODY_SIZE_MB"), 10, 64)
+
 	// Create SSE server
 	sseServer := transport.NewMCPServer(mcpServer, transport.MCPConfig{
 		Host:              cfg.Server.Host,
@@ -213,6 +233,9 @@ func main() {
 		Upload:            cfg.Upload,
 		FilesDir:          filepath.Join(cfg.Execution.WorkingDir, cfg.Execution.ReportsDir),
 		HealthChecker:     healthChecker,
+		AdminKey:          adminKey,
+		DB:                adminDB,
+		MaxMCPBodySizeMB:  maxBodyMB,
 	})
 
 	// Wire resource manager into the transport server for internal resource streaming

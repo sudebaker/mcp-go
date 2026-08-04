@@ -44,9 +44,9 @@
 
 ### Nice to Have (Optional - Phase 3)
 
-- [ ] HTTPS/TLS configuration
+- [x] HTTPS/TLS configuration (documented below)
 - [ ] API key authentication
-- [ ] Audit logging
+- [x] Audit logging
 - [ ] Secret management
 - [ ] Network policies
 - [ ] PostgreSQL backup strategy
@@ -140,6 +140,29 @@ docker logs mcp-orchestrator | grep -E "error|panic|timeout"
 | Error rate | > 5% | Investigate errors |
 | Tool timeout rate | > 10% | Increase timeout or optimize |
 | Health check failures | > 0 | Immediate investigation |
+| `mcp_admin_operations_total` | unexpected spikes | Review audit log for abuse |
+
+---
+
+## Database Connection Budget
+
+The orchestrator opens multiple database connection pools. PostgreSQL `max_connections` must be sized for the worst-case concurrent load:
+
+| Consumer | Connections | Notes |
+|----------|-------------|-------|
+| `mcp_app` | 10 | Default Go `sql.DB` pool for tool execution |
+| `mcp_admin` | 10 | Admin endpoint `sql.DB` pool |
+| `mcp_health` | 2 | Health check `sql.DB` pool |
+| Python KB tools | ~10 peak | One connection per concurrent KB request |
+| Safety margin | +20% | Headroom for bursts |
+
+**Recommended `max_connections`:**
+
+```text
+max_connections = 10 (app) + 10 (admin) + 2 (health) + 10 (python kb) + 20% margin ≈ 40
+```
+
+The included `deployments/docker-compose.yml` sets `max_connections=50`, which is suitable for the default deployment. Tune upward for high-traffic production deployments.
 
 ---
 
@@ -186,6 +209,49 @@ docker stats --no-stream mcp-orchestrator
 # Restart if needed
 docker-compose restart mcp-server
 ```
+
+---
+
+## TLS / HTTPS
+
+The MCP server itself does not terminate TLS. In production (or any non-air-gapped environment), run it behind a reverse proxy that handles HTTPS.
+
+### Caddy (recommended)
+
+```Caddyfile
+mcp.example.com {
+    reverse_proxy mcp-orchestrator:8080
+}
+```
+
+Run with `caddy run --config Caddyfile`. Caddy automatically obtains and renews Let's Encrypt certificates.
+
+### nginx
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name mcp.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
+
+    location / {
+        proxy_pass         http://mcp-orchestrator:8080;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+After enabling TLS, set `BASE_URL=https://mcp.example.com` so generated URLs and webhooks use the correct scheme.
+
+### Admin endpoints
+
+Admin endpoints (`/admin/*`) are protected by `ADMIN_API_KEY`. Keep them behind the same TLS terminator; never expose `/admin` over plain HTTP in production.
 
 ---
 

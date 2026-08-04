@@ -40,63 +40,36 @@ package transport
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/admin"
+	"github.com/sudebaker/mcp-go/internal/auth"
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/health"
+	"github.com/sudebaker/mcp-go/internal/metrics"
 	"github.com/sudebaker/mcp-go/internal/resources"
 	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
-// uploadAPIKey is read from MCP_UPLOAD_API_KEY env var for upload endpoint authentication.
-var uploadAPIKey string
+// uploadKeyHash is the SHA-256 hash of MCP_UPLOAD_API_KEY, pre-computed at startup.
+var uploadKeyHash [32]byte
 
 func init() {
-	uploadAPIKey = os.Getenv("MCP_UPLOAD_API_KEY")
-}
-
-// authMiddleware wraps a handler with API key authentication.
-// Requires header: Authorization: Bearer <api_key>
-// If MCP_UPLOAD_API_KEY is not set, authentication is skipped (for backward compatibility).
-func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth if no key is configured (backward compatibility)
-		if uploadAPIKey == "" {
-			log.Warn().Msg("MCP_UPLOAD_API_KEY not set - /upload endpoint is unprotected")
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		auth := r.Header.Get("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error": "missing or invalid authorization header",
-			})
-			return
-		}
-
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token != uploadAPIKey {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error": "invalid API key",
-			})
-			return
-		}
-
-		next.ServeHTTP(w, r)
+	key := os.Getenv("MCP_UPLOAD_API_KEY")
+	if key != "" {
+		uploadKeyHash = sha256.Sum256([]byte(key))
 	}
 }
 
@@ -118,11 +91,24 @@ type MCPServer struct {
 	filesDir        string                       // Directory for serving generated files via /files/
 	healthChecker   *health.Checker              // Health checker for dependency status
 	resourceManager *resources.ResourceManager   // Resource resolver/token manager
+	adminKey        string                       // ADMIN_API_KEY for admin endpoints (empty = disabled)
+	adminKeyHash    [32]byte                     // SHA-256 of adminKey, pre-computed for time-constant compare
+	db              *sql.DB                      // Database connection for admin endpoints
+	stopCh          chan struct{}
+	stopCleanupOnce sync.Once
+	maxMCPBodySize  int64
 }
 
 // SetResourceManager sets the resource manager used by the MCP server.
 func (s *MCPServer) SetResourceManager(m *resources.ResourceManager) {
 	s.resourceManager = m
+}
+
+// authMiddleware wraps a handler with API key authentication for the upload endpoint.
+// Requires header: Authorization: Bearer <api_key>. If MCP_UPLOAD_API_KEY is not set,
+// authentication is skipped (for backward compatibility).
+func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.Handler {
+	return auth.BearerAuth(uploadKeyHash, auth.OnEmptySkip, next)
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -155,6 +141,12 @@ type MCPConfig struct {
 	FilesDir string
 	// HealthChecker performs health checks against dependencies (nil = no-op)
 	HealthChecker *health.Checker
+	// AdminKey is the ADMIN_API_KEY for admin endpoints (empty = disabled)
+	AdminKey string
+	// DB is the database connection for admin endpoints (nil = admin endpoints disabled)
+	DB *sql.DB
+	// MaxMCPBodySizeMB is max request body size for MCP endpoints (0 = default 10MB)
+	MaxMCPBodySizeMB int64
 }
 
 // NewMCPServer creates a new MCP server with configured transports and middleware.
@@ -211,6 +203,11 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		tracer = tracing.NoOpTracer()
 	}
 
+	var adminKeyHash [32]byte
+	if cfg.AdminKey != "" {
+		adminKeyHash = sha256.Sum256([]byte(cfg.AdminKey))
+	}
+
 	return &MCPServer{
 		mcpServer:      mcpServer,
 		streamServer:   streamServer,
@@ -225,6 +222,11 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		uploadConfig:   cfg.Upload,
 		filesDir:       cfg.FilesDir,
 		healthChecker:  cfg.HealthChecker,
+		adminKey:       cfg.AdminKey,
+		adminKeyHash:   adminKeyHash,
+		db:             cfg.DB,
+		maxMCPBodySize: maxBodySize(cfg.MaxMCPBodySizeMB),
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -265,7 +267,8 @@ func (s *MCPServer) Start() error {
 	mux.HandleFunc("/", s.handleRoot)
 
 	// Upload endpoint (POST /upload) - protected with API key auth
-	mux.HandleFunc("/upload", s.authMiddleware(s.handleUpload))
+	uploadHandler := auth.BearerAuth(uploadKeyHash, auth.OnEmptySkip, http.HandlerFunc(s.handleUpload))
+	mux.Handle("/upload", uploadHandler)
 
 	// Files endpoint (GET /files/{tool}/{filename}) - serve generated files
 	mux.HandleFunc("/files/", s.handleFiles)
@@ -274,12 +277,21 @@ func (s *MCPServer) Start() error {
 	// Not protected by auth middleware; relies on Docker network isolation.
 	mux.HandleFunc("/internal/resource/", s.handleInternalResource)
 
-	// Prepare middleware chain: CORS -> Rate Limiter -> Path Sanitizer -> Mux Handler
+	// Admin endpoints (protected with ADMIN_API_KEY)
+	s.registerAdminRoutes(mux)
+
+	// Start background TTL cleanup goroutine for uploaded files
+	go s.startUploadCleanup()
+
+	// Prepare middleware chain: MaxBody -> CORS -> Rate Limiter -> Path Sanitizer -> Mux Handler
+	bodyMiddleware := MaxBodyMiddleware(s.maxMCPBodySize)
+
 	var streamHandler http.Handler = s.streamServer
 	if s.rateLimiter != nil {
 		streamHandler = s.rateLimiter.Middleware(streamHandler)
 	}
 	streamHandler = CORSMiddleware(s.allowedOrigins)(streamHandler)
+	streamHandler = bodyMiddleware(streamHandler)
 
 	// Build multi-handler chain: first the custom mux, then the SSE/stream handlers
 	// The mux handles health, metrics, upload, files; streamHandler handles MCP SSE/streamable HTTP
@@ -298,6 +310,7 @@ func (s *MCPServer) Start() error {
 		sseHandler = s.rateLimiter.Middleware(sseHandler)
 	}
 	sseHandler = CORSMiddleware(s.allowedOrigins)(sseHandler)
+	sseHandler = bodyMiddleware(sseHandler)
 
 	messageHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		messageServerHandler.ServeHTTP(w, r)
@@ -306,6 +319,7 @@ func (s *MCPServer) Start() error {
 		messageHandler = s.rateLimiter.Middleware(messageHandler)
 	}
 	messageHandler = CORSMiddleware(s.allowedOrigins)(messageHandler)
+	messageHandler = bodyMiddleware(messageHandler)
 
 	// Register handlers
 	// MCP Streamable HTTP endpoint (2025 spec)
@@ -332,8 +346,14 @@ func (s *MCPServer) Start() error {
 			Msg("CORS configured with restricted origin list")
 	}
 
-	// Log transport activation
-	log.Info().Msg("SSE transport active on /sse (GET) and /message (POST)")
+	maxBodyMB := s.maxMCPBodySize / (1024 * 1024)
+	if s.maxMCPBodySize%(1024*1024) != 0 {
+		maxBodyMB = s.maxMCPBodySize / (1024 * 1024)
+	}
+	log.Info().
+		Int64("max_body_bytes", s.maxMCPBodySize).
+		Int64("max_body_mb", maxBodyMB).
+		Msg("SSE transport active on /sse (GET) and /message (POST)")
 
 	// Wrap entire mux with sanitize middleware, tracing and logging middleware
 	var handler http.Handler = sanitizedMux
@@ -350,6 +370,113 @@ func (s *MCPServer) Start() error {
 	}
 
 	return s.httpServer.ListenAndServe()
+}
+
+// registerAdminRoutes sets up admin endpoints with auth, rate limiting, and CORS.
+// Only registers if admin key and DB are configured.
+func (s *MCPServer) registerAdminRoutes(mux *http.ServeMux) {
+	if s.adminKey == "" || s.db == nil {
+		log.Warn().Msg("Admin endpoints disabled: ADMIN_API_KEY or DB not configured")
+		return
+	}
+
+	adminHandler := admin.NewHandler(s.db)
+
+	if err := adminHandler.SetupMigrations(context.Background()); err != nil {
+		log.Error().Err(err).Msg("Failed to apply admin migrations")
+	}
+
+	adminMux := http.NewServeMux()
+	adminMux.HandleFunc("/admin/kb/users", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/admin/kb/users")
+		if r.Method == http.MethodGet {
+			if path == "" || path == "/" {
+				metrics.RecordAdminOperation("list_users", r.Method, "success")
+				adminHandler.ListUsers(w, r)
+			} else if strings.HasSuffix(path, "/export") {
+				metrics.RecordAdminOperation("export_user", r.Method, "success")
+				adminHandler.ExportUser(w, r)
+			} else {
+				metrics.RecordAdminOperation("get_user", r.Method, "success")
+				adminHandler.GetUser(w, r)
+			}
+		} else if r.Method == http.MethodDelete {
+			metrics.RecordAdminOperation("delete_user_data", r.Method, "success")
+			adminHandler.DeleteUserData(w, r)
+		} else {
+			metrics.RecordAdminOperation("users", r.Method, "method_not_allowed")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	adminMux.HandleFunc("/admin/kb/users/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/admin/kb/users/")
+		if strings.Contains(path, "/collections/") {
+			if r.Method == http.MethodDelete {
+				metrics.RecordAdminOperation("delete_user_collection", r.Method, "success")
+				adminHandler.DeleteUserCollection(w, r)
+			} else {
+				metrics.RecordAdminOperation("delete_user_collection", r.Method, "method_not_allowed")
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		} else if strings.HasSuffix(path, "/export") {
+			metrics.RecordAdminOperation("export_user", r.Method, "success")
+			adminHandler.ExportUser(w, r)
+		} else if r.Method == http.MethodGet {
+			metrics.RecordAdminOperation("get_user", r.Method, "success")
+			adminHandler.GetUser(w, r)
+		} else if r.Method == http.MethodDelete {
+			metrics.RecordAdminOperation("delete_user_data", r.Method, "success")
+			adminHandler.DeleteUserData(w, r)
+		} else {
+			metrics.RecordAdminOperation("users", r.Method, "method_not_allowed")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	adminMux.HandleFunc("/admin/kb/collections/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			metrics.RecordAdminOperation("delete_global_collection", r.Method, "success")
+			adminHandler.DeleteGlobalCollection(w, r)
+		} else {
+			metrics.RecordAdminOperation("delete_global_collection", r.Method, "method_not_allowed")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	adminMux.HandleFunc("/admin/audit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			metrics.RecordAdminOperation("audit_log", r.Method, "success")
+			adminHandler.AuditLog(w, r)
+		} else {
+			metrics.RecordAdminOperation("audit_log", r.Method, "method_not_allowed")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	adminMux.HandleFunc("/admin/audit/", func(w http.ResponseWriter, r *http.Request) {
+		metrics.RecordAdminOperation("audit_log", r.Method, "success")
+		adminHandler.AuditLog(w, r)
+	})
+
+	adminGetLimiter := NewRateLimiter(1.0, 60)
+	adminDeleteLimiter := NewRateLimiter(0.17, 10)
+	rateLimitedAdminMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			adminGetLimiter.Middleware(adminMux).ServeHTTP(w, r)
+		case http.MethodDelete:
+			adminDeleteLimiter.Middleware(adminMux).ServeHTTP(w, r)
+		default:
+			adminMux.ServeHTTP(w, r)
+		}
+	})
+
+	handler := auth.BearerAuth(s.adminKeyHash, auth.OnEmpty503, rateLimitedAdminMux)
+	handler = AdminCORSMiddleware(s.allowedOrigins)(handler)
+
+	if s.adminKey != "" && len(s.allowedOrigins) == 0 {
+		log.Warn().Msg("ADMIN_API_KEY is set but CORS allowed_origins is empty — admin endpoints accessible from any origin")
+	}
+
+	mux.Handle("/admin/", handler)
+	log.Info().Msg("Admin endpoints enabled on /admin/")
 }
 
 // Shutdown gracefully shuts down the server.

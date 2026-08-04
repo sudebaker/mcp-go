@@ -146,16 +146,16 @@ func TestResourceHandler_RegisterForSession(t *testing.T) {
 
 // testSession implements server.ClientSession for testing.
 type testSession struct {
-	id   string
-	ch   chan mcp.JSONRPCNotification
+	id string
+	ch chan mcp.JSONRPCNotification
 }
 
 func newTestSession(id string) *testSession {
 	return &testSession{id: id, ch: make(chan mcp.JSONRPCNotification, 10)}
 }
 
-func (s *testSession) SessionID() string          { return s.id }
-func (s *testSession) Initialize()                {}
-func (s *testSession) Initialized() bool          { return true }
+func (s *testSession) SessionID() string                                   { return s.id }
+func (s *testSession) Initialize()                                         {}
+func (s *testSession) Initialized() bool                                   { return true }
 func (s *testSession) NotificationChannel() chan<- mcp.JSONRPCNotification { return s.ch }
-func (s *testSession) Close() error               { return nil }
+func (s *testSession) Close() error                                        { return nil }

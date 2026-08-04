@@ -32,7 +32,7 @@ services:
       CRAWL4AI_URL: ${CRAWL4AI_URL:-http://crawl4ai:11235}
       CRAWL4AI_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
-      SSRF_ALLOWLIST: ${SSRF_ALLOWLIST}
+      SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-rustfs}
       LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY}
@@ -51,6 +51,9 @@ services:
       MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD}
       MCP_TOOLSET: ${MCP_TOOLSET:-default}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - mcp-data:/data
     # memgraph y opensearch solo se levantan con --profile ocu-investigacion.
@@ -279,6 +282,9 @@ services:
     shm_size: "1gb"
     environment:
       CRAWL4AI_API_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     networks:
       - mcp-external
     deploy:
@@ -306,6 +312,9 @@ services:
     environment:
       - BASE_URL=http://searxng:8080
       - INSTANCE_NAME=SearXNG-MCP
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
     networks:

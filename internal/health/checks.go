@@ -409,7 +409,8 @@ func (c *Checker) checkDependency(ctx context.Context, dep DependencyCheck) Chec
 
 	// TCP dial with 2-second timeout
 	d := net.Dialer{Timeout: 2 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", dep.URL)
+	hostPort := extractHostPort(dep.URL)
+	conn, err := d.DialContext(ctx, "tcp", hostPort)
 	if err != nil {
 		result.Status = StatusUnhealthy
 		result.Message = fmt.Sprintf("%s unreachable at %s: %v", dep.Name, dep.URL, err)
@@ -445,7 +446,8 @@ func (c *Checker) CheckDependencies(ctx context.Context) []DependencyStatus {
 			dStatus.Error = "URL not configured"
 		} else {
 			d := net.Dialer{Timeout: 2 * time.Second}
-			conn, err := d.DialContext(ctx, "tcp", dep.URL)
+			hostPort := extractHostPort(dep.URL)
+			conn, err := d.DialContext(ctx, "tcp", hostPort)
 			if err != nil {
 				dStatus.Reachable = false
 				dStatus.Error = err.Error()

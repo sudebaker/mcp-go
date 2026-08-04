@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -350,5 +351,60 @@ func TestExtractHostPort(t *testing.T) {
 				t.Errorf("extractHostPort(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCheckDependency_URLWithScheme(t *testing.T) {
+	// Start a local TCP listener so the dependency is actually reachable.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer ln.Close()
+
+	checker := NewChecker(nil, nil, nil, nil)
+	dep := DependencyCheck{
+		Name: "reachable-with-scheme",
+		// Pass a full URL with scheme; checkDependency must extract host:port before dialing.
+		URL:  "http://" + ln.Addr().String(),
+		Tool: "test_tool",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	result := checker.checkDependency(ctx, dep)
+	if result.Status != StatusHealthy {
+		t.Errorf("expected healthy for reachable http:// URL, got %s: %s", result.Status, result.Message)
+	}
+	if result.Name != "reachable-with-scheme" {
+		t.Errorf("expected name 'reachable-with-scheme', got %s", result.Name)
+	}
+}
+
+func TestCheckDependencies_URLWithScheme(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer ln.Close()
+
+	deps := []DependencyCheck{
+		{Name: "reachable-with-scheme", URL: "http://" + ln.Addr().String(), Tool: "test_tool"},
+	}
+	checker := NewChecker(nil, nil, nil, deps)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	statuses := checker.CheckDependencies(ctx)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+	if !statuses[0].Reachable {
+		t.Errorf("expected reachable-with-scheme to be reachable, got error: %s", statuses[0].Error)
+	}
+	if statuses[0].URL != "http://"+ln.Addr().String() {
+		t.Errorf("expected URL to be preserved, got %s", statuses[0].URL)
 	}
 }

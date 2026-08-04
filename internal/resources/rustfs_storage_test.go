@@ -90,4 +90,37 @@ func TestNewRustFSStorage_EnvironmentVariables(t *testing.T) {
 	}
 }
 
+func TestRustfsEndpoint_Normalization(t *testing.T) {
+	cases := []struct {
+		in     string
+		host   string
+		secure bool
+	}{
+		{"rustfs:9000", "rustfs:9000", false},
+		{"http://rustfs:9000", "rustfs:9000", false},
+		{"https://rustfs:9000", "rustfs:9000", true},
+		{"http://192.168.52.40:9000", "192.168.52.40:9000", false},
+		{"https://files.example.com:9000", "files.example.com:9000", true},
+		{"rustfs:9000/path", "rustfs:9000", false},
+	}
+	for _, tc := range cases {
+		host, secure, err := rustfsEndpoint(tc.in)
+		if err != nil {
+			t.Fatalf("rustfsEndpoint(%q) unexpected error: %v", tc.in, err)
+		}
+		if host != tc.host {
+			t.Errorf("rustfsEndpoint(%q) host = %q, want %q", tc.in, host, tc.host)
+		}
+		if secure != tc.secure {
+			t.Errorf("rustfsEndpoint(%q) secure = %v, want %v", tc.in, secure, tc.secure)
+		}
+	}
+}
+
+func TestRustfsEndpoint_Errors(t *testing.T) {
+	if _, _, err := rustfsEndpoint("http://"); err == nil {
+		t.Error("rustfsEndpoint(\"http://\") expected error, got nil")
+	}
+}
+
 var _ Storage = (*RustFSStorage)(nil)

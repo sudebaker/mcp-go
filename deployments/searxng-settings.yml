@@ -1708,7 +1708,6 @@ engines:
     shortcut: ps
     timeout: 4.0
     disabled: true
-    inactive: true
 
   - name: presearch images
     engine: presearch
@@ -1843,7 +1842,6 @@ engines:
     shortcut: re
     page_size: 25
     disabled: true
-    inactive: true
 
   - name: reuters
     engine: reuters
@@ -2546,7 +2544,6 @@ engines:
     shortcut: svg
     timeout: 10.0
     disabled: true
-    inactive: true
 
   - name: tootfinder
     engine: tootfinder

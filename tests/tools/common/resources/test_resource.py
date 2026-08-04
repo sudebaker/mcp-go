@@ -1,7 +1,11 @@
 import json
+import os
+import sys
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../.."))
 
 import pytest
 

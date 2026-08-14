@@ -1,6 +1,5 @@
 name: browser_scraper
-description: Scraping con Crawl4ai para páginas JS-heavy o anti-bot. Produce markdown optimizado para LLM. Usar si web_scraper falla.
-  si web_scraper falla.
+description: Scraping con Crawl4ai para páginas JS-heavy o anti-bot. Produce markdown optimizado para LLM. Si Crawl4ai falla (HTTP 5xx, timeout, conexión), reintenta automáticamente con backoff exponencial y luego hace fallback a web_scraper (HTTP+BS4) para garantizar resultado siempre que sea posible.
 command: python3
 args:
 - main.py

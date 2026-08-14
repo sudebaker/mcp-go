@@ -3,6 +3,9 @@
 Browser Scraper Tool for MCP Orchestrator.
 Uses Crawl4ai REST API to render JavaScript-heavy pages and extract
 LLM-optimized markdown or raw HTML.
+
+Implements retry with exponential backoff and automatic fallback to
+web_scraper (simple HTTP+BS4) when Crawl4ai fails.
 """
 
 import ipaddress
@@ -10,7 +13,9 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
+import time
 from urllib.parse import urlparse
 from typing import Any, Optional
 
@@ -39,6 +44,11 @@ MIN_WAIT_MS = 0
 MIN_MAX_CHARS = 100
 MAX_OUTPUT_CHARS = 50000
 MAX_SELECTOR_LENGTH = 256
+
+# Retry and fallback settings
+CRAWL4AI_MAX_RETRIES = 2           # Total attempts: 1 initial + 1 retry
+CRAWL4AI_RETRY_DELAY_BASE = 2.0    # Base delay in seconds (doubles each retry)
+CRAWL4AI_FALLBACK_ENABLED = True   # Auto-fallback to web_scraper on Crawl4ai failure
 
 
 def _is_public_host(hostname: str) -> bool:
@@ -145,7 +155,12 @@ def fetch_with_crawl4ai(
     extract_type: str = "text",
     max_chars: int = 5000,
 ) -> tuple[Optional[dict], Optional[str]]:
-    """Fetch a page using Crawl4ai REST API and return parsed result."""
+    """Fetch a page using Crawl4ai REST API and return parsed result.
+
+    Implements retry with exponential backoff for transient failures
+    (HTTP 500, 502, 503, 504, connection errors, timeouts).
+    Retries once after a short delay, increasing wait_ms on retry.
+    """
     if not REQUESTS_AVAILABLE:
         return None, "requests library not available"
 
@@ -182,62 +197,207 @@ def fetch_with_crawl4ai(
     # Build headers
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if BROWSERLESS_TOKEN:
-        # Try Bearer token (v0.9 secure-by-default)
         headers["Authorization"] = f"Bearer {BROWSERLESS_TOKEN}"
 
     # Try /crawl endpoint first (most capable)
     crawl_url = f"{BROWSERLESS_URL.rstrip('/')}/crawl"
 
-    try:
-        response = requests.post(
-            crawl_url,
-            headers=headers,
-            json=payload,
-            timeout=DEFAULT_TIMEOUT + 10,
-        )
+    last_error: Optional[str] = None
+    retryable_codes = {500, 502, 503, 504}
 
-        if response.status_code == 200:
-            data = response.json()
-            # Crawl4ai returns a list of results (one per URL)
-            if isinstance(data, list) and len(data) > 0:
-                return data[0], None
-            elif isinstance(data, dict):
-                # v0.9 wraps results in {success, results, ...}
-                if "results" in data and isinstance(data["results"], list) and len(data["results"]) > 0:
-                    return data["results"][0], None
-                return data, None
-            return None, "Unexpected response format from Crawl4ai"
+    for attempt in range(1, CRAWL4AI_MAX_RETRIES + 1):
+        try:
+            # Increase wait time on retries to give Crawl4ai more render time
+            if attempt > 1:
+                retry_delay = CRAWL4AI_RETRY_DELAY_BASE * (2 ** (attempt - 2))
+                logger.info(
+                    "Crawl4ai retry",
+                    extra_data={
+                        "attempt": attempt,
+                        "url": url,
+                        "delay_s": retry_delay,
+                    },
+                )
+                time.sleep(retry_delay)
 
-        # Auth error — try query param token (MCP clients that can't set headers)
-        if response.status_code in (401, 403) and BROWSERLESS_TOKEN:
-            token_url = f"{crawl_url}?token={BROWSERLESS_TOKEN}"
             response = requests.post(
-                token_url,
-                headers={"Content-Type": "application/json"},
+                crawl_url,
+                headers=headers,
                 json=payload,
                 timeout=DEFAULT_TIMEOUT + 10,
             )
+
             if response.status_code == 200:
                 data = response.json()
+                # Crawl4ai returns a list of results (one per URL)
                 if isinstance(data, list) and len(data) > 0:
                     return data[0], None
                 elif isinstance(data, dict):
+                    # v0.9 wraps results in {success, results, ...}
                     if "results" in data and isinstance(data["results"], list) and len(data["results"]) > 0:
                         return data["results"][0], None
                     return data, None
+                return None, "Unexpected response format from Crawl4ai"
 
-        return None, f"Crawl4ai returned HTTP {response.status_code}: {response.text[:200]}"
+            # Auth error — try query param token (MCP clients that can't set headers)
+            if response.status_code in (401, 403) and BROWSERLESS_TOKEN:
+                token_url = f"{crawl_url}?token={BROWSERLESS_TOKEN}"
+                response = requests.post(
+                    token_url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=DEFAULT_TIMEOUT + 10,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        return data[0], None
+                    elif isinstance(data, dict):
+                        if "results" in data and isinstance(data["results"], list) and len(data["results"]) > 0:
+                            return data["results"][0], None
+                        return data, None
 
-    except requests.exceptions.Timeout:
-        return None, "Crawl4ai request timed out"
-    except requests.exceptions.ConnectionError as e:
-        return None, f"Cannot connect to Crawl4ai: {str(e)}"
+            last_error = f"Crawl4ai returned HTTP {response.status_code}: {response.text[:200]}"
+
+            # Only retry on server errors (5xx), not client errors (4xx except 401/403)
+            if response.status_code not in retryable_codes:
+                # Non-retryable error — return immediately
+                return None, last_error
+
+            logger.warning(
+                "Crawl4ai server error, will retry",
+                extra_data={
+                    "attempt": attempt,
+                    "status_code": response.status_code,
+                    "url": url,
+                },
+            )
+
+        except requests.exceptions.Timeout:
+            last_error = "Crawl4ai request timed out"
+            logger.warning(
+                "Crawl4ai timeout, will retry",
+                extra_data={"attempt": attempt, "url": url},
+            )
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Cannot connect to Crawl4ai: {str(e)}"
+            logger.warning(
+                "Crawl4ai connection error, will retry",
+                extra_data={"attempt": attempt, "url": url},
+            )
+        except Exception as e:
+            logger.error(
+                "Unexpected Crawl4ai fetch error",
+                extra_data={"error": str(e), "url": url},
+            )
+            return None, f"Crawl4ai fetch failed: {str(e)}"
+
+    # All retries exhausted
+    return None, last_error or "Crawl4ai fetch failed after retries"
+
+
+def fallback_to_web_scraper(
+    url: str,
+    selector: Optional[str],
+    extract_type: str,
+    max_chars: int,
+    crawl4ai_error: str,
+) -> tuple[bool, Optional[dict]]:
+    """Attempt to scrape the URL using web_scraper as a fallback.
+
+    Invokes web_scraper/main.py as a subprocess with a JSON request,
+    matching the MCP tool protocol. Returns (success, result_or_none).
+    """
+    if not CRAWL4AI_FALLBACK_ENABLED:
+        logger.info("Crawl4ai fallback disabled, skipping web_scraper")
+        return False, None
+
+    logger.info(
+        "Falling back to web_scraper",
+        extra_data={"url": url, "crawl4ai_error": crawl4ai_error},
+    )
+
+    # Build the request payload matching web_scraper's expected input
+    fallback_type = "text" if extract_type in ("text", "html") else "text"
+    request_payload = {
+        "request_id": f"fallback-{int(time.time())}",
+        "arguments": {
+            "url": url,
+            "selector": selector or "",
+            "extract_type": fallback_type,
+        },
+        "context": {},
+    }
+
+    web_scraper_path = os.path.join(os.path.dirname(__file__), "..", "web_scraper", "main.py")
+
+    try:
+        result = subprocess.run(
+            [sys.executable, web_scraper_path],
+            input=json.dumps(request_payload),
+            capture_output=True,
+            text=True,
+            timeout=45,  # web_scraper timeout is 30s, add margin
+        )
+
+        if result.returncode != 0:
+            logger.warning(
+                "web_scraper fallback failed",
+                extra_data={
+                    "returncode": result.returncode,
+                    "stderr": result.stderr[:200] if result.stderr else "",
+                },
+            )
+            return False, None
+
+        response_data = json.loads(result.stdout)
+
+        if response_data.get("success"):
+            # web_scraper succeeded — return its response structure
+            # but tag it so the caller knows it came from fallback
+            structured = response_data.get("structured_content", {})
+            structured["fallback"] = True
+            structured["fallback_reason"] = crawl4ai_error[:200]
+
+            content_list = response_data.get("content", [])
+            content_text = content_list[0].get("text", "") if content_list else ""
+
+            # Truncate content to max_chars
+            if len(content_text) > max_chars:
+                content_text = content_text[:max_chars] + "\n\n[...]"
+
+            # Re-wrap into browser_scraper response format
+            title = structured.get("title", "")
+            fallback_result = {
+                "markdown": content_text,
+                "metadata": {"title": title, "source_url": url},
+                "fit_html": "",
+            }
+            logger.info(
+                "web_scraper fallback succeeded",
+                extra_data={"url": url, "content_len": len(content_text)},
+            )
+            return True, fallback_result
+        else:
+            error_info = response_data.get("error", {})
+            logger.warning(
+                "web_scraper fallback returned error",
+                extra_data={"error": error_info},
+            )
+            return False, None
+
+    except subprocess.TimeoutExpired:
+        logger.warning("web_scraper fallback timed out", extra_data={"url": url})
+        return False, None
+    except json.JSONDecodeError:
+        logger.warning("web_scraper fallback returned invalid JSON", extra_data={"url": url})
+        return False, None
     except Exception as e:
         logger.error(
-            "Unexpected Crawl4ai fetch error",
+            "web_scraper fallback exception",
             extra_data={"error": str(e), "url": url},
         )
-        return None, f"Crawl4ai fetch failed: {str(e)}"
+        return False, None
 
 
 def get_page_title_from_result(result: dict) -> str:
@@ -387,24 +547,39 @@ def main() -> None:
             url, wait_ms=wait_ms, selector=selector,
             extract_type=extract_type, max_chars=max_chars,
         )
-        if fetch_error:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {"code": "CRAWL4AI_FETCH_FAILED", "message": fetch_error},
-            })
-            return
 
-        if result is None:
-            write_response({
-                "success": False,
-                "request_id": request_id,
-                "error": {
-                    "code": "CRAWL4AI_FETCH_FAILED",
-                    "message": "No content returned by Crawl4ai",
-                },
-            })
-            return
+        # If Crawl4ai failed, try fallback to web_scraper (HTTP+BS4)
+        if fetch_error or result is None:
+            error_msg = fetch_error or "No content returned by Crawl4ai"
+            logger.warning(
+                "Crawl4ai failed, attempting fallback",
+                extra_data={"url": url, "error": error_msg},
+            )
+
+            fallback_ok, fallback_result = fallback_to_web_scraper(
+                url=url,
+                selector=selector,
+                extract_type=extract_type,
+                max_chars=max_chars,
+                crawl4ai_error=error_msg,
+            )
+
+            if fallback_ok and fallback_result is not None:
+                # Fallback succeeded — use its result
+                result = fallback_result
+                fetch_error = None
+                # Mark that we used the fallback in structured_content
+                fallback_used = True
+            else:
+                # Both Crawl4ai and fallback failed — return the original error
+                write_response({
+                    "success": False,
+                    "request_id": request_id,
+                    "error": {"code": "CRAWL4AI_FETCH_FAILED", "message": error_msg},
+                })
+                return
+        else:
+            fallback_used = False
 
         # Extract title
         title = get_page_title_from_result(result)
@@ -437,6 +612,7 @@ def main() -> None:
                 "extract_type": extract_type,
                 "selector_used": selector,
                 "char_count": len(data) if data else 0,
+                "fallback": fallback_used,
             },
         })
 

@@ -1,0 +1,29 @@
+version: "2"
+
+# Gate real y verde hoy: main tenia 68 hallazgos con los linters por defecto, asi
+# que se activa solo el conjunto que pasa limpio en todo el arbol. Los pendientes
+# (con su recuento en main, 2026-10) se anaden cuando la deuda se salde — ver
+# docs/DEVELOPMENT.md o el issue de CI:
+#   errcheck 50 · revive 50 · gosec 25 · staticcheck 13 · gocritic 7 · unused 5
+# Activar cualquiera de ellos antes de limpiar la deuda pone el CI en rojo el
+# primer dia, y un CI rojo permanentemente no es una puerta.
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - misspell
+    - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  tests: true

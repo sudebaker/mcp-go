@@ -27,7 +27,10 @@ services:
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
       LLM_VISION_API_URL: ${LLM_VISION_API_URL}
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required (see deployments/.env.example)}
+      # DATABASE_URL se construye aqui desde POSTGRES_*: una sola fuente de verdad
+      # para el password (antes era un literal duplicado en .env que podia
+      # desincronizarse). El host `postgres` es el nombre del servicio interno.
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
       FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/data/fastembed}
       CRAWL4AI_URL: ${CRAWL4AI_URL:-http://crawl4ai:11235}
       CRAWL4AI_TOKEN: ${CRAWL4AI_TOKEN:?CRAWL4AI_TOKEN is required - generate with openssl rand -hex 32}

@@ -77,7 +77,13 @@ docker-compose -f deployments/docker-compose.yml ps
 # Required
 LLM_API_URL=http://localhost:11434
 LLM_MODEL=llama3
-DATABASE_URL=postgresql://mcp:***@localhost:5432/knowledge
+
+# PostgreSQL — DATABASE_URL is NOT set here: docker-compose.yml builds it from
+# these three (internal host `postgres:5432`), so the password has a single
+# source of truth. Keep POSTGRES_PASSWORD URL-safe ([A-Za-z0-9._-]).
+POSTGRES_USER=mcp
+POSTGRES_PASSWORD=change_me
+POSTGRES_DB=knowledge
 
 # RustFS/S3 (required for storage tools)
 RUSTFS_ENDPOINT=http://rustfs:9000

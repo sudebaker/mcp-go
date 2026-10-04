@@ -20,6 +20,25 @@ server:
   #   - "https://lobe-chat.mycompany.com"
   #   - "https://another-client.example.com"
 
+# auth declares the keyring used to authenticate MCP clients.
+#
+# MCP_AUTH_MODE is the single switch that decides whether these keys are
+# enforced: "required" (the default when the variable is unset) or "off" for
+# isolated local development.
+#
+# Tokens are never written in this file. Each entry names the environment
+# variable that holds its token, and the server keeps only sha256(token) ->
+# user_id at runtime. Every key_env listed here MUST be set and non-empty, or
+# the server refuses to start.
+auth:
+  keys:
+    - user_id: amphora
+      key_env: MCP_AUTH_KEY_AMPHORA
+    # MCP_UPLOAD_API_KEY is declared as a keyring entry so the /upload endpoint
+    # shares the single auth switch instead of having an on/off rule of its own.
+    - user_id: legacy-upload
+      key_env: MCP_UPLOAD_API_KEY
+
 execution:
   default_timeout: "60s"
   working_dir: "/data"

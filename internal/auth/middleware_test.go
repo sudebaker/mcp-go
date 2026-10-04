@@ -134,25 +134,6 @@ func TestBearerAuth_WrongScheme(t *testing.T) {
 	}
 }
 
-func TestBearerAuth_OnEmptySkip(t *testing.T) {
-	called := false
-	handler := BearerAuth([32]byte{}, OnEmptySkip, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if !called {
-		t.Error("next handler was not called")
-	}
-}
-
 func TestBearerAuth_OnEmpty503(t *testing.T) {
 	handler := BearerAuth([32]byte{}, OnEmpty503, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")

@@ -44,6 +44,25 @@ upload:
     - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
     - application/vnd.ms-excel
 
+# auth declares the keyring used to authenticate MCP clients.
+#
+# MCP_AUTH_MODE is the single switch that decides whether these keys are
+# enforced: "required" (the default when the variable is unset) or "off" for
+# isolated local development.
+#
+# Tokens are never written in this file. Each entry names the environment
+# variable that holds its token, and the server keeps only sha256(token) ->
+# user_id at runtime. Every key_env listed here MUST be set and non-empty, or
+# the server refuses to start.
+auth:
+  keys:
+    - user_id: amphora
+      key_env: MCP_AUTH_KEY_AMPHORA
+    # MCP_UPLOAD_API_KEY is declared as a keyring entry so the /upload endpoint
+    # shares the single auth switch instead of having an on/off rule of its own.
+    - user_id: legacy-upload
+      key_env: MCP_UPLOAD_API_KEY
+
 execution:
   default_timeout: "60s"
   working_dir: "/data"
@@ -221,7 +240,7 @@ tools:
 
   # Knowledge Base - Ingest
   - name: "kb_ingest"
-    description: "Stores text in the knowledge base for future semantic search. Use to memorize facts, preferences, decisions, or any information the user wants the bot to remember across conversations. Returns a confirmation with the stored content ID. user_id is automatically injected from the MCP session context (capabilities.experimental.user_id) for data isolation. If the MCP client does not send user_id, all data defaults to 'anonymous' — shared across sessions. No user_id parameter is needed in the tool call."
+    description: "Stores text in the knowledge base for future semantic search. Use to memorize facts, preferences, decisions, or any information the user wants the bot to remember across conversations. Returns a confirmation with the stored content ID. user_id is automatically injected from the authenticated MCP session (derived from the caller's bearer token) for data isolation. If the session carries no identity (MCP_AUTH_MODE=off), all data defaults to 'anonymous' — shared across sessions. No user_id parameter is needed in the tool call."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "ingest"]
     timeout: "300s"
@@ -246,7 +265,7 @@ tools:
 
   # Knowledge Base - Search
   - name: "kb_search"
-    description: "Searches the knowledge base for relevant facts using semantic similarity. Use when the user asks about something previously discussed, their preferences, past decisions, or any memorized information. Returns ranked results with relevance scores. user_id is automatically injected from the MCP session context (capabilities.experimental.user_id) for data isolation. If the MCP client does not send user_id, searches default to 'anonymous' — returning all shared data. No user_id parameter is needed in the tool call."
+    description: "Searches the knowledge base for relevant facts using semantic similarity. Use when the user asks about something previously discussed, their preferences, past decisions, or any memorized information. Returns ranked results with relevance scores. user_id is automatically injected from the authenticated MCP session (derived from the caller's bearer token) for data isolation. If the session carries no identity (MCP_AUTH_MODE=off), searches default to 'anonymous' — returning all shared data. No user_id parameter is needed in the tool call."
     command: "python3"
     args: ["/app/tools/knowledge_base/main.py", "search"]
     timeout: "60s"

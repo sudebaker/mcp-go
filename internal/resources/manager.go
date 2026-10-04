@@ -84,6 +84,20 @@ func (m *ResourceManager) resolveUser(sessionID string) (string, error) {
 	return userID, nil
 }
 
+// OwnerOf returns the user_id that owns an MCP session, resolved by the same
+// store PutForUser uses to choose a namespace.
+//
+// It lets a caller verify that the session a request names belongs to the
+// caller's own identity before any bytes are written; keeping the lookup here
+// means the check can never drift from the rule that decides the destination.
+func (m *ResourceManager) OwnerOf(sessionID string) (string, bool) {
+	userID, err := m.resolveUser(sessionID)
+	if err != nil {
+		return "", false
+	}
+	return userID, true
+}
+
 func (m *ResourceManager) ResolveForTool(ctx context.Context, sessionID, rawArg string) (Resource, error) {
 	userID, err := m.resolveUser(sessionID)
 	if err != nil {

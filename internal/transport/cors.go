@@ -39,6 +39,11 @@ func MaxBodyMiddleware(maxSize int64) func(http.Handler) http.Handler {
 // list, it responds with HTTP 403 Forbidden as required by the MCP spec.
 // If allowed origins is empty, it reflects the request origin (permissive mode).
 //
+// Authorization is in the allowed request headers and Mcp-Session-Id is in the
+// exposed response headers on purpose: the MCP endpoints authenticate with a
+// bearer token and hand the session id back to the client, and neither is
+// available to a browser without those two lists.
+//
 // In restricted mode (non-empty allowed list), disallowed origins are rejected with 403
 // before the inner handler runs, so there is no risk of the handler overwriting CORS
 // headers. In permissive mode (empty list), the handler may set conflicting CORS headers,
@@ -86,7 +91,16 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", corsOrigin)
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID")
+				// Authorization is required now that the MCP endpoints are
+				// bearer-authenticated: without it every cross-origin request
+				// dies in the preflight and the client never sees the 401/503
+				// that the auth middleware produces.
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID")
+				// A browser can only read response headers listed here. Without
+				// Mcp-Session-Id a JS client completes initialize and then has
+				// no session id to send back, so every request starts a new
+				// session.
+				w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, X-Request-ID")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 			}
 

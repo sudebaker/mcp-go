@@ -1,5 +1,11 @@
 # Local development configuration
-# Usage: go run ./cmd/server -config configs/config.local.yaml
+#
+# Usage: MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
+#
+# There is no auth section here on purpose. MCP_AUTH_MODE is the single auth
+# switch and this profile is loopback-only development, so it runs with "off".
+# Starting it with the default MCP_AUTH_MODE=required aborts: a required keyring
+# with no keys is refused rather than silently ignored.
 
 server:
   host: "127.0.0.1"

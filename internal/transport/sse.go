@@ -12,11 +12,15 @@
 //
 // # Middleware Chain
 //
-// The middleware is applied in this order for each request:
+// For /mcp, /sse, /message and /upload the middleware is applied in this order:
 //
 //	Client Request
 //	    ↓
-//	CORS Middleware (origin validation)
+//	Max Body Size (reject oversized payloads)
+//	    ↓
+//	CORS Middleware (origin validation, preflight)
+//	    ↓
+//	Keyring Auth (bearer token → user_id, or 401/503)
 //	    ↓
 //	Rate Limiter (requests per second)
 //	    ↓
@@ -25,6 +29,19 @@
 //	Logging Middleware (request/response logging)
 //	    ↓
 //	MCPServer Handler
+//
+// CORS sits outside auth so preflights work and a disallowed origin is rejected
+// before any credential is considered. /upload uses the same keyring without the
+// rate limiter or the body-size wrapper.
+//
+// # Authentication
+//
+// MCP_AUTH_MODE is the single switch: "required" (default) demands a bearer
+// token on /mcp, /sse, /message and /upload, "off" disables authentication for
+// isolated local development. Tokens are declared in configs/config.yaml as
+// auth.keys entries and read from the environment at startup; the server keeps
+// sha256(token) → user_id only. The resolved user_id is bound to the request
+// context and, on initialize, to the MCP session.
 //
 // # Endpoint Summary
 //
@@ -63,16 +80,6 @@ import (
 	"github.com/sudebaker/mcp-go/internal/tracing"
 )
 
-// uploadKeyHash is the SHA-256 hash of MCP_UPLOAD_API_KEY, pre-computed at startup.
-var uploadKeyHash [32]byte
-
-func init() {
-	key := os.Getenv("MCP_UPLOAD_API_KEY")
-	if key != "" {
-		uploadKeyHash = sha256.Sum256([]byte(key))
-	}
-}
-
 // MCPServer wraps the mcp-go library server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
@@ -91,6 +98,7 @@ type MCPServer struct {
 	filesDir        string                       // Directory for serving generated files via /files/
 	healthChecker   *health.Checker              // Health checker for dependency status
 	resourceManager *resources.ResourceManager   // Resource resolver/token manager
+	keyring         *auth.Keyring                // Bearer-token keyring for /mcp, /sse, /message, /upload
 	adminKey        string                       // ADMIN_API_KEY for admin endpoints (empty = disabled)
 	adminKeyHash    [32]byte                     // SHA-256 of adminKey, pre-computed for time-constant compare
 	db              *sql.DB                      // Database connection for admin endpoints
@@ -104,11 +112,13 @@ func (s *MCPServer) SetResourceManager(m *resources.ResourceManager) {
 	s.resourceManager = m
 }
 
-// authMiddleware wraps a handler with API key authentication for the upload endpoint.
-// Requires header: Authorization: Bearer <api_key>. If MCP_UPLOAD_API_KEY is not set,
-// authentication is skipped (for backward compatibility).
+// authMiddleware wraps a handler with the MCP keyring.
+//
+// MCP_UPLOAD_API_KEY is declared as an ordinary keyring entry (user_id
+// legacy-upload), so /upload shares the single auth switch — MCP_AUTH_MODE —
+// with /mcp, /sse and /message instead of having its own on/off rule.
 func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.Handler {
-	return auth.BearerAuth(uploadKeyHash, auth.OnEmptySkip, next)
+	return auth.KeyringAuth(s.keyring, next)
 }
 
 // MCPConfig holds configuration for creating a new MCPServer.
@@ -141,6 +151,10 @@ type MCPConfig struct {
 	FilesDir string
 	// HealthChecker performs health checks against dependencies (nil = no-op)
 	HealthChecker *health.Checker
+	// Auth is the bearer-token keyring guarding /mcp, /sse, /message and /upload.
+	// A keyring that is disabled (MCP_AUTH_MODE=off) passes requests through
+	// without an identity; nil fails closed.
+	Auth *auth.Keyring
 	// AdminKey is the ADMIN_API_KEY for admin endpoints (empty = disabled)
 	AdminKey string
 	// DB is the database connection for admin endpoints (nil = admin endpoints disabled)
@@ -229,12 +243,40 @@ func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
 		uploadConfig:   cfg.Upload,
 		filesDir:       cfg.FilesDir,
 		healthChecker:  cfg.HealthChecker,
+		keyring:        cfg.Auth,
 		adminKey:       cfg.AdminKey,
 		adminKeyHash:   adminKeyHash,
 		db:             cfg.DB,
 		maxMCPBodySize: maxBodySize(cfg.MaxMCPBodySizeMB),
 		stopCh:         make(chan struct{}),
 	}
+}
+
+// mcpEndpointMiddleware builds the middleware chain shared by /mcp, /sse and
+// /message, from the outside in:
+//
+//	body limit → CORS → auth → rate limiter → handler
+//
+// CORS is deliberately outside auth:
+//   - a preflight (OPTIONS) must be answered before a bearer token is demanded,
+//     otherwise browsers cannot negotiate with a protected server;
+//   - an origin outside the allow-list is rejected with 403 before the token is
+//     even read, so the origin decision does not depend on the credential.
+//
+// Auth is outside the rate limiter so that unauthenticated traffic cannot
+// consume the request budget of legitimate clients.
+//
+// All three MCP endpoints go through this one function so their auth, CORS and
+// throttle policy cannot drift apart between the modern and legacy transports.
+func (s *MCPServer) mcpEndpointMiddleware(next http.Handler) http.Handler {
+	handler := next
+	if s.rateLimiter != nil {
+		handler = s.rateLimiter.Middleware(handler)
+	}
+	handler = auth.KeyringAuth(s.keyring, handler)
+	handler = CORSMiddleware(s.allowedOrigins)(handler)
+	handler = MaxBodyMiddleware(s.maxMCPBodySize)(handler)
+	return handler
 }
 
 // Start begins serving the MCP server and blocks until shutdown.
@@ -273,9 +315,8 @@ func (s *MCPServer) Start() error {
 	// Info endpoint
 	mux.HandleFunc("/", s.handleRoot)
 
-	// Upload endpoint (POST /upload) - protected with API key auth
-	uploadHandler := auth.BearerAuth(uploadKeyHash, auth.OnEmptySkip, http.HandlerFunc(s.handleUpload))
-	mux.Handle("/upload", uploadHandler)
+	// Upload endpoint (POST /upload) - protected with the MCP keyring
+	mux.Handle("/upload", s.authMiddleware(s.handleUpload))
 
 	// Files endpoint (GET /files/{tool}/{filename}) - serve generated files
 	mux.HandleFunc("/files/", s.handleFiles)
@@ -290,51 +331,18 @@ func (s *MCPServer) Start() error {
 	// Start background TTL cleanup goroutine for uploaded files
 	go s.startUploadCleanup()
 
-	// Prepare middleware chain: MaxBody -> CORS -> Rate Limiter -> Path Sanitizer -> Mux Handler
-	bodyMiddleware := MaxBodyMiddleware(s.maxMCPBodySize)
-
-	var streamHandler http.Handler = s.streamServer
-	if s.rateLimiter != nil {
-		streamHandler = s.rateLimiter.Middleware(streamHandler)
-	}
-	streamHandler = CORSMiddleware(s.allowedOrigins)(streamHandler)
-	streamHandler = bodyMiddleware(streamHandler)
-
-	// Build multi-handler chain: first the custom mux, then the SSE/stream handlers
-	// The mux handles health, metrics, upload, files; streamHandler handles MCP SSE/streamable HTTP
 	// Wrap the entire mux with sanitizePathMiddleware to prevent path normalization attacks
 	sanitizedMux := sanitizePathMiddleware(mux)
 
-	// Prepare SSE handlers with same middleware chain
-	// Cache handlers to avoid allocating new function values per request
-	sseServerHandler := s.sseServer.SSEHandler()
-	messageServerHandler := s.sseServer.MessageHandler()
-
-	sseHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sseServerHandler.ServeHTTP(w, r)
-	}))
-	if s.rateLimiter != nil {
-		sseHandler = s.rateLimiter.Middleware(sseHandler)
-	}
-	sseHandler = CORSMiddleware(s.allowedOrigins)(sseHandler)
-	sseHandler = bodyMiddleware(sseHandler)
-
-	messageHandler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		messageServerHandler.ServeHTTP(w, r)
-	}))
-	if s.rateLimiter != nil {
-		messageHandler = s.rateLimiter.Middleware(messageHandler)
-	}
-	messageHandler = CORSMiddleware(s.allowedOrigins)(messageHandler)
-	messageHandler = bodyMiddleware(messageHandler)
-
-	// Register handlers
+	// Register the MCP endpoints. All three share one middleware chain so the
+	// auth/CORS/rate-limit policy cannot drift between transports.
+	//
 	// MCP Streamable HTTP endpoint (2025 spec)
-	mux.Handle("/mcp", streamHandler)
+	mux.Handle("/mcp", s.mcpEndpointMiddleware(s.streamServer))
 
 	// SSE endpoints (legacy 2024 spec)
-	mux.Handle("/sse", sseHandler)
-	mux.Handle("/message", messageHandler)
+	mux.Handle("/sse", s.mcpEndpointMiddleware(s.sseServer.SSEHandler()))
+	mux.Handle("/message", s.mcpEndpointMiddleware(s.sseServer.MessageHandler()))
 
 	// Log rate limiting status
 	if s.rateLimiter != nil {
@@ -342,6 +350,18 @@ func (s *MCPServer) Start() error {
 			Float64("rps", s.rateLimiter.rps).
 			Int("burst", s.rateLimiter.burst).
 			Msg("Rate limiting enabled for /mcp, /sse, /message")
+	}
+
+	// Log auth status
+	switch {
+	case s.keyring == nil:
+		log.Error().Msg("MCP endpoint authentication not configured (no keyring): /mcp, /sse, /message and /upload answer 503")
+	case s.keyring.Enabled():
+		log.Info().
+			Str("auth", s.keyring.Describe()).
+			Msg("Auth enabled for /mcp, /sse, /message and /upload")
+	default:
+		log.Warn().Msg("MCP_AUTH_MODE=off: /mcp, /sse, /message and /upload accept unauthenticated requests")
 	}
 
 	// Log CORS status

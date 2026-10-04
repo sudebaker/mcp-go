@@ -21,6 +21,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/sudebaker/mcp-go/internal/auth"
 	"github.com/sudebaker/mcp-go/internal/resources"
 )
 
@@ -104,12 +105,23 @@ func sanitizeFilename(name string) string {
 //
 // Request:
 //   - Content-Type: multipart/form-data
-//   - Header: X-Session-ID (required) - identifies the authenticated session
+//   - Header: Authorization (required when MCP_AUTH_MODE=required) - the caller's bearer token
+//   - Header: X-Session-ID (required) - identifies the session, and therefore the namespace.
+//     It must belong to the identity of the bearer token, otherwise the request is rejected
+//     with 403 so no caller can write into another user's namespace.
 //   - Field: file (required) - the binary file
 //
 // Response (200):
 //
 //	{"success": true, "uri": "res://...", "sha256": "...", "size": N, "content_type": "...", "name": "..."}
+//
+// Response (401):
+//
+//	{"success": false, "error": "..."} - no or invalid bearer token, or a session that cannot be resolved
+//
+// Response (403):
+//
+//	{"success": false, "error": "X-Session-ID does not belong to the authenticated user"}
 //
 // Response (413):
 //
@@ -128,6 +140,32 @@ func (s *MCPServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		http.Error(w, "Missing X-Session-ID", http.StatusUnauthorized)
 		return
+	}
+
+	// SECURITY: the session a caller names must belong to the identity that
+	// authenticated the request. The namespace an upload lands in is resolved
+	// from X-Session-ID through the session store, so without this check any
+	// holder of a valid token could write into another user's namespace by
+	// naming one of their session ids.
+	//
+	// With MCP_AUTH_MODE=off there is no identity to compare against and the
+	// header is trusted, exactly as it was before token auth existed.
+	if userID := auth.UserIDFromContext(r.Context()); userID != "" && s.resourceManager != nil {
+		owner, ok := s.resourceManager.OwnerOf(sessionID)
+		if !ok || owner != userID {
+			log.Warn().
+				Str("token_user_id", userID).
+				Str("session_id", sessionID).
+				Str("session_owner", owner).
+				Msg("Upload rejected: session does not belong to the authenticated user")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(UploadResponse{
+				Success: false,
+				Error:   "X-Session-ID does not belong to the authenticated user",
+			})
+			return
+		}
 	}
 
 	// Get upload config from server (use defaults if not configured)

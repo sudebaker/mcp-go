@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go — vet, build, test, race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test ./...
+      - name: go test -race (config, transport, tests)
+        run: go test -race -count=1 ./internal/config/ ./internal/transport/ ./tests/
+
+  python:
+    name: Python — tests de seguridad
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Dependencias de los tests (fijadas)
+        run: >-
+          python -m pip install --disable-pip-version-check
+          pytest==9.1.1 PyYAML==6.0.3 Jinja2==3.1.6
+      # Mitigaciones SSRF, SSTI, ReDoS y deserialización YAML.
+      - name: pytest tests/test_security_mitigations.py
+        run: python -m pytest tests/test_security_mitigations.py -v
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      # Conjunto de linters y formatters en .golangci.yml (gofmt incluido).
+      # Los linters desactivados hoy están listados ahí con su recuento.
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.14.0
+
+  compose:
+    name: Compose — defaults seguros y override por env
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Render con los defaults (ningún override)
+        working-directory: deployments
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example --profile ocu-investigacion \
+            config --format json > /tmp/render-default.json
+          python3 scripts/check-publish-hosts.py 127.0.0.1 < /tmp/render-default.json
+      - name: Render con <SVC>_PUBLISH_HOST=0.0.0.0 (override LAN)
+        working-directory: deployments
+        env:
+          MCP_PUBLISH_HOST: 0.0.0.0
+          RUSTFS_PUBLISH_HOST: 0.0.0.0
+          MEMGRAPH_PUBLISH_HOST: 0.0.0.0
+          OPENSEARCH_PUBLISH_HOST: 0.0.0.0
+          CRAWL4AI_PUBLISH_HOST: 0.0.0.0
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.example --profile ocu-investigacion \
+            config --format json > /tmp/render-lan.json
+          python3 scripts/check-publish-hosts.py 0.0.0.0 < /tmp/render-lan.json
+
+  image:
+    name: Imagen — build y escaneo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Build (sin push)
+        id: build
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: deployments/Dockerfile
+          push: false
+          load: true
+          tags: mcp-go:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Puerta: ningún CRITICAL. Es la convención de la casa.
+      - name: Trivy — CRITICAL (bloqueante)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: mcp-go:ci
+          format: table
+          severity: CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: "1"
+      # Informe de HIGH: hoy salen dependencias vendorizadas de pip en la imagen
+      # base (jaraco.context, wheel, urllib3) y subir pip no las quita — rotan.
+      # Se reportan para verlas evolucionar, sin bloquear el merge.
+      - name: Trivy — HIGH (informativo)
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: mcp-go:ci
+          format: table
+          severity: HIGH
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: "0"

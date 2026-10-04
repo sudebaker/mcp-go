@@ -7,6 +7,15 @@
 #   mcp-external  — Red con acceso a internet. Servicios públicos/proxy.
 #   mcp-server es el único puente entre ambas.
 #
+# RED DE ESCUCHA Y EXPOSICIÓN (convención de dos variables, ver deployments/.env.example):
+#   <SVC>_BIND_HOST    — red en la que ESCUCHA el proceso DENTRO del contenedor.
+#                        Por defecto 0.0.0.0: si escuchara en loopback, el puerto no
+#                        sería alcanzable ni por otros contenedores ni por `ports`.
+#                        Bajarlo a 127.0.0.1 aísla el servicio al propio contenedor.
+#   <SVC>_PUBLISH_HOST — red del HOST a la que se PUBLICA el puerto (`ports`).
+#                        Por defecto 127.0.0.1 (seguro). Poner 0.0.0.0 para exponerlo
+#                        en la LAN — solo con firewall/auth por delante.
+#
 # Variables de entorno en deployments/.env (ver .env.example)
 
 services:
@@ -20,8 +29,11 @@ services:
       dockerfile: deployments/Dockerfile
     container_name: mcp-orchestrator
     ports:
-      - "8080:8080"
+      - "${MCP_PUBLISH_HOST:-127.0.0.1}:8080:8080"
     environment:
+      # Bind interno del proceso. Debe ser 0.0.0.0 dentro del contenedor, si no ni
+      # los demás contenedores ni el mapeo de `ports` alcanzan el servidor.
+      MCP_BIND_HOST: ${MCP_BIND_HOST:-0.0.0.0}
       BASE_URL: ${BASE_URL:?BASE_URL is required (copy deployments/.env.example to .env)}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
@@ -156,7 +168,7 @@ services:
       - whisper-models:/root/.cache/huggingface
     networks:
       - mcp-internal
-    command: ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "${WHISPER_BIND_HOST:-0.0.0.0}", "--port", "8000"]
     restart: unless-stopped
     deploy:
       resources:
@@ -174,7 +186,7 @@ services:
     image: rustfs/rustfs:latest
     container_name: rustfs
     ports:
-      - "9000:9000"
+      - "${RUSTFS_PUBLISH_HOST:-127.0.0.1}:9000:9000"
     environment:
       RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:?RUSTFS_ACCESS_KEY_ID is required}
       RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:?RUSTFS_SECRET_ACCESS_KEY is required}
@@ -208,7 +220,7 @@ services:
       - ocu-investigacion
     restart: unless-stopped
     ports:
-      - "7687:7687"
+      - "${MEMGRAPH_PUBLISH_HOST:-127.0.0.1}:7687:7687"
     volumes:
       - ocu-memgraph-data:/var/lib/memgraph
       - ocu-memgraph-logs:/var/log/memgraph
@@ -244,8 +256,8 @@ services:
       - ocu-investigacion
     restart: unless-stopped
     ports:
-      - "9200:9200"
-      - "9600:9600"
+      - "${OPENSEARCH_PUBLISH_HOST:-127.0.0.1}:9200:9200"
+      - "${OPENSEARCH_PUBLISH_HOST:-127.0.0.1}:9600:9600"
     volumes:
       - ocu-opensearch-data:/usr/share/opensearch/data
     environment:
@@ -257,7 +269,9 @@ services:
       - DISABLE_INSTALL_DEMO_CONFIG=true
       - DISABLE_SECURITY_PLUGIN=true
       - DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true
-      - network.host=0.0.0.0
+      # Bind interno del nodo. NO se puede bajar a 127.0.0.1: mcp-server lo alcanza
+      # como `opensearch:9200` por la red del bridge, no por loopback.
+      - network.host=${OPENSEARCH_BIND_HOST:-0.0.0.0}
     ulimits:
       memlock:
         soft: -1
@@ -286,7 +300,7 @@ services:
     image: unclecode/crawl4ai:latest
     container_name: crawl4ai
     ports:
-      - "11235:11235"
+      - "${CRAWL4AI_PUBLISH_HOST:-127.0.0.1}:11235:11235"
     shm_size: "1gb"
     environment:
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_TOKEN:?CRAWL4AI_TOKEN is required - generate with openssl rand -hex 32}

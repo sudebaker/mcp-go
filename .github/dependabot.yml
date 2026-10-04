@@ -1,0 +1,29 @@
+version: 2
+
+# Las actions van fijadas a version exacta y las imagenes base del Dockerfile a
+# tag de minor (golang:1.25-alpine, python:3.11-slim-bookworm). Dependabot abre
+# el PR del bump; el CI es el que decide si entra.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: docker
+    directory: /deployments
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"

@@ -32,6 +32,33 @@ type Entry struct {
 	KeyEnv string
 }
 
+// placeholderSecrets are the values shipped in deployments/.env.example. They
+// satisfy the charset and length rules for a token, so without an explicit
+// rejection an operator who copies the template would start the server with a
+// credential anyone can guess.
+var placeholderSecrets = map[string]struct{}{
+	"change_me":       {},
+	"changeme":        {},
+	"change-me":       {},
+	"placeholder":     {},
+	"replace_me":      {},
+	"replace-me":      {},
+	"your_token_here": {},
+	"your-token-here": {},
+}
+
+// IsPlaceholderSecret reports whether a secret is one of the placeholder values
+// shipped in .env.example, compared case-insensitively and ignoring surrounding
+// whitespace.
+//
+// Callers use it to refuse a configuration that would otherwise run with a
+// guessable credential. It matches a fixed deny-list on purpose: guessing at
+// "weak" secrets would be unreliable in both directions.
+func IsPlaceholderSecret(secret string) bool {
+	_, found := placeholderSecrets[strings.ToLower(strings.TrimSpace(secret))]
+	return found
+}
+
 // Keyring is the runtime identity index: sha256(token) -> user_id.
 //
 // Only the digest of a token is kept, so the index cannot be replayed into a
@@ -150,6 +177,9 @@ func BuildKeyring(lookup EnvLookup, entries []Entry) (*Keyring, error) {
 		}
 		if !validToken.MatchString(token) {
 			return nil, fmt.Errorf("auth.keys[%d] (user_id %q): token from %s must match %s", i, userID, keyEnv, validToken.String())
+		}
+		if IsPlaceholderSecret(token) {
+			return nil, fmt.Errorf("auth.keys[%d] (user_id %q): token from %s is the placeholder value shipped in .env.example - generate one with 'openssl rand -hex 32'", i, userID, keyEnv)
 		}
 
 		if _, duplicate := users[userID]; duplicate {

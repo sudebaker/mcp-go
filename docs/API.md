@@ -46,6 +46,7 @@ abort the process. Nothing is skipped.
 |-----------|----------|
 | Authentication disabled (`off`) | Request continues without an identity |
 | No `Authorization` header / wrong scheme / malformed token | `401` |
+| `/upload` with an `X-Session-ID` that is unknown or belongs to another identity | `403` |
 | Token not in the keyring | `401` |
 | `required` with no usable keys (misconfiguration) | `503` |
 
@@ -493,12 +494,20 @@ Uploads a file to the server for temporary storage. Files are stored in `/data/u
 ```
 POST /upload
 Content-Type: multipart/form-data
+Authorization: Bearer <token>          (required when MCP_AUTH_MODE=required)
+X-Session-ID: <session id>             (required) - decides the namespace; it must belong to the token identity
 
 FormData:
   - file: (required) binary file
   - ttl: (optional) seconds until expiration (default: 3600, max: 86400)
   - collection: (optional) subdirectory for organization
 ```
+
+The upload lands in the namespace of the MCP session named by `X-Session-ID`. The server resolves
+that session through the same store the KB uses and rejects the request with `403` when the session
+belongs to another identity, so a valid token cannot write into someone else's namespace. A client
+must therefore initialize with the token it uploads with (`MCP_UPLOAD_API_KEY` initializes a session
+of its own, `user_id: legacy-upload`).
 
 **Response (200 OK):**
 ```json

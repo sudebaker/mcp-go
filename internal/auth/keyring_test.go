@@ -228,6 +228,50 @@ func TestBuildKeyring_OffModeNeedsNoEnv(t *testing.T) {
 	}
 }
 
+// The placeholder shipped in .env.example passes the charset and length rules,
+// so copying the template must fail loudly instead of starting the server with a
+// guessable credential.
+func TestBuildKeyring_RejectsPlaceholderTokens(t *testing.T) {
+	for _, raw := range []string{
+		"change_me", "CHANGE_ME", "Change_Me", "changeme", "change-me",
+		"placeholder", "replace_me", "your_token_here", "your-token-here",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			k, err := BuildKeyring(
+				envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": raw}),
+				[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+			)
+			if err == nil {
+				t.Fatalf("expected placeholder %q to be rejected, got a keyring with %d entries", raw, k.Size())
+			}
+			if !strings.Contains(err.Error(), "placeholder") {
+				t.Errorf("error %q should say it is a placeholder value", err.Error())
+			}
+		})
+	}
+
+	// A generated token is not caught by the placeholder guard.
+	if _, err := BuildKeyring(
+		envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "9f2c7d1e45b8a06c3e5d7f9012ab34cd"}),
+		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+	); err != nil {
+		t.Errorf("a generated token must be accepted, got: %v", err)
+	}
+}
+
+func TestIsPlaceholderSecret(t *testing.T) {
+	for _, value := range []string{"change_me", "CHANGE-ME", " changeme ", "Placeholder", "replace_me", "your_token_here"} {
+		if !IsPlaceholderSecret(value) {
+			t.Errorf("%q should be recognised as a placeholder", value)
+		}
+	}
+	for _, value := range []string{"", "a", "change_me_not", "amphora-token-abcdef", "9f2c7d1e45b8a06c"} {
+		if IsPlaceholderSecret(value) {
+			t.Errorf("%q must not be treated as a placeholder", value)
+		}
+	}
+}
+
 func TestNewKeyring_RequiredEmptyIsNotEnabledButPresent(t *testing.T) {
 	k := NewKeyring(ModeRequired, nil)
 	if k == nil {

@@ -34,8 +34,71 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 	if w.Header().Get("Access-Control-Allow-Methods") != "GET, POST, DELETE, OPTIONS" {
 		t.Errorf("Expected Allow-Methods header, got %s", w.Header().Get("Access-Control-Allow-Methods"))
 	}
-	if w.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID" {
+	if w.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID" {
 		t.Errorf("Expected Allow-Headers header with all fields, got %s", w.Header().Get("Access-Control-Allow-Headers"))
+	}
+	if w.Header().Get("Access-Control-Expose-Headers") != "Mcp-Session-Id, X-Request-ID" {
+		t.Errorf("Expected Expose-Headers header, got %s", w.Header().Get("Access-Control-Expose-Headers"))
+	}
+}
+
+// A browser only gets to send Authorization if the preflight allows it;
+// otherwise the request dies in CORS and the client never sees the 401/503 that
+// the auth middleware produces.
+func TestCORSMiddleware_PreflightAllowsAuthorization(t *testing.T) {
+	middleware := CORSMiddleware([]string{"https://lobe-chat.example.com"})
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("preflight must not reach the handler")
+	}))
+
+	req := httptest.NewRequest("OPTIONS", "/mcp", nil)
+	req.Header.Set("Origin", "https://lobe-chat.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("Expected 204, got %d", w.Code)
+	}
+	allowed := make(map[string]bool)
+	for _, h := range strings.Split(w.Header().Get("Access-Control-Allow-Headers"), ",") {
+		allowed[strings.ToLower(strings.TrimSpace(h))] = true
+	}
+	for _, header := range []string{"authorization", "content-type"} {
+		if !allowed[header] {
+			t.Errorf("Access-Control-Allow-Headers %q does not allow %q",
+				w.Header().Get("Access-Control-Allow-Headers"), header)
+		}
+	}
+}
+
+// A JavaScript client cannot read the MCP session id unless the server exposes
+// it: it is not a CORS-safelisted response header.
+func TestCORSMiddleware_ExposesSessionIDHeader(t *testing.T) {
+	middleware := CORSMiddleware([]string{"https://lobe-chat.example.com"})
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Mcp-Session-Id", "3f2b7c1e-0000-4000-8000-000000000000")
+		w.Header().Set("X-Request-ID", "req-1")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/mcp", nil)
+	req.Header.Set("Origin", "https://lobe-chat.example.com")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	exposed := make(map[string]bool)
+	for _, h := range strings.Split(w.Header().Get("Access-Control-Expose-Headers"), ",") {
+		exposed[strings.ToLower(strings.TrimSpace(h))] = true
+	}
+	if !exposed["mcp-session-id"] {
+		t.Errorf("Mcp-Session-Id is not readable by JS clients: Access-Control-Expose-Headers=%q",
+			w.Header().Get("Access-Control-Expose-Headers"))
 	}
 }
 

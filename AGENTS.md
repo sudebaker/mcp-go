@@ -106,6 +106,11 @@ KB tools (`kb_ingest`, `kb_search`) use `context.user_id` for data isolation:
 - Python KB tool receives `user_id` in the `context` object of the request
 - All queries filter by `user_id` - users only see their own documents
 - A session that initializes without an authenticated identity stays unbound
+- `/upload` resolves the destination namespace from `X-Session-ID` through the session store, so it
+  verifies that the session belongs to the token identity (`resources.OwnerOf`) and answers `403`
+  when it does not: a token holder cannot write into another user's namespace by naming their
+  session id. With `MCP_AUTH_MODE=off` there is no identity to compare and the header is trusted
+  (local development only)
 
 **Performance:** KB tools use a persistent process pool (5 processes per tool) to avoid reloading embedding models and database connections on each call. Latency drops from ~7s (cold) to <1s (warm).
 
@@ -120,7 +125,10 @@ See [docs/AUTH.md](docs/AUTH.md) for the full contract. In short:
   `/metrics`, `/files/` and `/internal/resource/{token}` stay open (container healthcheck,
   network-isolated internal streaming)
 - Middleware order for the MCP endpoints is body limit → CORS → auth → rate limit, so clients
-  receive 401/503 from auth, not a CORS error
+  receive 401/503 from auth, not a CORS error. For that to hold in a browser, `CORSMiddleware`
+  allows `Authorization` in `Access-Control-Allow-Headers` and exposes `Mcp-Session-Id` in
+  `Access-Control-Expose-Headers` — without the first the preflight fails before auth runs, without
+  the second a JS client cannot read the session id it must send back (see `internal/transport/cors.go`)
 
 ### mcp-go Library Hooks
 Uses `github.com/mark3labs/mcp-go` server hooks:

@@ -78,6 +78,17 @@ func main() {
 	}
 	log.Info().Str("auth", keyring.Describe()).Msg("MCP auth keyring resolved")
 
+	// ADMIN_API_KEY is a password-equivalent read directly from the environment
+	// (it is not a keyring entry: the admin API has a single shared credential).
+	// Rejecting the template placeholder extends the fail-fast promise to the one
+	// secret that does not go through BuildKeyring.
+	adminKey := os.Getenv("ADMIN_API_KEY")
+	if auth.IsPlaceholderSecret(adminKey) {
+		log.Fatal().
+			Str("env_var", "ADMIN_API_KEY").
+			Msg("ADMIN_API_KEY is still the placeholder value from .env.example - generate one with 'openssl rand -hex 32'")
+	}
+
 	// Build health checker with dependency detection
 	deps := health.BuildDependencies(cfg)
 
@@ -232,9 +243,6 @@ func main() {
 	}
 
 	log.Info().Msg("Server started with static configuration")
-
-	// Read ADMIN_API_KEY from environment (optional)
-	adminKey := os.Getenv("ADMIN_API_KEY")
 
 	// Max request body size for MCP endpoints (MB), 0 = default 10MB
 	maxBodyMB, _ := strconv.ParseInt(os.Getenv("MCP_MAX_BODY_SIZE_MB"), 10, 64)

@@ -105,6 +105,20 @@ MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
 - `internal/auth/identity_test.go` — isolation asserted against the real `session.Store`, and the
   regression that a client-asserted `user_id` is never stored.
 - `internal/transport/auth_chain_test.go` — CORS outside auth, preflight without a token, the
-  shared keyring on `/upload`.
+  shared keyring on `/upload`, and that the preflight allows `Authorization` while `Mcp-Session-Id`
+  is exposed to JS clients.
+- `internal/transport/upload_identity_test.go` — `/upload` rejects an `X-Session-ID` owned by another
+  identity with `403` (and writes nothing), accepts the owner, and still trusts the header when
+  `MCP_AUTH_MODE=off`.
+- `internal/resources` — `OwnerOf` is the same lookup `PutForUser` uses to pick a namespace.
 - `tests/auth_endpoint_test.go` — end-to-end over real HTTP: `401` without a token, session bound
   to the token identity, client-asserted identity ignored, two users isolated.
+
+## What this does not cover
+
+- `/files/` is served without auth (documented as intentional: it serves the already-authorized
+  internal streaming path). Anyone who can reach the port and knows a filename can read it.
+- With `MCP_AUTH_MODE=off` there is no identity: `/upload` trusts `X-Session-ID` as it did before
+  token auth existed. Do not run `off` outside an isolated local environment.
+- The placeholder guard is a fixed deny-list of the values shipped in `deployments/.env.example`
+  (`change_me`, `changeme`, `placeholder`, `replace_me`, `your_token_here`), not a strength check.

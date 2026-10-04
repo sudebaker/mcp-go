@@ -51,6 +51,62 @@ func lanIPv4(t *testing.T) string {
 	return ""
 }
 
+// serve starts srv in the background and stops it when the test ends.
+func serve(t *testing.T, srv *MCPServer) {
+	t.Helper()
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Start() }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		select {
+		case <-serveErr:
+		case <-time.After(5 * time.Second):
+			t.Log("server did not stop within 5s")
+		}
+	})
+}
+
+// waitLoopback polls until the already-started server answers on the loopback
+// port, so the reachability assertions run against a live listener.
+func waitLoopback(t *testing.T, port int) {
+	t.Helper()
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	deadline := time.Now().Add(5 * time.Second)
+	client := &http.Client{Timeout: time.Second}
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("server never answered on %s: %v", url, lastErr)
+}
+
+// lanReachable reports whether this host's LAN address accepts a connection on
+// port. On a loopback bind it must stay false: that is the point of the guard.
+func lanReachable(t *testing.T, port int) bool {
+	t.Helper()
+
+	lanIP := lanIPv4(t)
+	if lanIP == "" {
+		t.Skip("host has no non-loopback IPv4 address")
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(lanIP, strconv.Itoa(port)), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
 // writeServerConfig writes a config carrying the exact server.host line shipped
 // in configs/config.yaml, on the given port.
 func writeServerConfig(t *testing.T, port int) string {
@@ -71,32 +127,10 @@ tools: []
 	return path
 }
 
-// waitForHTTP polls until the server answers on url or the deadline passes.
-func waitForHTTP(url string) error {
-	deadline := time.Now().Add(5 * time.Second)
-	client := &http.Client{Timeout: time.Second}
-	var lastErr error
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			return nil
-		}
-		lastErr = err
-		time.Sleep(50 * time.Millisecond)
-	}
-	return lastErr
-}
-
 // TestStartBindsConfiguredHost is the runtime guard for the bind-host contract:
 // a started server answers on loopback, and only becomes reachable on the LAN
 // address when MCP_BIND_HOST explicitly widens the bind.
 func TestStartBindsConfiguredHost(t *testing.T) {
-	lanIP := lanIPv4(t)
-	if lanIP == "" {
-		t.Skip("host has no non-loopback IPv4 address")
-	}
-
 	cases := []struct {
 		name         string
 		bindEnv      string
@@ -124,36 +158,36 @@ func TestStartBindsConfiguredHost(t *testing.T) {
 				Host: cfg.Server.Host,
 				Port: cfg.Server.Port,
 			})
+			serve(t, srv)
+			waitLoopback(t, port)
 
-			serveErr := make(chan error, 1)
-			go func() { serveErr <- srv.Start() }()
-			t.Cleanup(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = srv.Shutdown(ctx)
-				select {
-				case <-serveErr:
-				case <-time.After(5 * time.Second):
-					t.Log("server did not stop within 5s")
+			if got := lanReachable(t, port); got != tc.lanReachable {
+				if tc.lanReachable {
+					t.Errorf("expected the LAN address to be reachable on port %d", port)
+				} else {
+					t.Errorf("SECURITY: LAN address reachable on port %d although the server must bind loopback only", port)
 				}
-			})
-
-			loopbackURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-			if err := waitForHTTP(loopbackURL); err != nil {
-				t.Fatalf("server never answered on %s: %v", loopbackURL, err)
-			}
-
-			lanAddr := net.JoinHostPort(lanIP, strconv.Itoa(port))
-			conn, dialErr := net.DialTimeout("tcp", lanAddr, 2*time.Second)
-			if dialErr == nil {
-				_ = conn.Close()
-			}
-			if tc.lanReachable && dialErr != nil {
-				t.Errorf("expected %s to be reachable, got %v", lanAddr, dialErr)
-			}
-			if !tc.lanReachable && dialErr == nil {
-				t.Errorf("SECURITY: %s is reachable although the server must bind loopback only", lanAddr)
 			}
 		})
+	}
+}
+
+// TestNewMCPServerKeepsEmptyHostOnLoopback guards the constructor invariant: an
+// empty Host must never reach ListenAndServe as ":port", which binds every
+// interface (IPv6 included) instead of loopback.
+func TestNewMCPServerKeepsEmptyHostOnLoopback(t *testing.T) {
+	port := freePort(t)
+
+	srv := NewMCPServer(server.NewMCPServer("bind-host-test", "1.0.0"), MCPConfig{Port: port})
+
+	if want := fmt.Sprintf("127.0.0.1:%d", port); srv.addr != want {
+		t.Fatalf("addr = %q, want %q", srv.addr, want)
+	}
+
+	serve(t, srv)
+	waitLoopback(t, port)
+
+	if lanReachable(t, port) {
+		t.Errorf("SECURITY: empty Host bound the LAN address on port %d", port)
 	}
 }

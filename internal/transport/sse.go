@@ -178,6 +178,13 @@ type MCPConfig struct {
 //	}
 //	mcpServer := server.NewMCPServer(transport.NewMCPServer(mcpServer, cfg))
 func NewMCPServer(mcpServer *server.MCPServer, cfg MCPConfig) *MCPServer {
+	// SECURITY: an empty Host would produce the ":port" address, which binds
+	// every interface instead of loopback. Keep the safe bind an invariant of
+	// the constructor, not a consequence of config loading.
+	if cfg.Host == "" {
+		cfg.Host = "127.0.0.1"
+	}
+
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
 	streamServer := server.NewStreamableHTTPServer(mcpServer)

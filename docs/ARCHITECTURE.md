@@ -504,7 +504,7 @@ __RESULT__:{"success": true, "content": [...]}
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `host` | string | `"0.0.0.0"` | Bind address |
+| `host` | string | `"127.0.0.1"` (`MCP_BIND_HOST`) | Bind address |
 | `port` | int | `8080` | TCP port |
 | `name` | string | `"mcp-orchestrator"` | Service name |
 | `base_url` | string | auto | Public URL for SSE |

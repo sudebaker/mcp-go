@@ -334,7 +334,8 @@ docker exec mcp-orchestrator python3 tests/test_config_auditor.py
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  # 127.0.0.1 keeps the port off the LAN; export MCP_BIND_HOST=0.0.0.0 to expose it.
+  host: "${MCP_BIND_HOST:-127.0.0.1}"
   port: 8080
   name: "mcp-orchestrator"
   rate_limit_rps: 10

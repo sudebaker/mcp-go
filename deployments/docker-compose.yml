@@ -69,8 +69,10 @@ services:
       # Auth del endpoint MCP: MCP_AUTH_MODE (required|off) es el unico interruptor.
       MCP_AUTH_MODE: ${MCP_AUTH_MODE:?MCP_AUTH_MODE is required (required|off)}
       # Una var por entrada de configs/config.yaml -> auth.keys[].key_env.
-      # El sufijo DEBE coincidir con el user_id de esa entrada.
-      MCP_AUTH_KEY_AMPHORA: ${MCP_AUTH_KEY_AMPHORA:?MCP_AUTH_KEY_AMPHORA is required}
+      # El nombre de la var NO guarda relacion con el user_id: la invariante es
+      # que cada key_env sea unico. Con una sola entrada basta MCP_AUTH_KEY; con
+      # N, <CLIENT>_AUTH_KEY.
+      MCP_AUTH_KEY: ${MCP_AUTH_KEY:?MCP_AUTH_KEY is required}
     dns:
       - 8.8.8.8
       - 1.1.1.1

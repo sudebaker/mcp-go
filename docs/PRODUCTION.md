@@ -93,7 +93,7 @@ RUSTFS_SECRET_ACCESS_KEY=change_me
 
 # MCP endpoint auth (see deployments/.env.example)
 MCP_AUTH_MODE=required
-MCP_AUTH_KEY_AMPHORA=change_me
+MCP_AUTH_KEY=change_me
 
 # Security (defaults work for most deployments)
 SSRF_ALLOWLIST=rustfs

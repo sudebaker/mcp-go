@@ -19,6 +19,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sudebaker/mcp-go/internal/auth"
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/executor"
 	"github.com/sudebaker/mcp-go/internal/health"
@@ -66,6 +67,16 @@ func main() {
 	if err := config.Validate(cfg); err != nil {
 		log.Fatal().Err(err).Msg("Configuration validation failed")
 	}
+
+	// Build the MCP endpoint keyring. MCP_AUTH_MODE is the only switch that
+	// decides whether a token is required; the parse is fail-fast, so an unknown
+	// mode or a missing/empty secret aborts startup instead of leaving the MCP
+	// endpoints reachable without authentication.
+	keyring, err := auth.BuildKeyring(os.LookupEnv, authEntries(cfg.Auth.Keys))
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to build MCP auth keyring")
+	}
+	log.Info().Str("auth", keyring.Describe()).Msg("MCP auth keyring resolved")
 
 	// Build health checker with dependency detection
 	deps := health.BuildDependencies(cfg)
@@ -167,21 +178,32 @@ func main() {
 	resourceHandler := resources.NewResourceHandler(resourceManager, mcpServer)
 	resourceHandler.RegisterHandler()
 
-	// Add after-initialize hook to associate user IDs and register resources
+	// Add after-initialize hook to associate the authenticated user and register resources.
+	//
+	// The identity comes from the bearer token verified by the transport
+	// (auth.UserIDFromContext). A user_id asserted by the client in
+	// capabilities.experimental is deliberately ignored: it is only logged, so
+	// a client can never choose the account its tools run against. A session
+	// that initializes without an authenticated identity is left unbound, and
+	// downstream tools receive no user_id at all.
 	hooks.AddAfterInitialize(func(ctx context.Context, id any, message *mcp.InitializeRequest, result *mcp.InitializeResult) {
-		if message == nil || message.Params.Capabilities.Experimental == nil {
+		sess := server.ClientSessionFromContext(ctx)
+		if sess == nil {
 			return
 		}
-		if userID, ok := message.Params.Capabilities.Experimental["user_id"].(string); ok {
-			if sess := server.ClientSessionFromContext(ctx); sess != nil {
-				sessionStore.Set(sess.SessionID(), userID)
-				log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with user")
 
-				// Register this user's resources after successful initialization
-				if _, err := resourceHandler.RegisterForSession(context.Background(), sess.SessionID()); err != nil {
-					log.Error().Err(err).Str("session_id", sess.SessionID()).Msg("Failed to register resources for session")
-				}
-			}
+		userID, ok := auth.BindSessionUserID(ctx, clientAssertedUserID(message), sessionStore, sess.SessionID())
+		if !ok {
+			log.Warn().
+				Str("session_id", sess.SessionID()).
+				Msg("Initialize without an authenticated identity: session left unbound")
+			return
+		}
+		log.Info().Str("session_id", sess.SessionID()).Str("user_id", userID).Msg("Session associated with authenticated user")
+
+		// Register this user's resources after successful initialization
+		if _, err := resourceHandler.RegisterForSession(context.Background(), sess.SessionID()); err != nil {
+			log.Error().Err(err).Str("session_id", sess.SessionID()).Msg("Failed to register resources for session")
 		}
 	})
 
@@ -233,6 +255,7 @@ func main() {
 		Upload:            cfg.Upload,
 		FilesDir:          filepath.Join(cfg.Execution.WorkingDir, cfg.Execution.ReportsDir),
 		HealthChecker:     healthChecker,
+		Auth:              keyring,
 		AdminKey:          adminKey,
 		DB:                adminDB,
 		MaxMCPBodySizeMB:  maxBodyMB,
@@ -279,6 +302,28 @@ func main() {
 	exec.Close()
 
 	log.Info().Msg("Server stopped")
+}
+
+// authEntries converts the configured keyring into the auth package's entries.
+func authEntries(keys []config.AuthKeyConfig) []auth.Entry {
+	entries := make([]auth.Entry, 0, len(keys))
+	for _, key := range keys {
+		entries = append(entries, auth.Entry{UserID: key.UserID, KeyEnv: key.KeyEnv})
+	}
+	return entries
+}
+
+// clientAssertedUserID returns the user_id the client sent in
+// capabilities.experimental, if any.
+//
+// The value is used for logging only. It is never trusted as an identity: the
+// session's user_id is derived from the bearer token.
+func clientAssertedUserID(message *mcp.InitializeRequest) string {
+	if message == nil || message.Params.Capabilities.Experimental == nil {
+		return ""
+	}
+	userID, _ := message.Params.Capabilities.Experimental["user_id"].(string)
+	return userID
 }
 
 // truncateClientError caps error message length sent to clients.

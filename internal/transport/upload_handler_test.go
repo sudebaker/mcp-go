@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/sudebaker/mcp-go/internal/auth"
 	"github.com/sudebaker/mcp-go/internal/config"
 	"github.com/sudebaker/mcp-go/internal/resources"
 	"github.com/sudebaker/mcp-go/internal/session"
@@ -33,6 +34,9 @@ func setupUploadServer(t *testing.T) (*MCPServer, *fakeStorage, *session.Store) 
 	srv := NewMCPServer(mcpServer, MCPConfig{
 		Host: "127.0.0.1",
 		Port: 0,
+		// These tests exercise the upload pipeline, not auth: MCP_AUTH_MODE=off
+		// is the explicit "no bearer token" state.
+		Auth: auth.NewKeyring(auth.ModeOff, nil),
 		Upload: config.UploadConfig{
 			Enabled:   true,
 			MaxSizeMB: 50,

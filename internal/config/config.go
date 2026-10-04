@@ -44,10 +44,32 @@ type Config struct {
 	Execution ExecutionConfig `yaml:"execution"`
 	// Upload contains file upload endpoint configuration
 	Upload UploadConfig `yaml:"upload,omitempty"`
+	// Auth contains the MCP endpoint keyring (bearer token -> user_id)
+	Auth AuthConfig `yaml:"auth,omitempty"`
 	// Tools is the list of available tools and their configurations
 	Tools []ToolConfig `yaml:"tools"`
 	// Prompts is the list of available prompts
 	Prompts []PromptConfig `yaml:"prompts,omitempty"`
+}
+
+// AuthConfig declares the keyring used to authenticate MCP clients.
+//
+// Whether the keyring is enforced is decided by the MCP_AUTH_MODE environment
+// variable, not by this section: a config file describes who exists, the
+// environment decides whether they are required. The token for an entry is
+// never written here — only the name of the environment variable holding it.
+type AuthConfig struct {
+	// Keys is the list of users allowed to call the MCP endpoints
+	Keys []AuthKeyConfig `yaml:"keys,omitempty"`
+}
+
+// AuthKeyConfig binds one user_id to the environment variable that holds its
+// bearer token.
+type AuthKeyConfig struct {
+	// UserID is the identity attributed to requests carrying this token
+	UserID string `yaml:"user_id"`
+	// KeyEnv is the name of the environment variable holding the token
+	KeyEnv string `yaml:"key_env"`
 }
 
 // ServerConfig holds HTTP server-specific settings including network binding,

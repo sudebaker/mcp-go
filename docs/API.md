@@ -13,6 +13,48 @@ This document describes the HTTP API and MCP protocol interface for the MCP Orch
 
 ---
 
+## Authentication
+
+`MCP_AUTH_MODE` is the single switch that controls authentication:
+
+| Value | Behaviour |
+|-------|-----------|
+| `required` (default when unset) | `/mcp`, `/sse`, `/message` and `/upload` require `Authorization: Bearer <token>` |
+| `off` | No authentication. Only for isolated local development |
+| anything else | The server refuses to start |
+
+Tokens are **never** stored in a config file. `configs/config.yaml` declares who exists:
+
+```yaml
+auth:
+  keys:
+    - user_id: amphora
+      key_env: MCP_AUTH_KEY_AMPHORA
+```
+
+The token value is read at startup from the named environment variable, and the server keeps only
+`sha256(token) → user_id`. Generate one with `openssl rand -hex 32` (8–256 chars of
+`[A-Za-z0-9._-]`).
+
+**Fail-closed at startup:** an unknown mode, an empty `auth.keys` list in `required` mode, an unset
+or empty `key_env`, a malformed token, a duplicate `user_id` or two entries sharing a token all
+abort the process. Nothing is skipped.
+
+**Response codes:**
+
+| Situation | Response |
+|-----------|----------|
+| Authentication disabled (`off`) | Request continues without an identity |
+| No `Authorization` header / wrong scheme / malformed token | `401` |
+| Token not in the keyring | `401` |
+| `required` with no usable keys (misconfiguration) | `503` |
+
+Unauthenticated endpoints: `GET /health`, `GET /health/detailed`, `GET /metrics`, `GET /files/...`
+and `GET /internal/resource/{token}` (token-addressed, reachable only on the internal Docker
+network). Full contract and rotation procedure: [AUTH.md](AUTH.md).
+
+---
+
 ## HTTP Endpoints
 
 ### GET /
@@ -118,21 +160,22 @@ Interactive API documentation (Swagger UI).
 
 ### initialize
 
-Initializes the MCP session. The server accepts experimental capabilities for user identity.
+Initializes the MCP session. Requires `Authorization: Bearer <token>` (see
+[Authentication](#authentication)); the token determines the session identity.
 
-**User Identity via `capabilities.experimental.user_id`:**
+**User Identity:** the server resolves the bearer token to a `user_id` through the keyring
+declared in `configs/config.yaml` (`auth.keys[].key_env`). The `capabilities.experimental.user_id`
+field of the request is **client-asserted and ignored** — it is only logged, so a client cannot
+choose the account its tools run against:
+
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
   "method": "initialize",
   "params": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {
-      "experimental": {
-        "user_id": "user_abc123"
-      }
-    },
+    "protocolVersion": "2025-03-26",
+    "capabilities": {},
     "clientInfo": {
       "name": "my-mcp-client",
       "version": "1.0.0"
@@ -141,10 +184,20 @@ Initializes the MCP session. The server accepts experimental capabilities for us
 }
 ```
 
+With `Authorization: Bearer <token for user_id=amphora>`:
+
+```
+POST /mcp
+Content-Type: application/json
+Authorization: Bearer <token>
+Mcp-Session-Id: <returned by the initialize response>
+```
+
 **User Isolation:**
-- The `user_id` is stored in a session store mapped to the session ID
+- The `user_id` resolved from the token is stored in a session store mapped to the session ID
 - For KB tools (`kb_ingest`, `kb_search`), the `user_id` is injected into the subprocess context
 - All KB queries are filtered by `user_id`, ensuring complete data isolation
+- A session that initializes without an authenticated token is left unbound (no `user_id`)
 - Session is cleaned up on disconnect via `OnUnregisterSession` hook
 
 ### ping
@@ -224,7 +277,7 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 ### kb_ingest
 
-Stores content in the knowledge base (PostgreSQL + pgvector). **User isolation:** Each user can only access their own documents. User identity is established via the `capabilities.experimental.user_id` field in the MCP `initialize` request.
+Stores content in the knowledge base (PostgreSQL + pgvector). **User isolation:** Each user can only access their own documents. User identity is established by the bearer token of the MCP session (see [Authentication](#authentication)); the `capabilities.experimental.user_id` field is ignored.
 
 **Performance:** Uses a persistent process pool (5 processes per tool) to avoid reloading the embedding model and database connections on each call. Expected latency: <1s vs ~7s for cold starts.
 

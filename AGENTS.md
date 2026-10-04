@@ -99,20 +99,37 @@ print(json.dumps(response, default=str))
 
 ### User Isolation (KB tools)
 KB tools (`kb_ingest`, `kb_search`) use `context.user_id` for data isolation:
-- User identity comes from `capabilities.experimental.user_id` in MCP initialize
+- User identity comes from the bearer token verified by the transport (`internal/auth`), which
+  resolves `sha256(token) → user_id` from the keyring
+- `capabilities.experimental.user_id` is client-asserted and is IGNORED (logged only)
 - Go server stores `session_id → user_id` mapping in `internal/session/store.go`
 - Python KB tool receives `user_id` in the `context` object of the request
 - All queries filter by `user_id` - users only see their own documents
+- A session that initializes without an authenticated identity stays unbound
 
 **Performance:** KB tools use a persistent process pool (5 processes per tool) to avoid reloading embedding models and database connections on each call. Latency drops from ~7s (cold) to <1s (warm).
+
+### Authentication (MCP endpoints)
+See [docs/AUTH.md](docs/AUTH.md) for the full contract. In short:
+- `MCP_AUTH_MODE` (`required` by default, `off` for isolated local dev) is the ONLY auth switch
+- The keyring is declared in `configs/config.yaml` as `auth.keys: [{user_id, key_env}]`; the token
+  value is read at startup from the env var named by `key_env` (`internal/auth/keyring.go`)
+- Fail-closed: unknown mode, empty keyring in required mode, unset `key_env`, duplicate `user_id`
+  or duplicate token abort startup. Never reintroduce an "on empty → skip" behaviour
+- `/mcp`, `/sse`, `/message` and `/upload` require `Authorization: Bearer <token>`. `/health`,
+  `/metrics`, `/files/` and `/internal/resource/{token}` stay open (container healthcheck,
+  network-isolated internal streaming)
+- Middleware order for the MCP endpoints is body limit → CORS → auth → rate limit, so clients
+  receive 401/503 from auth, not a CORS error
 
 ### mcp-go Library Hooks
 Uses `github.com/mark3labs/mcp-go` server hooks:
 ```go
 hooks := &server.Hooks{}
 hooks.AddAfterInitialize(func(ctx context.Context, id any, msg *mcp.InitializeRequest, result *mcp.InitializeResult) {
-    if userID, ok := msg.Params.Capabilities.Experimental["user_id"].(string); ok {
-        sessionStore.Set(sess.SessionID(), userID)
+    if sess := server.ClientSessionFromContext(ctx); sess != nil {
+        // Identity comes from the bearer token in ctx, never from msg.
+        auth.BindSessionUserID(ctx, "", sessionStore, sess.SessionID())
     }
 })
 hooks.AddOnUnregisterSession(func(ctx context.Context, sess server.ClientSession) {

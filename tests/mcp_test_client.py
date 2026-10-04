@@ -11,6 +11,17 @@ Usage:
     python tests/mcp_test_client.py --user-id test_user
     python tests/mcp_test_client.py --tools echo,datetime,kb_ingest
     python tests/mcp_test_client.py --skip-external      # Skip tools needing external services
+
+Authentication:
+    The MCP endpoints require a bearer token when MCP_AUTH_MODE=required (the
+    default). Export the token of a keyring entry, e.g.:
+
+        export MCP_AUTH_KEY_AMPHORA=$(grep ^MCP_AUTH_KEY_AMPHORA deployments/.env | cut -d= -f2)
+        python tests/mcp_test_client.py --skip-external
+
+    The server derives the user_id from that token; the user_id sent in
+    capabilities.experimental is ignored. With MCP_AUTH_MODE=off no token is
+    needed.
 """
 
 import argparse
@@ -32,6 +43,16 @@ import requests
 DEFAULT_SERVER_URL = "http://localhost:8080/mcp"
 DEFAULT_USER_ID = "test_client"
 DEFAULT_TIMEOUT = 120
+
+# Bearer token for the MCP and /upload endpoints. The server maps it to a user_id
+# (configs/config.yaml -> auth.keys[].key_env), so capabilities.experimental
+# .user_id is no longer the source of identity. First non-empty value wins.
+AUTH_TOKEN = (
+    os.getenv("MCP_AUTH_TOKEN")
+    or os.getenv("MCP_AUTH_KEY_AMPHORA")
+    or os.getenv("MCP_UPLOAD_API_KEY")
+    or ""
+)
 
 # Tools that require external services (LLM, PostgreSQL, SearXNG, etc.)
 EXTERNAL_DEPENDENCY_TOOLS = {
@@ -128,6 +149,8 @@ class MCPClient:
             payload["params"] = params
 
         headers = {"Content-Type": "application/json"}
+        if AUTH_TOKEN:
+            headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
 
@@ -145,7 +168,12 @@ class MCPClient:
         return resp.json()
 
     def initialize(self) -> dict:
-        """Initialize MCP session with user_id."""
+        """Initialize MCP session.
+
+        capabilities.experimental.user_id is still sent for compatibility with
+        servers that predate token auth, but the current server ignores it: the
+        session identity comes from the bearer token.
+        """
         result = self._send_request("initialize", {
             "protocolVersion": "2025-03-26",
             "capabilities": {
@@ -178,16 +206,25 @@ class MCPClient:
         upload_url = self.base_url.rsplit("/mcp", 1)[0] + "/upload"
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f, mime_type)}
-            headers = {"X-Session-ID": self.session_id} if self.session_id else {}
+            headers = {}
+            if AUTH_TOKEN:
+                headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+            if self.session_id:
+                headers["X-Session-ID"] = self.session_id
             resp = self.session.post(upload_url, files=files, headers=headers, timeout=120)
         resp.raise_for_status()
         return resp.json()["uri"]
 
     def health_check(self) -> bool:
-        """Check if MCP server is healthy by probing the MCP endpoint."""
+        """Check if the MCP server is reachable via GET /health.
+
+        /health is intentionally unauthenticated (container healthcheck), so
+        this works regardless of MCP_AUTH_MODE.
+        """
+        health_url = self.base_url.rsplit("/mcp", 1)[0] + "/health"
         try:
-            resp = self.session.post(self.base_url, json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 0}, timeout=10)
-            return resp.status_code in (200, 202)
+            resp = self.session.get(health_url, timeout=10)
+            return resp.status_code == 200
         except requests.RequestException:
             return False
 

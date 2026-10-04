@@ -77,18 +77,32 @@ docker-compose -f deployments/docker-compose.yml ps
 # Required
 LLM_API_URL=http://localhost:11434
 LLM_MODEL=llama3
-DATABASE_URL=postgresql://mcp:***@localhost:5432/knowledge
+
+# PostgreSQL — DATABASE_URL is NOT set here: docker-compose.yml builds it from
+# these three (internal host `postgres:5432`), so the password has a single
+# source of truth. Keep POSTGRES_PASSWORD URL-safe ([A-Za-z0-9._-]).
+POSTGRES_USER=mcp
+POSTGRES_PASSWORD=change_me
+POSTGRES_DB=knowledge
 
 # RustFS/S3 (required for storage tools)
 RUSTFS_ENDPOINT=http://rustfs:9000
 RUSTFS_PUBLIC_URL=http://your-public-url:9000
-RUSTFS_ACCESS_KEY_ID=rustfsadmin
-RUSTFS_SECRET_ACCESS_KEY=rustfsadmin
+RUSTFS_ACCESS_KEY_ID=change_me
+RUSTFS_SECRET_ACCESS_KEY=change_me
+
+# MCP endpoint auth (see deployments/.env.example)
+MCP_AUTH_MODE=required
+MCP_AUTH_KEY_AMPHORA=change_me
 
 # Security (defaults work for most deployments)
 SSRF_ALLOWLIST=rustfs
 S3_OPERATION_TIMEOUT_SECONDS=30
 RUSTFS_PRESIGNED_TTL_SECONDS=3600
+
+# NOTE: the variables above are declared `${VAR:?}` in docker-compose.yml — the
+# stack refuses to start, naming the missing variable, instead of booting with an
+# empty secret or a public default. Generate values with `openssl rand -hex 32`.
 ```
 
 ### Start Services

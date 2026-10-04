@@ -9,7 +9,7 @@ This document describes the HTTP API and MCP protocol interface for the MCP Orch
 | Protocol | MCP (Model Context Protocol) |
 | Transport | Streamable HTTP |
 | Default Port | 8080 |
-| Host | 0.0.0.0 |
+| Bind Host | `127.0.0.1` (override with `MCP_BIND_HOST`; `0.0.0.0` exposes it on all interfaces) |
 
 ---
 

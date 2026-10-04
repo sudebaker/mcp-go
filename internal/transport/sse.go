@@ -113,7 +113,7 @@ func (s *MCPServer) authMiddleware(next http.HandlerFunc) http.Handler {
 
 // MCPConfig holds configuration for creating a new MCPServer.
 type MCPConfig struct {
-	// Host is the network address to bind (default: "0.0.0.0")
+	// Host is the network address to bind (default: "127.0.0.1")
 	Host string
 	// Port is the TCP port to listen on (default: 8080)
 	Port int
@@ -169,7 +169,7 @@ type MCPConfig struct {
 // Example:
 //
 //	cfg := transport.MCPConfig{
-//	    Host: "0.0.0.0",
+//	    Host: "127.0.0.1",
 //	    Port: 8080,
 //	    ServerName: "mcp-orchestrator",
 //	    Version: "1.0.0",

@@ -11,7 +11,7 @@
 //
 //	configuration:
 //	  server:
-//	    host: "0.0.0.0"
+//	    host: "${MCP_BIND_HOST:-127.0.0.1}"
 //	    port: 8080
 //	    base_url: "${BASE_URL:-http://localhost:8080}"
 //
@@ -53,7 +53,9 @@ type Config struct {
 // ServerConfig holds HTTP server-specific settings including network binding,
 // rate limiting, and CORS configuration.
 type ServerConfig struct {
-	// Host is the network address to bind to (default: "0.0.0.0")
+	// Host is the network address to bind to (default: "127.0.0.1").
+	// Override with the MCP_BIND_HOST environment variable (e.g. "0.0.0.0"
+	// to expose the server on every interface, as done inside a container).
 	Host string `yaml:"host"`
 	// Port is the TCP port to listen on (default: 8080)
 	Port int `yaml:"port"`
@@ -245,8 +247,11 @@ func expandAndUnmarshal(raw []byte) (*Config, error) {
 // applyDefaults fills zero-value fields with sensible defaults.
 // POST: cfg.Server.Port != 0, cfg.Server.Name != "", etc.
 func applyDefaults(cfg *Config) {
+	// SECURITY: loopback by default. A service that publishes a port must opt
+	// in to a wider bind explicitly via MCP_BIND_HOST (configs/config.yaml
+	// already resolves "${MCP_BIND_HOST:-127.0.0.1}").
 	if cfg.Server.Host == "" {
-		cfg.Server.Host = "0.0.0.0"
+		cfg.Server.Host = "127.0.0.1"
 	}
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080

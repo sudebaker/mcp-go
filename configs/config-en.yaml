@@ -1,5 +1,5 @@
 server:
-  host: "0.0.0.0"
+  host: "${MCP_BIND_HOST:-127.0.0.1}"
   port: 8080
   name: "mcp-orchestrator"
   # base_url: Public-facing URL for SSE clients to send messages (e.g., http://localhost:8080).

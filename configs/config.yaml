@@ -1,5 +1,8 @@
 server:
-  host: "0.0.0.0"
+  # Bind address. Default 127.0.0.1 = reachable only from the host itself.
+  # Set MCP_BIND_HOST=0.0.0.0 only when the port must be exposed on the LAN
+  # (containers do this, and keep the published host port on 127.0.0.1).
+  host: "${MCP_BIND_HOST:-127.0.0.1}"
   port: 8080
   name: "mcp-orchestrator"
   # base_url: Public-facing URL for SSE clients to send messages (e.g., http://localhost:8080).

@@ -2,6 +2,47 @@
 
 Compact instructions for working in this MCP Orchestrator repo.
 
+## How We Work Here
+
+Read this before touching the code. This repo has a live deployment behind it.
+
+**Branch from a fresh `main`, one worktree per task.**
+
+```bash
+git fetch origin && git checkout -B main origin/main
+git worktree add ../mcp-go-<task> -b <role>/<task> origin/main
+```
+
+Worktrees live next to the repo, inside `~/Proyectos/`. Do not clone the repo into
+scratch or temp directories: clones outside the project root get purged and rot.
+Remove the worktree (`git worktree remove <dir>`) once its PR is merged.
+
+**Everything lands through a pull request.** Never push to `main`, never force-push a
+shared branch. State in the description what you verified and what you did not.
+
+**Stacked work: declare the base branch.** If your task builds on another open PR, open
+your PR against that branch (not `main`) and say "merges bottom-up" in the description.
+A stack is always merged bottom-up; retarget the upper PRs to `main` with
+`PATCH /repos/{owner}/{repo}/pulls/{n}` (`base=main`) once the lower one lands —
+`gh pr edit --base` needs the `read:org` scope and fails with our token.
+
+**This repo is deployed; the server tree is production.** The running orchestrator is
+the checkout on epicteto (`/home/amphora/dockers/mcp-go`). Never edit it, never
+`git pull` it, never restart the service without being asked. Changes reach production
+only after the PR is merged, by whoever owns the deployment.
+
+**No secrets in the repo.** Tokens and keys (`MCP_AUTH_KEY`, `MCP_UPLOAD_API_KEY`, ...)
+come from the environment. Never commit a real value, never write one into an example
+file, never echo one in a PR, an issue or a commit message.
+
+**Run the checks before opening the PR.** `go fmt ./... && go vet ./... && go test ./...`,
+plus `python -m pytest tests/test_security_mitigations.py -v` if you touched the Python
+tools. CI must be green before merge.
+
+**Report facts, not impressions.** Exact paths, commit hashes, command output. "Should
+work" is not a result. If something fails, say it in the same message as the rest of the
+report — never save a failure for a later turn.
+
 ## Essential Commands
 
 ```bash

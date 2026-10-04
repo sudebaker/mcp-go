@@ -22,35 +22,40 @@ services:
     ports:
       - "8080:8080"
     environment:
-      BASE_URL: ${BASE_URL}
+      BASE_URL: ${BASE_URL:?BASE_URL is required (copy deployments/.env.example to .env)}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       LLM_API_URL: ${LLM_API_URL:-http://ollama:11434}
       LLM_MODEL: ${LLM_MODEL:-llama3}
       LLM_VISION_API_URL: ${LLM_VISION_API_URL}
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required (see deployments/.env.example)}
       FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/data/fastembed}
       CRAWL4AI_URL: ${CRAWL4AI_URL:-http://crawl4ai:11235}
-      CRAWL4AI_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
+      CRAWL4AI_TOKEN: ${CRAWL4AI_TOKEN:?CRAWL4AI_TOKEN is required - generate with openssl rand -hex 32}
       WHISPER_URL: ${WHISPER_URL:-http://whisper:8000}
       SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-rustfs}
       LLM_API_FORMAT: ${LLM_API_FORMAT:-ollama}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY}
       RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-rustfs:9000}
-      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL}
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY}
+      RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?RUSTFS_PUBLIC_URL is required (presigned download URLs)}
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:?RUSTFS_ACCESS_KEY_ID is required}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:?RUSTFS_SECRET_ACCESS_KEY is required}
       # S3_BUCKET_NAME: no se usa, cada tool hardcodea su bucket
       # S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
-      MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY}
+      MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY:?MCP_UPLOAD_API_KEY is required}
       PYTHONUNBUFFERED: ${PYTHONUNBUFFERED:-1}
       MEMGRAPH_URL: ${MEMGRAPH_URL:-bolt://memgraph:7687}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
       MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME}
       MEMGRAPH_PASSWORD: ${MEMGRAPH_PASSWORD}
       MCP_TOOLSET: ${MCP_TOOLSET:-default}
-      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY is required}
+      # Auth del endpoint MCP: MCP_AUTH_MODE (required|off) es el unico interruptor.
+      MCP_AUTH_MODE: ${MCP_AUTH_MODE:?MCP_AUTH_MODE is required (required|off)}
+      # Una var por entrada de configs/config.yaml -> auth.keys[].key_env.
+      # El sufijo DEBE coincidir con el user_id de esa entrada.
+      MCP_AUTH_KEY_AMPHORA: ${MCP_AUTH_KEY_AMPHORA:?MCP_AUTH_KEY_AMPHORA is required}
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -105,9 +110,9 @@ services:
     image: pgvector/pgvector:pg16
     container_name: mcp-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -168,8 +173,8 @@ services:
     ports:
       - "9000:9000"
     environment:
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY}
+      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:?RUSTFS_ACCESS_KEY_ID is required}
+      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:?RUSTFS_SECRET_ACCESS_KEY is required}
     volumes:
       - rustfs-data:/data
     networks:
@@ -281,7 +286,7 @@ services:
       - "11235:11235"
     shm_size: "1gb"
     environment:
-      CRAWL4AI_API_TOKEN: "${CRAWL4AI_TOKEN:-crawl4ai-dev-token-abc123def456}"
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_TOKEN:?CRAWL4AI_TOKEN is required - generate with openssl rand -hex 32}
     dns:
       - 8.8.8.8
       - 1.1.1.1

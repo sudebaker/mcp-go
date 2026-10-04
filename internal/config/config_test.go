@@ -168,6 +168,39 @@ func TestGetToolByName(t *testing.T) {
 	}
 }
 
+// TestExpandEnvVars verifies the ${VAR:-default} contract: the default applies
+// when the variable is unset OR set to an empty value (the doc comment promised
+// both; set-but-empty used to expand to an empty string).
+func TestExpandEnvVars(t *testing.T) {
+	t.Run("unset uses default", func(t *testing.T) {
+		unsetEnv(t, "PROBE_VAR")
+		if got := expandEnvVars("${PROBE_VAR:-fallback}"); got != "fallback" {
+			t.Errorf("expandEnvVars = %q, want %q", got, "fallback")
+		}
+	})
+
+	t.Run("empty uses default", func(t *testing.T) {
+		t.Setenv("PROBE_VAR", "")
+		if got := expandEnvVars("${PROBE_VAR:-fallback}"); got != "fallback" {
+			t.Errorf("expandEnvVars = %q, want %q", got, "fallback")
+		}
+	})
+
+	t.Run("value wins over default", func(t *testing.T) {
+		t.Setenv("PROBE_VAR", "explicit")
+		if got := expandEnvVars("${PROBE_VAR:-fallback}"); got != "explicit" {
+			t.Errorf("expandEnvVars = %q, want %q", got, "explicit")
+		}
+	})
+
+	t.Run("no default stays empty", func(t *testing.T) {
+		t.Setenv("PROBE_VAR", "")
+		if got := expandEnvVars("${PROBE_VAR}"); got != "" {
+			t.Errorf("expandEnvVars = %q, want empty", got)
+		}
+	})
+}
+
 // unsetEnv removes key for the duration of the test, restoring the previous
 // value (or absence) on cleanup. Needed because t.Setenv can only set a value.
 func unsetEnv(t *testing.T, key string) {

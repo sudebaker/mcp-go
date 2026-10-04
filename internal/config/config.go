@@ -196,7 +196,7 @@ func expandEnvVars(input string) string {
 			defaultVal = parts[2]
 		}
 
-		if val, exists := os.LookupEnv(varName); exists {
+		if val, exists := os.LookupEnv(varName); exists && val != "" {
 			return val
 		}
 		return defaultVal

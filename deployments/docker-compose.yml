@@ -106,7 +106,11 @@ services:
       - mcp-external
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8080/health"]
+      # -f/--fail es imprescindible: sin el, curl termina con exit 0 ante
+      # cualquier respuesta HTTP (incluido 503) y Docker marcaria el contenedor
+      # "healthy" con /health degradado. Debe coincidir con el HEALTHCHECK de
+      # deployments/Dockerfile para que el override de compose no lo debilite.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

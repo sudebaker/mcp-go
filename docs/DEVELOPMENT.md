@@ -5,7 +5,8 @@ This guide covers how to build, test, and develop the MCP Orchestrator and its P
 ## Prerequisites
 
 - Go 1.25+
-- Python 3.10+
+- Python 3.14+ (the runtime the tool images are built on: `deployments/Dockerfile` and
+  `tools/data_analysis/sandbox.Dockerfile`; the CI pins the same version)
 - Docker & Docker Compose
 - (Optional) Ollama for local LLM inference
 

@@ -13,7 +13,7 @@ Este documento describe como ejecutar y validar pruebas de manera consistente en
 
 ## Prerrequisitos
 
-- Go 1.23+
+- Go 1.25+
 - Docker y Docker Compose
 - Servicios levantados cuando la prueba lo requiera
 

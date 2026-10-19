@@ -2,7 +2,7 @@
 
 A Go-based MCP (Model Context Protocol) server that orchestrates external tools — primarily Python — for data analysis, OCR, report generation, knowledge base management, and more. Built for air-gapped and restricted-network deployments.
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://www.docker.com/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green?style=flat)](https://modelcontextprotocol.io/)
 
@@ -17,8 +17,8 @@ A Go-based MCP (Model Context Protocol) server that orchestrates external tools 
 
 ## Requirements
 
-- Go 1.23+
-- Docker and Docker Compose
+- Go 1.25+ (see `go.mod`)
+- Docker and Docker Compose — the server image ships the Python 3.14 runtime the tools run on
 - Optional: Ollama on the same Docker network
 
 ## Quick Start

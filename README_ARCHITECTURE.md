@@ -222,10 +222,12 @@ __RESULT__:{"success": true, ...}
 1. **Redis** - Ping with 2s timeout
 2. **PostgreSQL** - Ping with 2s timeout
 3. **Config** - Verify tools are defined
-4. **Memory** - Go runtime heap against the detected budget (cgroup limit, else
+4. **Memory** - Kernel-measured memory usage against the detected budget
+   (`memory.current` / `memory.usage_in_bytes` of the process's own cgroup, else
+   the Go heap when no usage file is readable; budget from cgroup limit, else
    `GOMEMLIMIT`, else legacy absolute thresholds). Degraded above 70% of the
    budget, error log above 90%. **Never unhealthy**: `/health` only answers 503
-   when a check means "this process cannot serve", so a heap that grew during a
+   when a check means "this process cannot serve", so memory that grew during a
    burst cannot flip the container health status.
 
 **Key Functions:**

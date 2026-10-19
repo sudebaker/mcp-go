@@ -78,8 +78,17 @@ dejar rastro en `/health`. Si el endpoint no expone `/api/show` (proveedor
 OpenAI-compatible), avisa de que la visión **no se pudo verificar** en vez de
 callarlo: la sección nunca da un «todo bien» que no ha comprobado. Es **aviso,
 no error** —el host del LLM puede estar apagado y eso no impide desplegar el
-orquestador—, pero un `warn` ahí significa 5 tools muertos con `/health` en
-verde: no se salta.
+orquestador—, pero los tres avisos no pesan lo mismo:
+
+| aviso | qué rompe | estado |
+|---|---|---|
+| `LLM_MODEL=… NO lo sirve` | los **5 tools con LLM** dan 404 con `/health` en verde | no se salta |
+| `no declara visión` | solo `analyze_image` (`tools/vision_ocr`) con imágenes | no se salta si se usan imágenes |
+| `no puedo verificar la visión` (sin `/api/show`) | nada comprobado: es un no-dato, no un verde | se asume el riesgo a sabiendas |
+
+Un `warn` de la primera fila es el que dejó cinco tools muertos durante días con
+el contenedor `healthy`; los otros dos son degradaciones acotadas y se leen antes
+de desplegar, no se ignoran.
 
 ## 2. Backup y rename
 

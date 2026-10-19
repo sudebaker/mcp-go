@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// probeLog es lo que convierte el stub en un ancla del payload: el preflight ya
+// no solo pregunta si el host responde, pregunta a la ruta que el código
+// construye. Sin ver el cuerpo enviado no se puede distinguir un probe correcto
+// de uno que se pondría en rojo a sí mismo con un modelo thinking.
+type probeLog struct {
+	mu     sync.Mutex
+	paths  []string
+	bodies []string
+}
+
+// record guarda ruta y cuerpo y devuelve el cuerpo leído, para que el handler
+// pueda seguir decodificándolo (r.Body queda consumido).
+func (p *probeLog) record(r *http.Request) string {
+	body, _ := io.ReadAll(r.Body)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paths = append(p.paths, r.URL.Path)
+	p.bodies = append(p.bodies, string(body))
+	return string(body)
+}
+
+func (p *probeLog) Paths() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.paths...)
+}
+
+// BodiesFor devuelve los cuerpos recibidos en una ruta concreta.
+func (p *probeLog) BodiesFor(path string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for i, seen := range p.paths {
+		if seen == path && i < len(p.bodies) {
+			out = append(out, p.bodies[i])
+		}
+	}
+	return out
+}
+
 // Preflight-env.sh tiene un historial de verdes falsos y rojos falsos que ningún
 // test anclaba (el `:latest` que Ollama publica y el `.env` del host con un tag
 // inexistente que dejó los 5 tools con LLM en 404 sin que /health se enterara).
@@ -25,8 +66,9 @@ const preflightScript = "../deployments/scripts/preflight-env.sh"
 
 // requiredEnv arma un .env mínimo que compose acepta, con el bloque LLM apuntando
 // al stub. Los valores son de mentira a propósito: sin credenciales reales.
-func requiredEnv(llmURL, llmModel string) string {
-	return strings.Join([]string{
+// extra añade líneas opcionales (LLM_API_FORMAT=...) sin duplicar el .env base.
+func requiredEnv(llmURL, llmModel string, extra ...string) string {
+	lines := []string{
 		"ADMIN_API_KEY=test-admin",
 		"BASE_URL=http://localhost:8080",
 		"CRAWL4AI_TOKEN=test-crawl",
@@ -42,23 +84,28 @@ func requiredEnv(llmURL, llmModel string) string {
 		"SANDBOX_REQUIRED=true",
 		"LLM_API_URL=" + llmURL,
 		"LLM_MODEL=" + llmModel,
-		"",
-	}, "\n")
+	}
+	for _, e := range extra {
+		if e != "" {
+			lines = append(lines, e)
+		}
+	}
+	return strings.Join(append(lines, ""), "\n")
 }
 
 // stubOllama reproduce lo mínimo que el preflight consulta: /api/tags para saber
-// qué hay servido y /api/show para las capacidades declaradas.
-func stubOllama(t *testing.T, served map[string][]string) *httptest.Server {
+// qué hay servido, /api/show para las capacidades declaradas y /api/chat, que es
+// la ruta que el código CONSTRUYE para hablar con ollama. Sin esa tercera ruta el
+// stub aprobaba el catálogo y el probe del endpoint daba 404: un rojo falso sobre
+// el .env correcto (y antes de #53, un agujero que ningún test ejercitaba).
+func stubOllama(t *testing.T, served map[string][]string) (*httptest.Server, *probeLog) {
 	t.Helper()
 
-	var mu sync.Mutex
-	var hits []string
+	log := &probeLog{}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/tags", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		hits = append(hits, r.URL.Path)
-		mu.Unlock()
+		log.record(r)
 
 		type model struct {
 			Name string `json:"name"`
@@ -73,14 +120,12 @@ func stubOllama(t *testing.T, served map[string][]string) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		hits = append(hits, r.URL.Path)
-		mu.Unlock()
+		body := log.record(r)
 
 		var req struct {
 			Name string `json:"name"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		_ = json.Unmarshal([]byte(body), &req)
 		caps, ok := served[req.Name]
 		if !ok {
 			caps, ok = served[req.Name+":latest"]
@@ -92,29 +137,45 @@ func stubOllama(t *testing.T, served map[string][]string) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": caps})
 	})
+	// Respuesta mínima válida de /api/chat, la misma forma que devuelve Ollama.
+	// El cuerpo enviado queda registrado para poder anclar `think:false`.
+	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
+		log.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model":   "stub",
+			"message": map[string]string{"role": "assistant", "content": "ok"},
+			"done":    true,
+		})
+	})
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, log
 }
 
 // stubOpenAICompatible es el caso que quedó sin anclar: un endpoint que solo
 // habla el protocolo OpenAI (`/v1/models` sí, `/api/tags` y `/api/show` no).
 // Ahí la capacidad de visión no es consultable, y callarlo era un verde falso.
-func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, func() []string) {
+// Sirve también la ruta que el código construye con LLM_API_FORMAT=openai
+// (`{LLM_API_URL}/chat/completions`), en las dos formas que publican los
+// gateways: con y sin prefijo /v1 sobre la base.
+func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, *probeLog) {
 	t.Helper()
 
-	var mu sync.Mutex
-	var hits []string
-	record := func(r *http.Request) {
-		mu.Lock()
-		hits = append(hits, r.URL.Path)
-		mu.Unlock()
+	log := &probeLog{}
+
+	chatOK := func(w http.ResponseWriter, r *http.Request) {
+		log.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "ok"}}},
+		})
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		record(r)
+		log.record(r)
 		type model struct {
 			ID string `json:"id"`
 		}
@@ -128,20 +189,19 @@ func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})
+	mux.HandleFunc("/chat/completions", chatOK)
+	mux.HandleFunc("/v1/chat/completions", chatOK)
 	notOllama := func(w http.ResponseWriter, r *http.Request) {
-		record(r)
+		log.record(r)
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}
 	mux.HandleFunc("/api/tags", notOllama)
 	mux.HandleFunc("/api/show", notOllama)
+	mux.HandleFunc("/api/chat", notOllama)
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return srv, func() []string {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]string(nil), hits...)
-	}
+	return srv, log
 }
 
 // runPreflight ejecuta el script real con el .env dado y devuelve stdout+stderr
@@ -191,7 +251,7 @@ func asExitError(err error, target **exec.ExitError) bool {
 // TestPreflightLLM_servedTagDeclaresVision: el caso verde. Tag servido con
 // exactamente el nombre del .env y con visión declarada.
 func TestPreflightLLM_servedTagDeclaresVision(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{
+	srv, _ := stubOllama(t, map[string][]string{
 		"qwen3.5:9b": {"completion", "vision", "tools", "thinking"},
 	})
 
@@ -208,7 +268,7 @@ func TestPreflightLLM_servedTagDeclaresVision(t *testing.T) {
 // falso de @reviewer: Ollama publica `minicpm-v4.5` como `minicpm-v4.5:latest`, y
 // el `.env` sin sufijo funciona. Si alguien vuelve al match exacto, esto falla.
 func TestPreflightLLM_latestSuffixAccepted(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{
+	srv, _ := stubOllama(t, map[string][]string{
 		"minicpm-v4.5:latest": {"completion", "vision"},
 	})
 
@@ -224,7 +284,7 @@ func TestPreflightLLM_latestSuffixAccepted(t *testing.T) {
 // preflight no puede dar error (el orchestrator arranca), pero callarlo deja
 // analyze_image roto sin rastro en /health.
 func TestPreflightLLM_servedWithoutVisionWarns(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{
+	srv, _ := stubOllama(t, map[string][]string{
 		"gpt-oss:20b": {"completion", "tools", "thinking"},
 	})
 
@@ -239,7 +299,7 @@ func TestPreflightLLM_servedWithoutVisionWarns(t *testing.T) {
 // `qwen3.5:9b-32k`, que el host no servía. Elige un nombre que sea prefijo de
 // otro servido para que un match laxo (grep sin comillas) también falle aquí.
 func TestPreflightLLM_unknownTagStaysRed(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{
+	srv, _ := stubOllama(t, map[string][]string{
 		"qwen3.5:9b":     {"completion", "vision", "tools"},
 		"qwen3.5:9b-mlx": {"completion", "vision", "tools"},
 	})
@@ -261,7 +321,7 @@ func TestPreflightLLM_unknownTagStaysRed(t *testing.T) {
 // contra el nombre completo entrecomillado y no una subcadena, que es el verde
 // falso más fácil de introducir.
 func TestPreflightLLM_familyNameIsNotAServedTag(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{
+	srv, _ := stubOllama(t, map[string][]string{
 		"qwen3.5:9b": {"completion", "vision"},
 	})
 
@@ -294,9 +354,13 @@ func TestPreflightLLM_hostUnreachableWarns(t *testing.T) {
 // que nadie verificó. Ahora lo dice como aviso, con la misma severidad que los
 // otros dos (si alguien lo degrada a `ok`, el assert de `warn ` y el recuento caen).
 func TestPreflightLLM_openAICompatibleCannotVerifyVision(t *testing.T) {
-	srv, hits := stubOpenAICompatible(t, "qwen3.5:9b")
+	srv, log := stubOpenAICompatible(t, "qwen3.5:9b")
 
-	out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b"))
+	// Un proveedor OpenAI-compatible se declara con LLM_API_FORMAT=openai: el
+	// código construye entonces `{LLM_API_URL}/chat/completions`, que este stub
+	// sirve. Sin el formato explícito el preflight construiría /api/chat, que es
+	// el rojo correcto del caso siguiente, no este.
+	out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b", "LLM_API_FORMAT=openai"))
 
 	require.Equal(t, 0, code, "no poder verificar no es un error de deploy:\n%s", out)
 	require.Contains(t, out, "ok    LLM_MODEL=qwen3.5:9b está servido por "+srv.URL, "output:\n%s", out)
@@ -304,9 +368,10 @@ func TestPreflightLLM_openAICompatibleCannotVerifyVision(t *testing.T) {
 	require.Contains(t, out, "1 aviso(s)", "el no-dato tiene que contar como aviso:\n%s", out)
 	require.NotContains(t, out, "declara visión", "sin /api/show no se puede afirmar nada:\n%s", out)
 	require.NotContains(t, out, "NO lo sirve", "el tag está servido según /v1/models:\n%s", out)
+	require.NotContains(t, out, "ERROR", "un endpoint openai-compatible bien configurado no es un error:\n%s", out)
 
 	// El aviso solo tiene sentido si el script realmente intentó /api/show.
-	seen := strings.Join(hits(), " ")
+	seen := strings.Join(log.Paths(), " ")
 	require.Contains(t, seen, "/v1/models", "output:\n%s", out)
 	require.Contains(t, seen, "/api/show", "no se intentó comprobar la capacidad:\n%s", out)
 }
@@ -315,7 +380,7 @@ func TestPreflightLLM_openAICompatibleCannotVerifyVision(t *testing.T) {
 // tiene que salir 1. Si no, el resto de estos tests podrían estar "pasando" con
 // un script que nunca falla.
 func TestPreflight_envIsAGate(t *testing.T) {
-	srv := stubOllama(t, map[string][]string{"qwen3.5:9b": {"vision"}})
+	srv, _ := stubOllama(t, map[string][]string{"qwen3.5:9b": {"vision"}})
 
 	body := strings.Replace(requiredEnv(srv.URL, "qwen3.5:9b"), "POSTGRES_PASSWORD=test-pg\n", "", 1)
 	out, code := runPreflight(t, body)

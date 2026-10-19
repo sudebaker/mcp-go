@@ -83,6 +83,29 @@ The token wins over the session binding on purpose: a `Mcp-Session-Id` minted fo
 decide which account another user's token runs as. An empty result means "no identity" — nothing
 downstream turns it into a user name.
 
+### Session ids are a client-held capability
+
+`initialize` binds the verified identity to the MCP session (the same `internal/session` store
+`/upload` consults), and that binding is re-resolved on later requests of the same session — the KB
+tools (`kb_ingest`, `kb_search`) receive the `user_id` the lookup returns.
+`internal/transport/session_identity_test.go` asserts that chain end to end over the real middleware
+chain: two users, two sessions, a second call on the same session still resolves the same user, and
+one user's session id never resolves to another user's id.
+
+Keep these two properties in mind when bumping `github.com/mark3labs/mcp-go`:
+
+- The default session manager is `StatelessGeneratingSessionIdManager` in both 0.43.2 and 1.2.0:
+  ids are generated but **not validated server-side**, so the session id is a capability the client
+  holds, not a server-side guarantee about who it is. Authorisation must never rest on it — the
+  bearer token is authoritative and the session store is only the fallback.
+- From 1.2.0 the library knows a "modern" era (protocol `2026-07-28` and later) in which
+  `Mcp-Session-Id` is ignored and every request is served by an ephemeral session. This server does
+  not advertise that version: a client asking for `2026-07-28` is negotiated down to `2025-11-25`
+  and still receives a session id (verified against v1.2.0). If the modern era ever becomes the
+  negotiated one the session fallback disappears, and isolation rests entirely on the token path:
+  it still resolves the user, and `required` mode fails closed (`ErrIdentityRequired`) instead of
+  running a user-scoped tool with an empty `user_id`.
+
 ## Calling the server
 
 ```bash
@@ -137,6 +160,10 @@ MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
   sessionless stateless shape resolves from the token, and user-scoped tools fail closed (both the
   plain and the pooled KB path) without spawning a process.
 - `internal/resources` — `OwnerOf` is the same lookup `PutForUser` uses to pick a namespace.
+- `internal/transport/session_identity_test.go` — end-to-end over the real middleware chain: the
+  identity bound at `initialize` is still resolved on a later `tools/call` of the same session, a
+  second user's session never resolves to the first user's id, and an unauthenticated `initialize`
+  mints no session and writes no binding.
 - `tests/auth_endpoint_test.go` — end-to-end over real HTTP: `401` without a token, session bound
   to the token identity, client-asserted identity ignored, two users isolated.
 

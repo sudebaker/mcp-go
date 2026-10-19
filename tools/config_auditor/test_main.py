@@ -55,10 +55,20 @@ EMPTY_VALUE=
 # API_TOKEN=should-not-be-reported
 """
 
+# A Docker API socket published on its default unauthenticated port. The port
+# never appears in a URL here, only as a value, which is how a compose file or a
+# daemon config actually exposes it.
+DOCKER_YAML = """\
+daemon:
+  host: unix:///var/run/docker.sock
+  port: 2375
+"""
+
 FILES = {
     "tok-bad": ("bad-config.yaml", "text/yaml", BAD_YAML),
     "tok-clean": ("clean-config.yaml", "text/yaml", CLEAN_YAML),
     "tok-env": (".env", "text/plain", ENV_FILE),
+    "tok-docker": ("daemon.yaml", "text/yaml", DOCKER_YAML),
 }
 
 
@@ -227,6 +237,18 @@ class ConfigAuditorTest(unittest.TestCase):
         self.assertFalse(response["success"])
         self.assertEqual(response["error"]["code"], "NO_FILES")
         self.assertIn("gone.yaml", response["error"]["details"][0]["file"])
+
+    def test_docker_api_port_is_caught_without_a_url(self):
+        response = self.audit([{"url": "res://tok-docker", "name": "daemon.yaml"}])
+        structured = response["structured_content"]
+        ports = [
+            f
+            for f in structured["findings"]
+            if f["rule"] == "dangerous_ports"
+        ]
+        self.assertEqual([f["current_value"] for f in ports], ["2375"])
+        self.assertEqual(ports[0]["severity"], "high")
+        self.assertEqual(structured["findings_by_severity"]["high"], 1)
 
     def test_missing_files_argument_is_an_error(self):
         response = run_tool({}, self.token_host)

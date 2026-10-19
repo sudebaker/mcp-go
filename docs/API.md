@@ -398,7 +398,7 @@ line and the failure is reported in `notes`.
 | Rule | Severity | Flags |
 |------|----------|-------|
 | `secrets` | critical | `password`/`secret`/`token`/`api_key`/`private_key`/`client_secret`… with a literal value. Environment references (`${VAR}`), empty strings, `<placeholders>` and commented-out lines are not reported; the value is redacted in the output |
-| `dangerous_ports` | high | Ports 22, 3389, 6379, 27017, 9200, 11211 bound or dialled |
+| `dangerous_ports` | high | Ports 22, 2375/2376, 3389, 6379, 27017, 9200, 11211 bound or dialled |
 | `debug_mode` | medium | `debug: true` / `DEBUG=1`, from the parsed tree or a line match |
 | `empty_required` | medium | Keys declared with no value (`timeout:` in YAML, `TIMEOUT=` in `.env`) |
 | `hardcoded_ips` | medium | Literal IPv4 addresses; `0.0.0.0`, `127.0.0.1` and `255.255.255.255` are treated as bind targets, not findings |

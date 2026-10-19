@@ -85,13 +85,14 @@ AUDIT_RULES: Dict[str, Dict[str, Any]] = {
         ),
     },
     "dangerous_ports": {
-        "pattern": r"(?::|port\s*[:=]\s*)(?P<value>22|3389|6379|27017|9200|11211)\b",
+        "pattern": r"(?::|port\s*[:=]\s*)(?P<value>22|2375|2376|3389|6379|27017|9200|11211)\b",
         "description": "Configuration binds or points at a dangerous service port",
         "severity": "high",
         "recommendation": (
-            "Do not expose management/datastore ports (SSH 22, RDP 3389, "
-            "Redis 6379, MongoDB 27017, Elasticsearch 9200, memcached 11211); "
-            "bind to localhost or front it with an authenticated proxy."
+            "Do not expose management/datastore ports (SSH 22, Docker API "
+            "2375/2376, RDP 3389, Redis 6379, MongoDB 27017, Elasticsearch "
+            "9200, memcached 11211); bind to localhost or front it with an "
+            "authenticated proxy."
         ),
     },
     "debug_mode": {

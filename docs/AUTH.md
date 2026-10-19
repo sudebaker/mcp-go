@@ -13,12 +13,14 @@ How the MCP Orchestrator authenticates callers, what it refuses to do, and how t
   auth:
     keys:
       - user_id: amphora
-        key_env: MCP_AUTH_KEY_AMPHORA
+        key_env: MCP_AUTH_KEY
       - user_id: legacy-upload
         key_env: MCP_UPLOAD_API_KEY
   ```
 
-  Each entry names an environment variable; the token lives there and is read once at startup.
+  Each entry names an environment variable; the token lives there and is read once at startup. The
+  name is arbitrary — the invariant is that every `key_env` is unique and set. With one entry it is
+  `MCP_AUTH_KEY`, as shipped in `deployments/.env.example`.
 - **Tokens become digests.** The runtime index is `map[sha256(token)]user_id`
   (`internal/auth/keyring.go`). The plaintext token is not kept anywhere, so the index cannot be
   replayed as a credential.
@@ -68,7 +70,7 @@ an unguessable token and only reachable on the internal Docker network; the Pyth
 
 ```bash
 curl -sS -X POST http://localhost:8080/mcp \
-  -H "Authorization: Bearer $MCP_AUTH_KEY_AMPHORA" \
+  -H "Authorization: Bearer $MCP_AUTH_KEY" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'

@@ -75,9 +75,9 @@ func TestResolveMode_TrimsSurroundingWhitespace(t *testing.T) {
 func TestBuildKeyring_IndexesSHA256OfToken(t *testing.T) {
 	token := "amphora-token-abcdef"
 	k, err := BuildKeyring(envFrom(map[string]string{
-		"MCP_AUTH_MODE":        ModeRequired,
-		"MCP_AUTH_KEY_AMPHORA": token,
-	}), []Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY_AMPHORA"}})
+		"MCP_AUTH_MODE": ModeRequired,
+		"MCP_AUTH_KEY":  token,
+	}), []Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,11 +111,11 @@ func TestBuildKeyring_IndexesSHA256OfToken(t *testing.T) {
 
 func TestBuildKeyring_MultipleUsers(t *testing.T) {
 	k, err := BuildKeyring(envFrom(map[string]string{
-		"MCP_AUTH_MODE":        ModeRequired,
-		"MCP_AUTH_KEY_AMPHORA": "amphora-token-abcdef",
-		"MCP_UPLOAD_API_KEY":   "legacy-upload-token-99",
+		"MCP_AUTH_MODE":      ModeRequired,
+		"MCP_AUTH_KEY":       "amphora-token-abcdef",
+		"MCP_UPLOAD_API_KEY": "legacy-upload-token-99",
 	}), []Entry{
-		{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY_AMPHORA"},
+		{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"},
 		{UserID: "legacy-upload", KeyEnv: "MCP_UPLOAD_API_KEY"},
 	})
 	if err != nil {
@@ -133,13 +133,13 @@ func TestBuildKeyring_MultipleUsers(t *testing.T) {
 // naming the entry. No entry is ever skipped, and no partial keyring is returned.
 func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 	okEnv := map[string]string{
-		"MCP_AUTH_MODE":        ModeRequired,
-		"MCP_AUTH_KEY_AMPHORA": "amphora-token-abcdef",
-		"MCP_AUTH_KEY_BOB":     "bob-token-1234567890",
-		"MCP_AUTH_KEY_SHORT":   "short",
-		"MCP_AUTH_KEY_EMPTY":   "",
+		"MCP_AUTH_MODE":      ModeRequired,
+		"MCP_AUTH_KEY":       "amphora-token-abcdef",
+		"MCP_AUTH_KEY_BOB":   "bob-token-1234567890",
+		"MCP_AUTH_KEY_SHORT": "short",
+		"MCP_AUTH_KEY_EMPTY": "",
 	}
-	valid := Entry{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY_AMPHORA"}
+	valid := Entry{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}
 	second := Entry{UserID: "bob", KeyEnv: "MCP_AUTH_KEY_BOB"}
 
 	tests := []struct {
@@ -164,7 +164,7 @@ func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 		},
 		{
 			name:       "empty user_id",
-			entries:    []Entry{{UserID: "  ", KeyEnv: "MCP_AUTH_KEY_AMPHORA"}},
+			entries:    []Entry{{UserID: "  ", KeyEnv: "MCP_AUTH_KEY"}},
 			wantSubstr: "user_id",
 		},
 		{
@@ -179,7 +179,7 @@ func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 		},
 		{
 			name:       "duplicate token",
-			entries:    []Entry{valid, {UserID: "bob", KeyEnv: "MCP_AUTH_KEY_AMPHORA"}},
+			entries:    []Entry{valid, {UserID: "bob", KeyEnv: "MCP_AUTH_KEY"}},
 			wantSubstr: "bob",
 		},
 		{
@@ -238,8 +238,8 @@ func TestBuildKeyring_RejectsPlaceholderTokens(t *testing.T) {
 	} {
 		t.Run(raw, func(t *testing.T) {
 			k, err := BuildKeyring(
-				envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": raw}),
-				[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+				envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": raw}),
+				[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 			)
 			if err == nil {
 				t.Fatalf("expected placeholder %q to be rejected, got a keyring with %d entries", raw, k.Size())
@@ -252,8 +252,8 @@ func TestBuildKeyring_RejectsPlaceholderTokens(t *testing.T) {
 
 	// A generated token is not caught by the placeholder guard.
 	if _, err := BuildKeyring(
-		envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "9f2c7d1e45b8a06c3e5d7f9012ab34cd"}),
-		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+		envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "9f2c7d1e45b8a06c3e5d7f9012ab34cd"}),
+		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 	); err != nil {
 		t.Errorf("a generated token must be accepted, got: %v", err)
 	}

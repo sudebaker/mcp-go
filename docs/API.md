@@ -29,8 +29,12 @@ Tokens are **never** stored in a config file. `configs/config.yaml` declares who
 auth:
   keys:
     - user_id: amphora
-      key_env: MCP_AUTH_KEY_AMPHORA
+      key_env: MCP_AUTH_KEY
 ```
+
+The variable name is arbitrary; the invariant is that every `key_env` is unique and is actually set
+in the container. With a single entry it is `MCP_AUTH_KEY`, the name
+`deployments/.env.example` ships and `deployments/docker-compose.yml` forwards.
 
 The token value is read at startup from the named environment variable, and the server keeps only
 `sha256(token) → user_id`. Generate one with `openssl rand -hex 32` (8–256 chars of

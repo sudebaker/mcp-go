@@ -135,18 +135,30 @@ FROM python-base AS final
 
 WORKDIR /app
 
+# Non-root runtime user. HOME is /app so every tool that resolves a cache or a
+# config dir through $HOME lands somewhere this user owns.
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home \
+        --home-dir /app --shell /usr/sbin/nologin app
+
 # Copy Python packages from deps stage
 COPY --from=python-deps /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 
 # Copy pre-downloaded models (both sentence-transformers and fastembed caches)
-COPY --from=python-deps /root/.cache/huggingface /root/.cache/huggingface
-COPY --from=python-deps /root/.cache/fastembed /root/.cache/fastembed
+# to /app/.cache: fastembed and sentence-transformers find them through
+# FASTEMBED_CACHE_PATH / HF_HOME, set below for the non-root user. --chown does
+# the ownership here instead of a recursive chown, which would duplicate every
+# model file into an extra layer.
+COPY --chown=10001:10001 --from=python-deps /root/.cache/huggingface /app/.cache/huggingface
+COPY --chown=10001:10001 --from=python-deps /root/.cache/fastembed /app/.cache/fastembed
 
 # Copy Go binary
-COPY --from=go-builder /build/mcp-server /app/mcp-server
+COPY --chown=10001:10001 --from=go-builder /build/mcp-server /app/mcp-server
 
-# Copy configuration and tools
+# Copy configuration and tools. Code stays root-owned on purpose: only the
+# cache (/app/.cache) and /data need to be writable by the runtime user, so a
+# compromised tool cannot rewrite the code or the tool definitions it runs.
 COPY configs/ /app/configs/
 COPY tools/ /app/tools/
 COPY templates/ /app/templates/
@@ -159,12 +171,21 @@ RUN if [ -d /tmp/build/.git ]; then \
         touch /app/.git-log.txt; \
     fi
 
-# Create data directory
-RUN mkdir -p /data/reports
+# Create data directory (the tools write reports and uploads here) and hand /app
+# and /data to the runtime user. Non-recursive on purpose: the big trees under
+# /app were already copied with --chown and only the roots are still root-owned.
+RUN mkdir -p /data/reports /data/uploads /data/input \
+    && chown app:app /app /app/.cache /data /data/reports /data/uploads /data/input
 
 # Set environment variables
+ENV HOME=/app
+ENV HF_HOME=/app/.cache/huggingface
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Run as the non-root user
+USER app
 
 # Expose port
 EXPOSE 8080

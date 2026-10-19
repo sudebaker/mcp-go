@@ -90,6 +90,30 @@ jobs:
             config --format json > /tmp/render-lan.json
           python3 scripts/check-publish-hosts.py 0.0.0.0 < /tmp/render-lan.json
 
+  # El sandbox de data_analysis es un Dockerfile aparte: el job de imagen no lo
+  # construye y sus pins (pandas, numpy, xlrd...) no los ve nadie hasta que un
+  # tool falla en runtime. Mismo camino que tools/common/sandbox.py: código en
+  # base64, usuario nobody, rootfs read-only. El código no lleva `import`: el
+  # bootstrap solo expone módulos pre-inyectados (pd, np, json, ...).
+  sandbox:
+    name: Sandbox — build y ejecución (data_analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build
+        run: docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-sandbox:ci .
+      - name: Ejecución — análisis pandas como nobody, rootfs read-only
+        run: |
+          set -euo pipefail
+          code=$(printf '%s' 'df = pd.DataFrame({"region": ["e", "n", "s"], "total": [40.0, 10.0, 50.5]}); print(df.groupby("region")["total"].sum().sort_index().to_string())' | base64 -w0)
+          out=$(docker run --rm --network none --read-only --user nobody \
+            --tmpfs /tmp:size=64M,mode=1777 \
+            -e MPLCONFIGDIR=/tmp/matplotlib \
+            -e MCP_SANDBOX_CODE="$code" \
+            mcp-sandbox:ci python3 /sandbox/sandbox_bootstrap.py)
+          echo "$out"
+          grep -q '"success": true' <<<"$out"
+
   image:
     name: Imagen — build y escaneo
     runs-on: ubuntu-latest

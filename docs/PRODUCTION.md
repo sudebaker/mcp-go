@@ -105,6 +105,46 @@ RUSTFS_PRESIGNED_TTL_SECONDS=3600
 # empty secret or a public default. Generate values with `openssl rand -hex 32`.
 ```
 
+### Container User (non-root)
+
+The image runs as **`app` (uid/gid 10001, `HOME=/app`)**; the container no longer
+starts as root. Two paths must remain writable by that uid:
+
+| Path | Written by |
+|------|------------|
+| `/data` (volume `mcp-data`) | tool reports, uploads, tool input |
+| `/app/.cache` | fastembed + HuggingFace model cache (baked into the image) |
+
+Fresh installs need nothing: the image creates `/data/{reports,uploads,input}`
+owned by `10001:10001`. **A volume left behind by a root-running container is
+not owned by `10001`**, and recreating the stack against it fails with
+`PermissionError` on `/data/reports` (and on any `FASTEMBED_CACHE_PATH` that
+points into `/data` instead of the baked image cache). Re-own the volume
+**before** recreating the container:
+
+```bash
+cd deployments
+docker compose stop mcp-server
+
+# Volume name is <compose project>_mcp-data — confirm it:
+docker volume ls | grep mcp-data
+
+# Existing data: hand it to the runtime uid (does not delete anything)
+docker run --rm -v deployments_mcp-data:/data alpine chown -R 10001:10001 /data
+
+docker compose up -d mcp-server
+docker exec mcp-orchestrator id          # uid=10001(app) gid=10001(app)
+docker exec mcp-orchestrator ls -ld /data/reports /app/.cache/fastembed
+```
+
+`FASTEMBED_CACHE_PATH` defaults to `/app/.cache/fastembed`, the cache baked into
+the image (offline-ready). Only override it in `.env` if the target path is
+writable by uid `10001`; otherwise fastembed silently stops finding its models.
+
+Rollback: `docker compose stop mcp-server`, then `docker run --rm -v
+deployments_mcp-data:/data alpine chown -R 0:0 /data` and redeploy the previous
+image tag — the volume itself is untouched by the chown, so no data is lost.
+
 ### Start Services
 
 ```bash
@@ -209,6 +249,17 @@ curl -v http://localhost:8080/health
 ```bash
 docker logs --tail 200 mcp-orchestrator | grep -E "tool|error|timeout"
 ```
+
+### PermissionError / "Could not load model ... from any source"
+
+The container runs as uid `10001`; a volume created by an older (root) deployment
+is still owned by root. Symptom: `PermissionError` writing `/data/reports` or
+`/data/uploads`; and if `FASTEMBED_CACHE_PATH` was overridden to a path inside
+`/data`, KB tools fail with
+`ValueError: Could not load model sentence-transformers/... from any source`.
+Fix: the `chown -R 10001:10001 /data` step in
+[Container User (non-root)](#container-user-non-root), and drop the
+`FASTEMBED_CACHE_PATH` override unless that path is writable by uid `10001`.
 
 ### LLM not responding
 

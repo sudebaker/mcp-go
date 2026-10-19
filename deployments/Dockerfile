@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-spa \
     # For PostgreSQL
     libpq-dev \
+    # For python-magic (metadata_extractor)
+    libmagic1 \
     # General utilities
     curl \
     git \

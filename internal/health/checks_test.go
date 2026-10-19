@@ -302,6 +302,52 @@ func TestGetHealthMetrics_ExposesMemoryRatio(t *testing.T) {
 	}
 }
 
+// TestHighHeapSimulatedDoesNotFailHealth covers the deployed incident: after
+// 61 tool calls the heap sat at 531 MB and /health answered 503, so the image
+// HEALTHCHECK (curl -f /health) marked the container unhealthy even though the
+// process was serving and the GC reclaimed the heap seconds later.
+//
+// The simulated heap goes through the real classifier and the real aggregation
+// used by handleHealth (internal/transport/sse.go maps exactly StatusUnhealthy
+// to 503), so no unavailable memory budget is invented for the test.
+func TestHighHeapSimulatedDoesNotFailHealth(t *testing.T) {
+	const budget = int64(2) << 30 // the mcp-server compose memory limit
+
+	checker := NewChecker(&config.Config{Tools: []config.ToolConfig{{Name: "kb_search"}}}, nil, nil, nil)
+
+	for _, heap := range []int64{531 << 20, 1600 << 20, 2 << 30, 4 << 30} {
+		status, _ := classifyMemory(heap, budget)
+		if status == StatusUnhealthy {
+			t.Fatalf("heap %d MB must never classify as unhealthy", heap>>20)
+		}
+
+		results := []CheckResult{
+			{Name: "config", Status: StatusHealthy},
+			{Name: "memory", Status: status},
+		}
+		if overall := checker.GetOverallStatus(results); overall == StatusUnhealthy {
+			t.Errorf("heap %d MB: overall status must not be unhealthy (got %s, /health would answer 503)", heap>>20, overall)
+		}
+	}
+}
+
+// TestHighHeapDoesNotMaskFatalChecks is the other half of the contract: the
+// memory ceiling must not hide a dependency that really cannot serve.
+func TestHighHeapDoesNotMaskFatalChecks(t *testing.T) {
+	checker := NewChecker(&config.Config{Tools: []config.ToolConfig{{Name: "kb_search"}}}, nil, nil, nil)
+
+	status, _ := classifyMemory(2<<30, 2<<30) // at the budget: degraded
+	results := []CheckResult{
+		{Name: "config", Status: StatusHealthy},
+		{Name: "memory", Status: status},
+		{Name: "postgres", Status: StatusUnhealthy},
+	}
+
+	if overall := checker.GetOverallStatus(results); overall != StatusUnhealthy {
+		t.Errorf("expected unhealthy when a fatal check fails, got %s", overall)
+	}
+}
+
 // --- Dependency check tests ---
 
 func TestBuildDependencies_EmptyConfig(t *testing.T) {

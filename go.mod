@@ -9,7 +9,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/prometheus/client_golang v1.19.1
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_model v0.6.3
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/rs/zerolog v1.32.0
 	github.com/stretchr/testify v1.12.1
@@ -46,6 +46,6 @@ require (
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
 )

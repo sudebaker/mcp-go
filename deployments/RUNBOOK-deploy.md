@@ -69,9 +69,14 @@ medias). **Con preflight en rojo no se lanza el `up -d`.**
 
 Desde el incidente de `LLM_MODEL=qwen3.5:9b-32k` lleva además una sección
 `Modelo LLM`: consulta `/api/tags` (o `/v1/models`) de `LLM_API_URL` y avisa si
-`LLM_MODEL` no está entre los modelos servidos. Es **aviso, no error** —el host
-del LLM puede estar apagado y eso no impide desplegar el orquestador—, pero un
-`warn` ahí significa 5 tools muertos con `/health` en verde: no se salta.
+`LLM_MODEL` no está entre los modelos servidos. Acepta el tag tal cual y con
+`:latest` (Ollama publica `minicpm-v4.5` como `minicpm-v4.5:latest`), de modo que
+un sufijo inexistente como `-32k` sigue en rojo. Cuando el modelo está servido,
+consulta además `/api/show` y avisa si **no declara `vision`**: `analyze_image`
+(`tools/vision_ocr`) necesita esa capacidad y un tag solo-texto la rompe sin
+dejar rastro en `/health`. Es **aviso, no error** —el host del LLM puede estar
+apagado y eso no impide desplegar el orquestador—, pero un `warn` ahí significa
+5 tools muertos con `/health` en verde: no se salta.
 
 ## 2. Backup y rename
 

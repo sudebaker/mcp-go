@@ -204,7 +204,7 @@ def main() -> None:
                     "request_id": request_id,
                     "error": {
                         "code": "NO_FILES",
-                        "message": "No files provided in file_uris or __files__",
+                        "message": "No files provided in __files__",
                     },
                 }
             )

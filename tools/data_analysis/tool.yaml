@@ -11,7 +11,7 @@ input_schema:
     file_url:
       type: string
       description: HTTP URL to the data file (presigned S3 URL or direct download
-        link). Supports .xlsx, .xls, .csv
+        link), or a res:// URI from a prior upload. Supports .xlsx, .xls, .csv
     file_name:
       type: string
       description: Original filename with extension (e.g., sales.xlsx) - required
@@ -31,27 +31,18 @@ input_schema:
       default: text
       description: 'How to return results: ''text'' (plain), ''json'' (structured),
         ''markdown'' (tables), ''png'' (chart image)'
-    file_uris:
-      type: array
-      description: 'Alternative: resource URIs for attached files. The tool will
-        load them automatically.'
-      items:
-        type: string
-        format: resource-uri
     __files__:
       type: array
-      description: '[deprecated] Use file_uris instead. Alternative: attach files
-        as __files__ parameter.'
+      description: Files to analyze as objects {url, name}; a res:// URI is streamed
+        from the internal resource endpoint. The first file with a supported extension
+        is used.
       items:
         type: object
         properties:
-          type:
-            type: string
           url:
             type: string
+            format: resource-uri
           name:
-            type: string
-          id:
             type: string
   required:
   - question

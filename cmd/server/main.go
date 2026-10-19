@@ -223,6 +223,14 @@ func main() {
 	// Pool keeps 5 persistent Python processes per tool, avoiding model reloads.
 	exec := executor.NewWithTracerSessionStoreAndPool(cfg, tracer, sessionStore, 5)
 
+	// KB tools are partitioned by user_id, and the identity comes from the
+	// verified bearer token (never from the session alone): modern stateless
+	// requests (protocol 2026-07-28) never run initialize, so they have no
+	// session to look up. When the transport enforces auth, a KB call that
+	// reaches the executor without an identity fails closed instead of running
+	// against the shared "anonymous" namespace.
+	exec.SetRequireUserIdentity(keyring != nil && keyring.Enabled())
+
 	// Validate and register tools from configuration
 	for _, toolCfg := range cfg.Tools {
 		if err := executor.ValidateToolConfig(&toolCfg); err != nil {

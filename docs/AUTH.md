@@ -23,9 +23,14 @@ How the MCP Orchestrator authenticates callers, what it refuses to do, and how t
   (`internal/auth/keyring.go`). The plaintext token is not kept anywhere, so the index cannot be
   replayed as a credential.
 - **Identity is never client-asserted.** `capabilities.experimental.user_id` in the MCP
-  `initialize` request is ignored — it is logged and dropped. The session's `user_id` comes from
-  the verified token, and it is what reaches the KB tools. A session that initializes without an
-  authenticated identity stays unbound.
+  `initialize` request is ignored — it is logged and dropped. The `user_id` that reaches the tools
+  comes from the verified token, and it does so on **every** request, not only on the ones that ran
+  `initialize`. A session that initializes without an authenticated identity stays unbound.
+- **User-scoped tools fail closed.** `kb_ingest` and `kb_search` are partitioned by `user_id`. With
+  `MCP_AUTH_MODE=required`, a KB call that reaches the executor with no resolved identity is
+  rejected (`ErrIdentityRequired`) before any subprocess starts — it never runs against the shared
+  `anonymous` namespace. This matters for the stateless protocol era (2026-07-28), where a
+  `tools/call` never runs `initialize` and therefore has no MCP session to look up.
 - **MCP_UPLOAD_API_KEY is an ordinary entry** (`user_id: legacy-upload`) so `/upload` has no
   separate on/off rule of its own.
 
@@ -63,6 +68,18 @@ Middleware order for the MCP endpoints is **body limit → CORS → auth → rat
 Unauthenticated on purpose: `GET /health`, `GET /health/detailed`, `GET /metrics` (container
 healthcheck and operations), `GET /files/...`, and `GET /internal/resource/{token}` (addressed by
 an unguessable token and only reachable on the internal Docker network; the Python tools use it).
+
+### Where the `user_id` comes from
+
+The executor resolves the identity in this order (`internal/executor/identity.go`):
+
+1. **The verified bearer token** (`auth.UserIDFromContext`) — always present on an authenticated
+   request, including modern stateless requests that never run `initialize`.
+2. **The session store**, only as a fallback when the context carries no identity.
+
+The token wins over the session binding on purpose: a `Mcp-Session-Id` minted for one user must not
+decide which account another user's token runs as. An empty result means "no identity" — nothing
+downstream turns it into a user name.
 
 ## Calling the server
 
@@ -110,6 +127,13 @@ MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
 - `internal/transport/upload_identity_test.go` — `/upload` rejects an `X-Session-ID` owned by another
   identity with `403` (and writes nothing), accepts the owner, and still trusts the header when
   `MCP_AUTH_MODE=off`.
+- `internal/transport/tool_identity_test.go` — the tool handler's context carries the token identity
+  through the real mcp-go streamable server, and a stateless 2026-07-28 `tools/call` (no
+  `initialize`, no session) is either refused or runs as the token's user — never with an empty
+  `user_id` (review #78 regression gate).
+- `internal/executor/identity_test.go` — token identity wins over the session binding, the
+  sessionless stateless shape resolves from the token, and user-scoped tools fail closed (both the
+  plain and the pooled KB path) without spawning a process.
 - `internal/resources` — `OwnerOf` is the same lookup `PutForUser` uses to pick a namespace.
 - `tests/auth_endpoint_test.go` — end-to-end over real HTTP: `401` without a token, session bound
   to the token identity, client-asserted identity ignored, two users isolated.
@@ -119,6 +143,7 @@ MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
 - `/files/` is served without auth (documented as intentional: it serves the already-authorized
   internal streaming path). Anyone who can reach the port and knows a filename can read it.
 - With `MCP_AUTH_MODE=off` there is no identity: `/upload` trusts `X-Session-ID` as it did before
-  token auth existed. Do not run `off` outside an isolated local environment.
+  token auth existed, and the KB tools fall back to their shared `anonymous` namespace. Do not run
+  `off` outside an isolated local environment.
 - The placeholder guard is a fixed deny-list of the values shipped in `deployments/.env.example`
   (`change_me`, `changeme`, `placeholder`, `replace_me`, `your_token_here`), not a strength check.

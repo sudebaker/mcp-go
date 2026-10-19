@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
 	"github.com/sudebaker/mcp-go/internal/config"
 	mcptypes "github.com/sudebaker/mcp-go/internal/mcp"
@@ -58,6 +57,10 @@ type Executor struct {
 	}
 	pool        *ProcessPool // Pool of persistent processes for KB tools
 	schemaCache sync.Map     // Cached compiled ToolProperty schemas by tool name
+	// requireUserIdentity makes user-scoped tools fail closed when the request
+	// carries no authenticated identity. It mirrors MCP_AUTH_MODE=required and
+	// is set by the server once the keyring is known.
+	requireUserIdentity bool
 }
 
 // New creates a new Executor with no-op tracing enabled.
@@ -147,6 +150,19 @@ func NewWithTracerSessionStoreAndPool(cfg *config.Config, tracer *tracing.Tracer
 	}
 }
 
+// SetRequireUserIdentity decides whether user-scoped tools (kb_ingest,
+// kb_search) must fail closed when a request carries no authenticated
+// identity. The server sets it to true whenever the transport enforces auth
+// (MCP_AUTH_MODE=required), so a request that somehow reaches a KB tool
+// without a resolved user_id is rejected instead of running against the shared
+// "anonymous" namespace.
+func (e *Executor) SetRequireUserIdentity(required bool) {
+	e.requireUserIdentity = required
+	if e.pool != nil {
+		e.pool.requireUserIdentity = required
+	}
+}
+
 // ExecuteResult contains the outcome of a tool execution.
 // It wraps the tool's response with additional metadata.
 type ExecuteResult struct {
@@ -190,8 +206,16 @@ type ExecuteResult struct {
 //   - ErrorCodeTimeout: execution exceeded the configured timeout
 //   - ErrorCodeExecutionFailed: subprocess error, parsing error, or tool error
 func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	// Resolve the caller identity before any execution path forks. The bearer
+	// token is authoritative; a missing identity on a user-scoped tool fails
+	// closed when auth is enforced (see resolveToolIdentity).
+	userID, err := resolveToolIdentity(ctx, e.sessionStore, toolName, e.requireUserIdentity)
+	if err != nil {
+		return nil, err
+	}
+
 	// Route KB tools through the persistent process pool
-	if e.pool != nil && (toolName == "kb_ingest" || toolName == "kb_search") {
+	if e.pool != nil && requiresIdentity(toolName) {
 		return e.pool.Execute(ctx, toolName, arguments)
 	}
 
@@ -237,14 +261,8 @@ func (e *Executor) Execute(ctx context.Context, toolName string, arguments map[s
 	span.SetAttribute("tool_name", toolName)
 	span.SetAttribute("timeout_seconds", timeout.Seconds())
 
-	userID := ""
-	if e.sessionStore != nil && (toolName == "kb_ingest" || toolName == "kb_search") {
-		if session := server.ClientSessionFromContext(ctx); session != nil {
-			if uid, ok := e.sessionStore.Get(session.SessionID()); ok {
-				userID = uid
-				span.SetAttribute("user_id", userID)
-			}
-		}
+	if userID != "" {
+		span.SetAttribute("user_id", userID)
 	}
 
 	subprocReq := mcptypes.SubprocessRequest{

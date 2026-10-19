@@ -27,7 +27,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.safe_file_ops import SafeFileOperations
-from common.sandbox import execute_in_sandbox, SandboxConfig
+from common.sandbox import (
+    execute_in_sandbox,
+    SandboxConfig,
+    default_sandbox_image,
+)
 from common.llm_cache import call_llm_with_cache
 from common.validators import validate_read_path, is_internal_url
 
@@ -537,7 +541,7 @@ def execute_code_in_sandbox(
         "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
     config = SandboxConfig(
-        image="mcp-python-sandbox:latest",
+        image=default_sandbox_image(),
         timeout_seconds=60,
         memory_limit="512m",  # Increased from 256m for data processing
         cpu_limit=0.5,

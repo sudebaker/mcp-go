@@ -135,12 +135,27 @@ go test ./...
 
 ## Docker Sandbox
 
-The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis` to run LLM-generated Pandas code in isolation.
+`data_analysis` runs LLM-generated Pandas code inside a hardened container: non-root user
+`nobody`, read-only root filesystem, no network, and CPU/memory/PID limits. The image tag is
+`mcp-python-sandbox:latest` — the only name the tool builds and runs.
+
+The build context is the **repository root**, not `tools/data_analysis/`: the Dockerfile copies
+`tools/common/*.py` and `tools/data_analysis/sandbox_bootstrap.py` from there.
 
 ```bash
 # Build from the repository root
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
+
+If the image is missing, the tool builds it on first use (`build_on_missing`, enabled by default)
+with that same Dockerfile and context, so a deployment that mounts `docker.sock` does not need a
+pre-build: it needs read access to the repository tree (the build context) and access to the
+daemon. Compose does not mount the socket, so there the sandbox degrades by design.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | Image tag the tool builds and runs; set it when a deployment pre-builds under another name |
+| `SANDBOX_REQUIRED` | `false` | `true` disables every non-sandboxed fallback, so code only ever runs in the container |
 
 ## Toolset Filtering
 

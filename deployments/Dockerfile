@@ -19,7 +19,7 @@ COPY .git/ /tmp/build/.git/
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mcp-server ./cmd/server
 
 # Stage 2: Python base with system dependencies
-FROM python:3.11-slim-bookworm AS python-base
+FROM python:3.14-slim-bookworm AS python-base
 
 # Install system dependencies for all Python tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-spa \
     # For PostgreSQL
     libpq-dev \
+    # For python-magic (metadata_extractor)
+    libmagic1 \
     # General utilities
     curl \
     git \
@@ -71,15 +73,15 @@ jinja2>=3.1.2
 weasyprint>=60.0
 
 # Data Analysis
-pandas>=2.1.0
+pandas>=2.3.2,<3.0
 openpyxl>=3.1.0
-numpy>=1.24.0,<2.0.0
+numpy>=2.3.2,<3.0
 matplotlib>=3.8.0
 tabulate>=0.9.0
 docker>=7.0.0
 
 # Vision/OCR
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.11,<5.0
 pillow>=10.0.0
 pytesseract>=0.3.10
 
@@ -114,8 +116,10 @@ opensearch-py>=2.4.0
 EOF
 
 # Install Python dependencies
-# Force CPU-only torch to avoid pulling NVIDIA/CUDA transitive dependencies
-RUN pip install --no-cache-dir torch==2.6.0+cpu torchvision==0.21.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+# Force CPU-only torch to avoid pulling NVIDIA/CUDA transitive dependencies.
+# The trio is pinned to the newest release that publishes cp314 wheels on the CPU index
+# (torch 2.9.0+ is the first with cp314; torchaudio stops at 2.11.0, so torch stays at 2.11.0).
+RUN pip install --no-cache-dir torch==2.11.0+cpu torchvision==0.26.0+cpu torchaudio==2.11.0+cpu --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download and cache embedding models for offline use
@@ -132,7 +136,7 @@ FROM python-base AS final
 WORKDIR /app
 
 # Copy Python packages from deps stage
-COPY --from=python-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=python-deps /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 
 # Copy pre-downloaded models (both sentence-transformers and fastembed caches)

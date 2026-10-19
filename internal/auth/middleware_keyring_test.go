@@ -18,8 +18,8 @@ func testKeyring(t *testing.T, env map[string]string, entries []Entry) *Keyring 
 
 func TestKeyringAuth_MissingHeaderIs401(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
+		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 
 	nextCalled := false
@@ -50,8 +50,8 @@ func TestKeyringAuth_MissingHeaderIs401(t *testing.T) {
 
 func TestKeyringAuth_RejectsBadTokens(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
+		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 	h := KeyringAuth(k, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler behind auth must not run")
@@ -80,8 +80,8 @@ func TestKeyringAuth_RejectsBadTokens(t *testing.T) {
 // A client must never be able to claim an identity with a plain header.
 func TestKeyringAuth_CannotSpoofIdentityWithHeaders(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
+		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 	h := KeyringAuth(k, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler behind auth must not run")
@@ -102,8 +102,8 @@ func TestKeyringAuth_CannotSpoofIdentityWithHeaders(t *testing.T) {
 
 func TestKeyringAuth_ValidTokenInjectsUserID(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "KEY_AMPHORA": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
+		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 
 	var gotUser, gotRequestID string

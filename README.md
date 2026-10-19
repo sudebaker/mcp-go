@@ -142,6 +142,13 @@ The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
+The compose stack does not mount `/var/run/docker.sock` into `mcp-server` (that would
+be root-equivalent), so inside the container no Docker daemon is reachable. In that
+case `data_analysis` degrades to the restricted in-process executor and logs
+`Executing user code in restricted mode (no Docker sandbox)`. Set `SANDBOX_REQUIRED=true`
+to hard-fail instead: every call is then rejected with `SANDBOX_UNAVAILABLE`, both with
+`use_sandbox=true` and `use_sandbox=false`.
+
 ## Toolset Filtering
 
 The server can expose different subsets of tools without code changes, using **toolsets** defined in `configs/toolsets.yaml`.

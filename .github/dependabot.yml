@@ -1,8 +1,10 @@
 version: 2
 
 # Las actions van fijadas a version exacta y las imagenes base del Dockerfile a
-# tag de minor (golang:1.25-alpine, python:3.11-slim-bookworm). Dependabot abre
-# el PR del bump; el CI es el que decide si entra.
+# tag de minor (ej. golang:1.27-alpine, no :alpine). Las versiones concretas
+# viven solo en deployments/Dockerfile; este comentario no las repite para que no
+# se quede atras en cada bump. Dependabot abre el PR del bump; el CI es el que
+# decide si entra.
 updates:
   - package-ecosystem: github-actions
     directory: /

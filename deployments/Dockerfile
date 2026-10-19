@@ -156,10 +156,12 @@ COPY --chown=10001:10001 --from=python-deps /root/.cache/fastembed /app/.cache/f
 # Copy Go binary
 COPY --chown=10001:10001 --from=go-builder /build/mcp-server /app/mcp-server
 
-# Copy configuration and tools
-COPY --chown=10001:10001 configs/ /app/configs/
-COPY --chown=10001:10001 tools/ /app/tools/
-COPY --chown=10001:10001 templates/ /app/templates/
+# Copy configuration and tools. Code stays root-owned on purpose: only the
+# cache (/app/.cache) and /data need to be writable by the runtime user, so a
+# compromised tool cannot rewrite the code or the tool definitions it runs.
+COPY configs/ /app/configs/
+COPY tools/ /app/tools/
+COPY templates/ /app/templates/
 
 # Generate a lightweight git-log snapshot for tools that need commit history.
 # Avoids copying the entire .git/ directory into the final image.

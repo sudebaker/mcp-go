@@ -232,14 +232,105 @@ func TestReadMemoryLimitFile(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
 				t.Fatalf("writing fixture: %v", err)
 			}
-			if got := readMemoryLimitFile(path); got != tt.want {
+			if got := readCgroupBytesFile(path); got != tt.want {
 				t.Errorf("expected %d, got %d", tt.want, got)
 			}
 		})
 	}
 
-	if got := readMemoryLimitFile(dir + "/does-not-exist"); got != 0 {
+	if got := readCgroupBytesFile(dir + "/does-not-exist"); got != 0 {
 		t.Errorf("missing file: expected 0, got %d", got)
+	}
+}
+
+// TestReadMemoryCurrentFile covers the usage read that feeds the memory check.
+// Same parsing rules as the limit file, but the fixtures use the real file names
+// (memory.current on cgroup v2, memory.usage_in_bytes on v1) so the intent
+// survives a refactor of the shared parser.
+func TestReadMemoryCurrentFile(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		file    string
+		content string
+		want    int64
+	}{
+		{"memory.current", "1610612736\n", 1536 << 20},
+		{"memory.usage_in_bytes", "268435456\n", 256 << 20},
+		{"memory.current-without-newline", "8388608", 8 << 20},
+		{"memory.current-with-spaces", "  1048576  \n", 1 << 20},
+		{"memory.current-max", "max\n", 0},
+		{"memory.current-empty", "\n", 0},
+		{"memory.current-garbage", "NaN\n", 0},
+		{"memory.current-zero", "0\n", 0},
+		{"memory.usage_in_bytes-sentinel", "9223372036854771712\n", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			path := dir + "/" + tt.file
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatalf("writing fixture: %v", err)
+			}
+			if got := readCgroupBytesFile(path); got != tt.want {
+				t.Errorf("expected %d, got %d", tt.want, got)
+			}
+		})
+	}
+
+	// A missing usage file is the fallback trigger: the check must fall back to
+	// the Go heap, which memorySignal covers below.
+	if got := readCgroupBytesFile(dir + "/missing/memory.current"); got != 0 {
+		t.Errorf("missing memory.current: expected 0, got %d", got)
+	}
+}
+
+// TestMemorySignal_FallsBackToHeap covers hosts with no readable cgroup usage
+// file (bare metal, or cgroup v2 without the memory controller delegated): the
+// signal keeps behaving exactly as before this change.
+func TestMemorySignal_FallsBackToHeap(t *testing.T) {
+	const heap = int64(300 << 20)
+
+	used, source := memorySignal(heap, 0)
+	if source != "heap" {
+		t.Errorf("expected source %q, got %q", "heap", source)
+	}
+	if used != heap {
+		t.Errorf("expected the heap value %d, got %d", heap, used)
+	}
+}
+
+// TestMemorySignal_ScoresKernelUsageNotHeap is the regression test for the
+// finding that motivated this change: a process can sit at ~60% of its budget by
+// HeapAlloc while the kernel already charges it far more. The signal must follow
+// the kernel, and the result must still cap at degraded, never unhealthy.
+func TestMemorySignal_ScoresKernelUsageNotHeap(t *testing.T) {
+	const budget = int64(2) << 30
+
+	heap := int64(600 << 20)   // 29.3% of the budget: healthy if you only watch the heap
+	usage := int64(1500 << 20) // 73.2% of the budget, as the kernel sees it
+
+	used, source := memorySignal(heap, usage)
+	if source != "cgroup" {
+		t.Fatalf("expected source %q, got %q", "cgroup", source)
+	}
+	if used != usage {
+		t.Fatalf("expected the cgroup usage %d, got %d", usage, used)
+	}
+
+	status, _ := classifyMemory(used, budget)
+	if status != StatusDegraded {
+		t.Errorf("expected degraded for %.1f%% of the budget, got %s", float64(used)/float64(budget)*100, status)
+	}
+	if status, _ := classifyMemory(heap, budget); status != StatusHealthy {
+		t.Errorf("the heap alone should look healthy, got %s", status)
+	}
+
+	// Ceiling unchanged: even usage at (and above) the budget stays degraded.
+	for _, bytes := range []int64{2 << 30, 3 << 30} {
+		if status, _ := classifyMemory(bytes, budget); status == StatusUnhealthy {
+			t.Errorf("usage %d MB must never classify as unhealthy", bytes>>20)
+		}
 	}
 }
 
@@ -290,6 +381,67 @@ func TestResolveCgroupV2LimitPath(t *testing.T) {
 	}
 }
 
+func TestResolveCgroupV1Path(t *testing.T) {
+	tests := []struct {
+		name string
+		proc string
+		want string
+	}{
+		{
+			name: "docker container",
+			proc: "12:memory:/docker/abc\n1:name=systemd:/\n",
+			want: "/sys/fs/cgroup/memory/docker/abc/memory.usage_in_bytes",
+		},
+		{
+			name: "shared controller list",
+			proc: "4:cpu,cpuacct,memory:/x\n",
+			want: "/sys/fs/cgroup/memory/x/memory.usage_in_bytes",
+		},
+		{
+			name: "v1 root",
+			proc: "12:memory:/\n",
+			want: "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+		},
+		{
+			name: "v2 only host",
+			proc: "0::/user.slice/user-1000.slice/session-3.scope\n",
+			want: "",
+		},
+		{
+			name: "no memory controller",
+			proc: "4:cpu,cpuacct:/x\n1:name=systemd:/\n",
+			want: "",
+		},
+		{
+			name: "empty",
+			proc: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveCgroupV1Path(tt.proc, "memory.usage_in_bytes"); got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+// TestResolveCgroupV2Path_UsageFile pins that the same own-cgroup resolution the
+// budget uses also yields the memory.current file, so limit and usage are always
+// read from the same cgroup.
+func TestResolveCgroupV2Path_UsageFile(t *testing.T) {
+	const proc = "0::/user.slice/user-1000.slice/session-3.scope\n"
+	if got, want := resolveCgroupV2Path(proc, "memory.current"),
+		"/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope/memory.current"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+	if got, want := resolveCgroupV2LimitPath(proc), "/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope/memory.max"; got != want {
+		t.Errorf("limit path changed: expected %q, got %q", want, got)
+	}
+}
+
 func TestGetHealthMetrics_ExposesMemoryRatio(t *testing.T) {
 	metrics := GetHealthMetrics()
 	if _, ok := metrics["memory_budget_bytes"]; !ok {
@@ -299,6 +451,16 @@ func TestGetHealthMetrics_ExposesMemoryRatio(t *testing.T) {
 		t.Error("memory_used_ratio metric is missing")
 	} else if ratio < 0 || ratio > 1 {
 		t.Errorf("memory_used_ratio out of range: %f", ratio)
+	}
+	if current, ok := metrics["memory_current_bytes"]; !ok {
+		t.Error("memory_current_bytes metric is missing")
+	} else if current < 0 {
+		t.Errorf("memory_current_bytes must never be negative: %f", current)
+	}
+	if ratio, ok := metrics["memory_current_ratio"]; !ok {
+		t.Error("memory_current_ratio metric is missing")
+	} else if ratio < 0 {
+		t.Errorf("memory_current_ratio must never be negative: %f", ratio)
 	}
 }
 

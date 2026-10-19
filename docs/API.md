@@ -100,8 +100,13 @@ Basic health check endpoint.
 
 A `503` is what the container `HEALTHCHECK` reads as "replace me", so only
 checks that mean exactly that are allowed to report `unhealthy`. The `memory`
-check never does: it reports the heap as a fraction of the detected memory
+check never does: it reports memory usage as a fraction of the detected memory
 budget (container cgroup limit, else `GOMEMLIMIT`) and caps at `degraded`.
+Usage is the kernel's own view — `memory.current` of the process's cgroup on v2,
+`memory.usage_in_bytes` on v1 — so runtime metadata, goroutine stacks outside the
+heap, cgo allocations and mmaps all count. When no cgroup usage file is readable
+the check falls back to the Go heap (`HeapAlloc`). The message names the source
+it scored (`cgroup` or `heap`).
 
 **Response:**
 ```json
@@ -151,9 +156,17 @@ Memory-related series (alert on the ratio, not on `/health`):
 
 | Metric | Meaning |
 |--------|---------|
-| `mcp_health_heap_alloc_bytes` | Current heap allocation |
+| `mcp_health_heap_alloc_bytes` | Current Go heap allocation |
 | `mcp_health_memory_budget_bytes` | Detected budget: container cgroup limit, else `GOMEMLIMIT`, else `0` |
-| `mcp_health_memory_used_ratio` | Heap as a fraction of the budget (`0` when unknown) |
+| `mcp_health_memory_current_bytes` | Memory charged to the process's cgroup (`memory.current` on v2, `memory.usage_in_bytes` on v1); `0` when unavailable |
+| `mcp_health_memory_current_ratio` | Cgroup memory usage as a fraction of the budget; `0` when either side is unknown |
+| `mcp_health_memory_used_ratio` | `HeapAlloc` as a fraction of the budget, kept for heap-only dashboards; `0` when unknown |
+
+`mcp_health_memory_current_ratio` is the one to alert on: it is what the kernel
+compares with `memory.max` before the OOM killer fires. It includes the cgroup's
+page cache, which the kernel reclaims under pressure, so a short-lived spike is
+not by itself a leak. `mcp_health_memory_used_ratio` only sees the Go heap and
+under-reports the container's real footprint.
 
 ---
 

@@ -643,8 +643,18 @@ upload:
 ### LLM Configuration
 | Variable | Default | Description |
 |----------|---------|-------------|
-| LLM_API_URL | http://localhost:11434 | LLM API (Ollama) |
+| LLM_API_URL | http://localhost:11434 | LLM API base URL. With `LLM_API_FORMAT=openai` it must already end in `/v1`, because the code appends `/chat/completions` |
 | LLM_MODEL | llama3 | LLM model |
+| LLM_API_FORMAT | ollama | Wire format. `ollama` → `{LLM_API_URL}/api/chat` (native); `openai` → `{LLM_API_URL}/chat/completions` |
+
+The five tools that use an LLM (`batch_summarize`, `data_analysis`, `document_classifier`,
+`regulation_diff`, `vision_ocr`) read the answer from `message.content`. On a *thinking* model
+(`qwen3.5`, `gpt-oss`, `lfm2.5`, ...) Ollama puts the whole answer in `message.thinking` and
+leaves `message.content` empty, which the tools surface as `Could not parse LLM response` while
+`/health` and the deploy preflight stay green. `tools/common/retry.py` therefore sends
+`think: false` on the native endpoint (Ollama ignores the field on models without that
+capability) and, if a model answers only in the reasoning channel, falls back to
+`message.thinking` instead of returning an empty string.
 
 ### Database Configuration
 | Variable | Default | Description |

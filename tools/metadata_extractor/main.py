@@ -13,6 +13,12 @@ import os
 import sys
 from typing import Any
 
+# tool.yaml runs this file as a standalone script (`python3 main.py`), so the
+# tools root is not on sys.path by default. Add it before importing `common`,
+# mirroring data_analysis/main.py, so the tool works both in /app/tools and
+# from a source checkout.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 from common.resources import ToolContext
 
 try:

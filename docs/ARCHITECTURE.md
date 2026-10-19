@@ -40,7 +40,7 @@ MCP-Go is a **Model Context Protocol (MCP) Orchestrator Server** that acts as a 
 
 | Layer | Technology | Purpose |
 |-------|-------------|---------|
-| Server Core | Go 1.25+ | HTTP server, protocol handling, subprocess management |
+| Server Core | Go 1.26+ | HTTP server, protocol handling, subprocess management |
 | Transport | mcp-go library | MCP protocol implementation |
 | Tools | Python 3.14 | Tool implementations (18+ tools) |
 | Configuration | YAML + gopkg.in/yaml.v3 | Type-safe config parsing |

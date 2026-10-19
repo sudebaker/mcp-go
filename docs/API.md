@@ -108,22 +108,24 @@ heap, cgo allocations and mmaps all count. When no cgroup usage file is readable
 the check falls back to the Go heap (`HeapAlloc`). The message names the source
 it scored (`cgroup` or `heap`).
 
-The endpoint runs every configured check (`config`, `memory`, `redis`/`postgres`
-when they are configured, and one TCP reachability check per external dependency)
-and reports the worst result. `status` drives the HTTP code, and Docker's compose
-healthcheck (`curl -fsS`) uses that code to decide whether the container is
-healthy:
+The endpoint runs every configured check (`config`, `memory`, `postgres` when
+`DATABASE_URL` is set, and one TCP reachability check per external dependency) and
+reports the worst result. `redis` is only probed when a Redis client is wired into
+the checker; the server currently passes `nil` (`cmd/server/main.go`), so `redis`
+never appears in `dependencies` and cannot turn the answer into a `503`. `status`
+drives the HTTP code, and Docker's compose healthcheck (`curl -fsS`) uses that code
+to decide whether the container is healthy:
 
 | `status` | HTTP | Meaning |
 |----------|------|---------|
 | `healthy` | `200` | Every check passed. |
 | `degraded` | `200` | A non-critical dependency (`searxng`, `crawl4ai`, `rustfs`, `ollama`) is unreachable or has no URL configured, the memory budget is elevated or nearly exhausted, or there are no tools configured. The server still serves the tools that work. |
-| `unhealthy` | `503` | A core check failed: `postgres`/`redis` ping error or unreachable, no configuration loaded, or a dependency declared `Critical: true` is unreachable. |
+| `unhealthy` | `503` | A core check failed: `postgres` ping error or unreachable, no configuration loaded, or a dependency declared `Critical: true` is unreachable. |
 
 `DependencyCheck.Critical` is what separates the two: only dependencies declared
-critical (`redis`, `postgres`) turn an unreachable dial into `unhealthy`; the rest
-report `degraded`. The memory check never reports `unhealthy`, so a large heap can
-make the answer `degraded` but never a `503`.
+critical turn an unreachable dial into `unhealthy`; the rest report `degraded`. The
+memory check never reports `unhealthy`, so a large heap can make the answer
+`degraded` but never a `503`.
 
 A `degraded` answer is HTTP 200 on purpose: a blip of an optional service must not
 mark the container `unhealthy` and trigger a restart/rollback. Only `unhealthy`

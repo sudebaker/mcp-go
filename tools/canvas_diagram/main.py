@@ -626,6 +626,43 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
     return {"nodes": nodes, "edges": edges, "layout": layout}
 
 
+# A usable DSL answers with connections (`A -> B`). A model that refuses or
+# answers in prose ("I'm sorry, but I can only convert...") used to be taken as
+# the map source as long as the sentence was longer than 3 chars: a canvas of
+# junk nodes, 0 edges, `used_llm: true`. A connection-less answer is only
+# accepted when it is short enough to be a single label.
+DSL_MAX_LABEL_WORDS = 8
+
+
+def sanitize_dsl(raw: Optional[str]) -> Optional[str]:
+    """Turn a raw model answer into a DSL, or None when it is not one."""
+    if not raw:
+        return None
+
+    text = raw.strip()
+    # Models like to wrap the answer in a markdown fence.
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    text = text.strip().strip('"').strip()
+    if not text:
+        return None
+
+    if "->" in text or "→" in text:
+        return text
+
+    # No connection: only a short label is a diagram, prose is not.
+    if len(text.split()) > DSL_MAX_LABEL_WORDS:
+        logger.warning(
+            "LLM answer discarded: prose without DSL connections",
+            extra_data={"words": len(text.split()), "preview": text[:80]},
+        )
+        return None
+
+    return text
+
+
 def generate_from_description(
     description: str, layout: str, llm_api_url: Optional[str], llm_model: str
 ) -> tuple[dict, str, bool]:
@@ -633,10 +670,7 @@ def generate_from_description(
 
     if llm_api_url:
         prompt = generate_dsl_prompt(description)
-        dsl = call_llm(llm_api_url, llm_model, prompt)
-        # Validate that we got a usable DSL (contains at least one arrow or node)
-        if dsl and '->' not in dsl and '→' not in dsl and len(dsl.strip()) < 3:
-            dsl = None  # Fall back to using description directly
+        dsl = sanitize_dsl(call_llm(llm_api_url, llm_model, prompt))
 
     used_llm = bool(dsl)
     if not dsl:

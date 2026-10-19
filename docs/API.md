@@ -661,9 +661,14 @@ capability) and, if a model answers only in the reasoning channel, falls back to
 directly, always in Ollama's native format (it does not read `LLM_API_FORMAT`). It sends
 `think: false` too, and reports `structured_content.llm_fallback: true` — plus a note in the
 response text — when an LLM was configured but returned no usable DSL, instead of claiming
-`used_llm: true` for a map built from the description. Measured against `qwen3.5:9b` with a
-6-line description: 30 s → timeout → description fallback (3 nodes, 0 edges) before, 4 s →
-LLM DSL (5 nodes, 8 edges) after.
+`used_llm: true` for a map built from the description.
+
+"Usable" is narrower than "non-empty": an answer with no connection (`->` / `→`) is only
+accepted when it is a short label (≤ 8 words), so a refusal in prose ("I'm sorry, but I can
+only convert…") is discarded and counted as a fallback instead of becoming a canvas of junk
+nodes with no edges. A markdown fence around the answer is stripped. Measured against
+`qwen3.5:9b` with a 6-line description: 30 s → timeout → description fallback (3 nodes,
+0 edges) before, 4 s → LLM DSL (5 nodes, 8 edges) after.
 
 ### Database Configuration
 | Variable | Default | Description |

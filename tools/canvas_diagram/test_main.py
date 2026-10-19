@@ -120,6 +120,54 @@ def test_successful_llm_answer_is_marked_as_used(monkeypatch):
     assert len(canvas["nodes"]) >= 2
 
 
+def test_prose_answer_is_not_accepted_as_dsl(monkeypatch):
+    module, requests_stub = load_tool(monkeypatch)
+    requests_stub.post = lambda *args, **kwargs: FakeResponse(
+        200,
+        {
+            "response": (
+                "I'm sorry, but I can only convert short flow descriptions "
+                "into diagrams."
+            )
+        },
+    )
+
+    canvas, layout, used_llm = module.generate_from_description(
+        "Login -> Panel", "horizontal", "http://ollama:11434", "qwen3.5:9b"
+    )
+
+    assert used_llm is False, "a refusal in prose is not a DSL"
+    assert canvas["edges"], "the description fallback keeps its arrows"
+
+
+def test_fenced_dsl_is_unwrapped(monkeypatch):
+    module, requests_stub = load_tool(monkeypatch)
+    requests_stub.post = lambda *args, **kwargs: FakeResponse(
+        200, {"response": "```\n[Login] -> [Panel] -> [Facturas]\n```"}
+    )
+
+    canvas, layout, used_llm = module.generate_from_description(
+        "Login -> Panel", "horizontal", "http://ollama:11434", "qwen3.5:9b"
+    )
+
+    assert used_llm is True
+    texts = [node["text"] for node in canvas["nodes"]]
+    assert len(texts) == 3, f"unexpected nodes: {texts}"
+    assert not any("`" in text for text in texts), f"fence leaked into the canvas: {texts}"
+
+
+def test_short_label_without_connections_is_accepted(monkeypatch):
+    module, requests_stub = load_tool(monkeypatch)
+    requests_stub.post = lambda *args, **kwargs: FakeResponse(200, {"response": "Panel"})
+
+    canvas, layout, used_llm = module.generate_from_description(
+        "Login -> Panel", "horizontal", "http://ollama:11434", "qwen3.5:9b"
+    )
+
+    assert used_llm is True
+    assert [node["text"] for node in canvas["nodes"]] == ["Panel"]
+
+
 def test_structured_content_flags_the_silent_fallback(monkeypatch):
     module, requests_stub = load_tool(monkeypatch)
     requests_stub.post = lambda *args, **kwargs: FakeResponse(404, {})

@@ -222,7 +222,11 @@ __RESULT__:{"success": true, ...}
 1. **Redis** - Ping with 2s timeout
 2. **PostgreSQL** - Ping with 2s timeout
 3. **Config** - Verify tools are defined
-4. **Memory** - Go runtime metrics (healthy < 250MB, degraded < 500MB)
+4. **Memory** - Go runtime heap against the detected budget (cgroup limit, else
+   `GOMEMLIMIT`, else legacy absolute thresholds). Degraded above 70% of the
+   budget, error log above 90%. **Never unhealthy**: `/health` only answers 503
+   when a check means "this process cannot serve", so a heap that grew during a
+   burst cannot flip the container health status.
 
 **Key Functions:**
 - `NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Checker` - Create checker

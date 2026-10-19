@@ -14,7 +14,8 @@ Usage:
 
 Authentication:
     The MCP endpoints require a bearer token when MCP_AUTH_MODE=required (the
-    default). Export the token of a keyring entry, e.g.:
+    default). Export the value of one of the keyring entries declared in
+    configs/config.yaml -> auth.keys (key_env), e.g. MCP_AUTH_KEY:
 
         export MCP_AUTH_KEY=$(grep ^MCP_AUTH_KEY deployments/.env | cut -d= -f2)
         python tests/mcp_test_client.py --skip-external
@@ -22,6 +23,40 @@ Authentication:
     The server derives the user_id from that token; the user_id sent in
     capabilities.experimental is ignored. With MCP_AUTH_MODE=off no token is
     needed.
+
+Running modes:
+    --skip-external is the CI/smoke mode: it skips every tool in
+    EXTERNAL_DEPENDENCY_TOOLS plus every case whose dependency probe fails
+    (llm, postgresql, searxng, crawl4ai, whisper, memgraph, rustfs, pdf), which
+    is where the ~39 skipped cases come from. To run those cases you need a
+    stack that really has the services and the same env probes the runner
+    checks, exported in the shell that runs the client:
+
+        export DATABASE_URL=postgresql://user:changeme@localhost:5432/db  # kb_ingest, kb_search
+        export LLM_API_URL=http://localhost:11434                     # analyze_data, batch_summarize, ...
+        export SEARXNG_URL=http://localhost:8080                      # searxng_search
+        export CRAWL4AI_URL=http://localhost:11235                    # browser_scraper
+        export WHISPER_URL=http://localhost:8000                      # transcribe
+        export RUSTFS_ENDPOINT=http://localhost:9000                  # rustfs_storage
+        export MEMGRAPH_HOST=localhost MEMGRAPH_PORT=7687             # memgraph tools
+        python -m pip install weasyprint                              # generate_report (pdf)
+        python tests/mcp_test_client.py                               # no --skip-external
+
+    Locally, the easiest way to have all of that is
+    deployments/docker-compose.yml with the server and the dependencies
+    published (deployments/.env.example documents each <SVC>_PUBLISH_HOST).
+    Against the deployed orchestrator, point --server at it and export
+    MCP_AUTH_KEY plus the *public* URLs of its dependencies: the
+    container-internal hostnames (postgres, ollama, searxng, ...) do not resolve
+    from the client host, so the probes skip those cases even though the server
+    can serve them.
+
+    Negative cases: expect_error=True means "the call must come back as an
+    error", not "this specific error". Schema rejections and tool crashes are
+    indistinguishable on the wire today: cmd/server/main.go returns the generic
+    "Tool execution failed. Check server logs for details." for both, and the
+    validation detail only reaches the server log. Keep those cases tied to the
+    schema in configs/config.yaml so a contract change is visible in review.
 """
 
 import argparse
@@ -380,12 +415,12 @@ def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
                        "question": "How many rows?", "output_format": "text",
                        "use_sandbox": False},
             category="ai", dependencies=["llm"]),
-        ToolTest(name="analyze_data", description="edge: __files__ with string",
+        ToolTest(name="analyze_data", description="error: string __files__ rejected",
             arguments={"__files__": [csv_uri2],
                        "question": "List columns", "output_format": "text",
                        "file_name": "test.csv",
                        "use_sandbox": False},
-            category="ai", dependencies=["llm"]),
+            category="ai", dependencies=["llm"], expect_error=True),
         ToolTest(name="analyze_data", description="error: no file source",
             arguments={"question": "test"},
             category="ai", expect_error=True),
@@ -429,9 +464,9 @@ def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
             arguments={"__files__": [{"url": txt_uri, "name": "doc.txt"}],
                        "summary_type": "individual", "max_length": 200},
             category="ai", dependencies=["llm"]),
-        ToolTest(name="batch_summarize", description="edge: string __files__",
+        ToolTest(name="batch_summarize", description="error: string __files__ rejected",
             arguments={"__files__": [txt_uri], "summary_type": "individual", "max_length": 100},
-            category="ai", dependencies=["llm"]),
+            category="ai", dependencies=["llm"], expect_error=True),
         ToolTest(name="batch_summarize", description="error: empty __files__",
             arguments={"__files__": [], "summary_type": "individual"},
             category="ai", expect_error=True),
@@ -441,9 +476,9 @@ def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
             arguments={"__files__": [{"url": old_uri, "name": "old.txt"},
                                      {"url": new_uri, "name": "new.txt"}]},
             category="ai", dependencies=["llm"]),
-        ToolTest(name="regulation_diff", description="edge: string __files__",
+        ToolTest(name="regulation_diff", description="error: string __files__ rejected",
             arguments={"__files__": [old_uri2, new_uri2]},
-            category="ai", dependencies=["llm"]),
+            category="ai", dependencies=["llm"], expect_error=True),
         ToolTest(name="regulation_diff", description="error: single file",
             arguments={"__files__": [old_uri]},
             category="ai", expect_error=True),
@@ -453,9 +488,9 @@ def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
             arguments={"__files__": [{"url": config_uri, "name": "config.yaml"}],
                        "rules": ["secrets", "debug_mode"]},
             category="ai"),
-        ToolTest(name="config_auditor", description="edge: string __files__",
+        ToolTest(name="config_auditor", description="error: string __files__ rejected",
             arguments={"__files__": [config_uri], "rules": ["secrets"]},
-            category="ai"),
+            category="ai", expect_error=True),
         ToolTest(name="config_auditor", description="error: missing __files__",
             arguments={"rules": ["secrets"]}, category="ai", expect_error=True),
 
@@ -463,9 +498,9 @@ def get_tool_tests(uris: dict[str, str] = None) -> list[ToolTest]:
         ToolTest(name="document_classifier", description="happy: classify text",
             arguments={"__files__": [{"url": txt_uri, "name": "doc.txt"}]},
             category="ai", dependencies=["llm"]),
-        ToolTest(name="document_classifier", description="edge: string __files__",
+        ToolTest(name="document_classifier", description="error: string __files__ rejected",
             arguments={"__files__": [txt_uri]},
-            category="ai", dependencies=["llm"]),
+            category="ai", dependencies=["llm"], expect_error=True),
         ToolTest(name="document_classifier", description="error: missing __files__",
             arguments={"language": "auto"}, category="ai", expect_error=True),
 

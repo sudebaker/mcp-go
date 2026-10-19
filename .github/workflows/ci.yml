@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Build
-        run: docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-sandbox:ci .
+        run: docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
       - name: Ejecución — análisis pandas como nobody, rootfs read-only
         run: |
           set -euo pipefail
@@ -110,7 +110,7 @@ jobs:
             --tmpfs /tmp:size=64M,mode=1777 \
             -e MPLCONFIGDIR=/tmp/matplotlib \
             -e MCP_SANDBOX_CODE="$code" \
-            mcp-sandbox:ci python3 /sandbox/sandbox_bootstrap.py)
+            mcp-python-sandbox:latest python3 /sandbox/sandbox_bootstrap.py)
           echo "$out"
           grep -q '"success": true' <<<"$out"
 

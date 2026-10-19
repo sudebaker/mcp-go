@@ -178,6 +178,21 @@ while IFS= read -r stale; do
 done < <(printf '%s\n' "${!ENV[@]}" | grep -E '_AUTH_KEY(_[A-Z0-9]+)?$' | sort)
 
 # ---------------------------------------------------------------------------
+# 6. Sandbox de ejecución de código (tool data_analysis)
+# ---------------------------------------------------------------------------
+# El contenedor no monta docker.sock: sin daemon, la única vía es el fallback
+# exec() restringido, evadible con una cadena de subclases. SANDBOX_REQUIRED=true
+# (default del compose) lo cierra a costa de deshabilitar la ejecución de código.
+echo
+echo "Sandbox de ejecución (data_analysis):"
+case "$(printf '%s' "${ENV[SANDBOX_REQUIRED]:-}" | tr '[:upper:]' '[:lower:]')" in
+    '')      ok "no está en el .env: el compose aplica SANDBOX_REQUIRED=true (código denegado sin daemon)" ;;
+    true)    ok "SANDBOX_REQUIRED=true: sin daemon Docker el tool deniega la ejecución de código" ;;
+    false)   warn "SANDBOX_REQUIRED=false: se permite el fallback exec() restringido (evadible). Solo aceptable en desarrollo local" ;;
+    *)       err "SANDBOX_REQUIRED='${ENV[SANDBOX_REQUIRED]}' no es válido (true|false)" ;;
+esac
+
+# ---------------------------------------------------------------------------
 echo
 if [ "$errors" -gt 0 ]; then
     printf '%sPREFLIGHT FALLIDO%s: %d error(es), %d aviso(s). NO lanzar el up -d.\n' \

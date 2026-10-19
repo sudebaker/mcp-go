@@ -150,7 +150,14 @@ docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:lat
 If the image is missing, the tool builds it on first use (`build_on_missing`, enabled by default)
 with that same Dockerfile and context, so a deployment that mounts `docker.sock` does not need a
 pre-build: it needs read access to the repository tree (the build context) and access to the
-daemon. Compose does not mount the socket, so there the sandbox degrades by design.
+daemon.
+
+The compose stack does not mount `/var/run/docker.sock` into `mcp-server` (that would be
+root-equivalent), so inside the container no Docker daemon is reachable and the sandbox degrades
+by design: `data_analysis` runs the generated code with the restricted in-process executor and
+logs `Executing user code in restricted mode (no Docker sandbox)`. Set `SANDBOX_REQUIRED=true`
+to remove that fallback: every call is then rejected with `SANDBOX_UNAVAILABLE`, both with
+`use_sandbox=true` and with `use_sandbox=false`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

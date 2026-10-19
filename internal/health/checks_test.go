@@ -593,20 +593,84 @@ func TestCheckDependency_EmptyURL(t *testing.T) {
 	}
 }
 
-func TestCheckDependency_Unreachable(t *testing.T) {
+// unreachableAddr returns a host:port that nothing is listening on. It binds a
+// port, reads it back and closes the listener, so the port was free an instant
+// ago and the dial fails with ECONNREFUSED instead of depending on a hard-coded
+// port staying unused.
+func unreachableAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a port: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("failed to close the reservation listener: %v", err)
+	}
+	return addr
+}
+
+// A non-critical dependency going away degrades the server: /health still
+// answers 200 (StatusDegraded) so a blip of searxng/crawl4ai/ollama/rustfs does
+// not report the container as broken.
+func TestCheckDependency_UnreachableNonCritical(t *testing.T) {
 	checker := NewChecker(nil, nil, nil, nil)
 	dep := DependencyCheck{
-		Name: "unreachable-dep",
-		URL:  "127.0.0.1:19999", // no service listening here
-		Tool: "test_tool",
+		Name:     "unreachable-dep",
+		URL:      unreachableAddr(t),
+		Tool:     "test_tool",
+		Critical: false,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	result := checker.checkDependency(ctx, dep)
+	if result.Status != StatusDegraded {
+		t.Errorf("expected degraded for unreachable non-critical dep, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// A critical dependency going away is a real failure and must keep returning
+// unhealthy, restoring the 503 from /health.
+func TestCheckDependency_UnreachableCritical(t *testing.T) {
+	checker := NewChecker(nil, nil, nil, nil)
+	dep := DependencyCheck{
+		Name:     "critical-dep",
+		URL:      unreachableAddr(t),
+		Tool:     "test_tool",
+		Critical: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	result := checker.checkDependency(ctx, dep)
 	if result.Status != StatusUnhealthy {
-		t.Errorf("expected unhealthy for unreachable dep, got %s: %s", result.Status, result.Message)
+		t.Errorf("expected unhealthy for unreachable critical dep, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// RunAllChecks + GetOverallStatus must agree with the per-check status: an
+// unreachable non-critical dependency ends up as an overall degraded system,
+// not unhealthy.
+func TestRunAllChecks_NonCriticalUnreachableIsOverallDegraded(t *testing.T) {
+	cfg := &config.Config{Tools: []config.ToolConfig{{Name: "searxng_search"}}}
+	deps := []DependencyCheck{
+		{Name: "searxng", URL: unreachableAddr(t), Tool: "searxng_search", Critical: false},
+	}
+	checker := NewChecker(cfg, nil, nil, deps)
+
+	results := checker.RunAllChecks(context.Background())
+	overall := checker.GetOverallStatus(results)
+
+	if overall != StatusDegraded {
+		t.Errorf("expected overall degraded with one unreachable non-critical dep, got %s (%v)", overall, results)
+	}
+	for _, r := range results {
+		if r.Name == "searxng" && r.Status != StatusDegraded {
+			t.Errorf("expected searxng degraded, got %s", r.Status)
+		}
 	}
 }
 

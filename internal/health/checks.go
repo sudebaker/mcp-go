@@ -60,10 +60,17 @@ type Checker struct {
 
 // DependencyCheck describes an external service to verify.
 type DependencyCheck struct {
-	Name     string // Human-readable name (e.g., "searxng")
-	URL      string // TCP address (host:port) extracted from env/config
-	Tool     string // Associated tool name (e.g., "searxng_search"), for mapping
-	Critical bool   // If true, /health returns 503 when unreachable
+	Name string // Human-readable name (e.g., "searxng")
+	URL  string // TCP address (host:port) extracted from env/config
+	Tool string // Associated tool name (e.g., "searxng_search"), for mapping
+	// Critical decides what an unreachable dependency means: true makes /health
+	// answer 503 (StatusUnhealthy), false only degrades it (StatusDegraded, HTTP
+	// 200) so a blip of an optional service does not mark the container broken.
+	//
+	// It does not apply to the "redis" and "postgres" entries: RunAllChecks skips
+	// them because they are checked through their own clients (ping), and a failed
+	// ping is always unhealthy.
+	Critical bool
 }
 
 // NewChecker creates a health Checker with dependencies for performing checks.
@@ -100,15 +107,19 @@ func BuildDependencies(cfg *config.Config) []DependencyCheck {
 
 	deps := []DependencyCheck{}
 
-	// Only add redis if REDIS_URL is configured
+	// redis/postgres are core: they are declared critical for documentation, but
+	// RunAllChecks skips them and pings them through their clients (nil client =
+	// degraded, failed ping = unhealthy → 503).
 	if os.Getenv("REDIS_URL") != "" {
-		deps = append(deps, DependencyCheck{Name: "redis", Critical: false})
+		deps = append(deps, DependencyCheck{Name: "redis", Critical: true})
 	}
 	// Only add postgres if DATABASE_URL is configured
 	if os.Getenv("DATABASE_URL") != "" {
-		deps = append(deps, DependencyCheck{Name: "postgres", Critical: false})
+		deps = append(deps, DependencyCheck{Name: "postgres", Critical: true})
 	}
 
+	// Optional services behind individual tools: if one is down the tools that do
+	// not need it still work, so the server is degraded, not unhealthy.
 	for _, tool := range cfg.Tools {
 		switch tool.Name {
 		case "browser_scraper", "web_scraper":
@@ -631,9 +642,17 @@ func (c *Checker) checkDependency(ctx context.Context, dep DependencyCheck) Chec
 	hostPort := extractHostPort(dep.URL)
 	conn, err := d.DialContext(ctx, "tcp", hostPort)
 	if err != nil {
-		result.Status = StatusUnhealthy
 		result.Message = fmt.Sprintf("%s unreachable at %s: %v", dep.Name, dep.URL, err)
-		log.Error().Err(err).Str("dependency", dep.Name).Str("url", dep.URL).Msg("Dependency health check failed")
+		if dep.Critical {
+			result.Status = StatusUnhealthy
+			log.Error().Err(err).Str("dependency", dep.Name).Str("url", dep.URL).Msg("Critical dependency health check failed")
+		} else {
+			// Optional service down: serve the tools that still work and keep the
+			// container healthy (a 503 here would make Docker/autoheal declare the
+			// whole orchestrator broken over a searxng/ollama blip).
+			result.Status = StatusDegraded
+			log.Warn().Err(err).Str("dependency", dep.Name).Str("url", dep.URL).Msg("Non-critical dependency health check failed")
+		}
 	} else {
 		conn.Close()
 		result.Status = StatusHealthy

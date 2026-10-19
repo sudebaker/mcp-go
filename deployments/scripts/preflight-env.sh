@@ -242,6 +242,66 @@ else
                 # la capacidad no es consultable. Se dice, no se calla.
                 warn "no puedo verificar la visión de $llm_model: $llm_url no expone /api/show"
             fi
+
+            # --- El endpoint que el código CONSTRUYE, no el catálogo ---
+            # tools/common/retry.py arma `{LLM_API_URL}/chat/completions` cuando el
+            # formato es openai y `{LLM_API_URL}/api/chat` cuando es ollama. Un catálogo
+            # que responde no prueba que esa ruta exista: en prod, con el tag servido y
+            # LLM_API_FORMAT=openai sobre una URL sin `/v1`, el preflight decía OK y los
+            # cinco tools devolvían 404. Esta es la única comprobación que ejercita la
+            # ruta real, con una completion de 1 token.
+            #
+            # Severidad: host mudo → aviso (puede estar apagado y eso no impide
+            # desplegar); host que responde 4xx/5xx a la ruta del código → error de
+            # configuración, porque desplegar así deja cinco tools rotos con /health verde.
+            llm_format="$(printf '%s' "${ENV[LLM_API_FORMAT]:-ollama}" | tr '[:upper:]' '[:lower:]')"
+            # retry.py:36-51 detecta los proveedores OpenAI-compatibles por dominio
+            # aunque LLM_API_FORMAT no esté puesto; se replica para no dar un rojo falso.
+            if printf '%s' "$llm_url" | grep -qE 'openrouter\.ai|api\.openai\.com|generativelanguage\.googleapis\.com|anthropic\.com|api\.cohere\.ai|api\.mistral\.ai|api\.groq\.com|api\.deepseek\.com|opencode\.ai'; then
+                llm_format="openai"
+            fi
+            body_openai="{\"model\":\"$llm_model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}"
+            # `think:false` es obligatorio en la rama ollama: un modelo thinking devuelve
+            # message.content vacío y este check se pondría en rojo a sí mismo sobre un
+            # .env correcto (medido con qwen3.5:9b: 936 chars en `thinking`, 0 en `content`).
+            body_ollama="{\"model\":\"$llm_model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"stream\":false,\"think\":false,\"options\":{\"num_predict\":1}}"
+            if [ "$llm_format" = "openai" ]; then
+                llm_probe="${llm_url%/}/chat/completions"
+                llm_probe_body="$body_openai"
+                llm_alt="${llm_url%/}/api/chat"
+                llm_alt_body="$body_ollama"
+            else
+                llm_probe="${llm_url%/}/api/chat"
+                llm_probe_body="$body_ollama"
+                llm_alt="${llm_url%/}/chat/completions"
+                llm_alt_body="$body_openai"
+            fi
+            probe_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+                -X POST "$llm_probe" -H 'Content-Type: application/json' \
+                -d "$llm_probe_body" 2>/dev/null)"
+            probe_rc=$?
+            case "$probe_code" in
+                2??)
+                    ok "el endpoint del código responde: $llm_probe (LLM_API_FORMAT=$llm_format, 1 token) — los 5 tools pueden llamar al modelo"
+                    ;;
+                *)
+                    if [ "$probe_rc" -ne 0 ] || [ -z "$probe_code" ] || [ "$probe_code" = "000" ]; then
+                        warn "no puedo alcanzar $llm_probe (host apagado o inalcanzable): no se comprueba el endpoint del código"
+                    else
+                        alt_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 \
+                            -X POST "$llm_alt" -H 'Content-Type: application/json' \
+                            -d "$llm_alt_body" 2>/dev/null)"
+                        case "$alt_code" in
+                            2??)
+                                err "el endpoint que construye el código (LLM_API_FORMAT=$llm_format → $llm_probe) responde HTTP $probe_code, pero $llm_alt sí responde: LLM_API_FORMAT y la URL del .env no encajan y los 5 tools con LLM fallarán con 404"
+                                ;;
+                            *)
+                                err "el endpoint que construye el código (LLM_API_FORMAT=$llm_format → $llm_probe) responde HTTP $probe_code para $llm_model: los 5 tools con LLM fallarán aunque el tag esté servido"
+                                ;;
+                        esac
+                    fi
+                    ;;
+            esac
         else
             served="$(printf '%s' "$tags" | grep -oE '"(name|id)":"[^"]+"' \
                 | sed -E 's/.*:"//; s/"$//' | sort -u | paste -sd' ' - | cut -c1-220)"

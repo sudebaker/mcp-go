@@ -2,7 +2,7 @@
 
 **Project:** MCP-Go Orchestrator Server  
 **Description:** Model Context Protocol server that orchestrates Python tools via subprocess execution with S3-compatible storage backend  
-**Stack:** Go 1.23+ | Python 3.11+ | Docker | PostgreSQL | Redis | RustFS
+**Stack:** Go 1.26+ | Python 3.14+ | Docker | PostgreSQL | Redis | RustFS
 
 ---
 

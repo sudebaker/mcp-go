@@ -29,7 +29,9 @@ no responde. Hoy **ninguna dep externa es crítica**, así que un 503 en este ho
 sale de config/postgres/memoria: no lo provoca `ollama`, `searxng` ni `rustfs`.
 Un 503 por `ollama`/`searxng` unhealthy **era** normal hasta `7f91291` (el `.env`
 apuntaba a `mac-mini.home` y a `localhost:8081`, que no resuelven desde el
-contenedor); desde ese deploy esas deps se ven como `degraded`, no como 503.
+contenedor). Con `#36` una dep opcional inalcanzable ya no se delata con un 503:
+sale `degraded` con 200 aunque el `.env` vuelva a apuntar mal — se mira en
+`dependencies`.
 
 La única señal de núcleo que puede aparecer y desaparecer sola es `memory`: con
 el check de `#36`, un pico de heap da 503 y vuelve a 200 al pasar el GC — **eso

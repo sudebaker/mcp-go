@@ -198,6 +198,11 @@ def call_llm_with_retry(
             "model": llm_model,
             "messages": messages,
             "stream": False,
+            # Thinking models (qwen3.5, gpt-oss, lfm2.5...) put the whole answer in
+            # `message.thinking` when reasoning is enabled and leave `message.content`
+            # empty, so every tool saw "Could not parse LLM response". Ollama ignores
+            # this flag for models without thinking capability.
+            "think": False,
             "options": {
                 "temperature": max(0.0, min(1.0, temperature)),
                 "num_predict": max(1, min(4096, max_tokens)),
@@ -235,7 +240,22 @@ def call_llm_with_retry(
             return choice["message"]["content"]
         else:
             msg = result.get("message", {})
-            return msg.get("content", "")
+            content = (msg.get("content") or "").strip()
+            if content:
+                return content
+
+            # Defensive fallback: a model (or an Ollama version that ignores `think`)
+            # answered entirely in the reasoning channel. Returning "" here is what
+            # made every tool log "Could not parse LLM response" while the LLM had
+            # actually answered.
+            thinking = (msg.get("thinking") or "").strip()
+            if thinking:
+                logger.warning(
+                    "Ollama returned an empty message.content; falling back to message.thinking"
+                )
+                return thinking
+
+            return ""
 
     except requests.HTTPError as e:
         status_code = e.response.status_code

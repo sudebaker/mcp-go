@@ -16,7 +16,7 @@ Authentication:
     The MCP endpoints require a bearer token when MCP_AUTH_MODE=required (the
     default). Export the token of a keyring entry, e.g.:
 
-        export MCP_AUTH_KEY_AMPHORA=$(grep ^MCP_AUTH_KEY_AMPHORA deployments/.env | cut -d= -f2)
+        export MCP_AUTH_KEY=$(grep ^MCP_AUTH_KEY deployments/.env | cut -d= -f2)
         python tests/mcp_test_client.py --skip-external
 
     The server derives the user_id from that token; the user_id sent in
@@ -49,7 +49,7 @@ DEFAULT_TIMEOUT = 120
 # .user_id is no longer the source of identity. First non-empty value wins.
 AUTH_TOKEN = (
     os.getenv("MCP_AUTH_TOKEN")
-    or os.getenv("MCP_AUTH_KEY_AMPHORA")
+    or os.getenv("MCP_AUTH_KEY")
     or os.getenv("MCP_UPLOAD_API_KEY")
     or ""
 )

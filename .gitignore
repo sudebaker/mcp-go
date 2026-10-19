@@ -53,3 +53,8 @@ cookies.txt
 .opencode/
 
 deployments/.env
+# Backups del .env que se crean al abrir una ventana de deploy (patch-env.py,
+# edits manuales): nunca se commitean, y no deben ensuciar `git status` del
+# checkout de produccion.
+deployments/.env.bak*
+.env.bak*

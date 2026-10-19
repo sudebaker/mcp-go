@@ -64,6 +64,16 @@ services:
       DOWNLOAD_URL_EXPIRY_HOURS: ${DOWNLOAD_URL_EXPIRY_HOURS:-24}
       MCP_UPLOAD_API_KEY: ${MCP_UPLOAD_API_KEY:?MCP_UPLOAD_API_KEY is required}
       PYTHONUNBUFFERED: ${PYTHONUNBUFFERED:-1}
+      # Presupuesto de memoria del runtime Go. GOMEMLIMIT es un limite BLANDO: el GC
+      # aprieta para no pasarlo, en vez de dejar que el cgroup alcance memory.max y
+      # actue el OOM killer. Ojo: solo cuenta la memoria del runtime Go, NO la de los
+      # subprocesos Python de las tools, que viven en el mismo cgroup.
+      # Medido en produccion (2026-10-19, imagen 7f91291): heap Go vivo ~530 MB y RSS
+      # del proceso mcp-server 1075 MB en reposo; un solo kb_search anade 619 MB de
+      # Python => 1696 MB de los 2048 MB del cgroup (83 %) con UNA llamada. Dos tools
+      # concurrentes no caben en 2G, de ahi el limite de 3G arriba: con GOMEMLIMIT en
+      # 1536MiB el runtime se queda en ~1.6G de RSS como maximo y deja >1G a los hijos.
+      GOMEMLIMIT: ${GOMEMLIMIT:-1536MiB}
       MEMGRAPH_URL: ${MEMGRAPH_URL:-bolt://memgraph:7687}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
       MEMGRAPH_USERNAME: ${MEMGRAPH_USERNAME}
@@ -106,16 +116,25 @@ services:
       - mcp-external
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8080/health"]
+      # `-f` es obligatorio: sin el, curl devuelve 0 aunque /health responda 503 y el
+      # contenedor se reporta "healthy" con el servidor sin poder servir. Verificado en
+      # produccion el 2026-10-19: `curl -f` dentro del contenedor daba exit 22 (503) y
+      # el Health.Log de Docker seguia anotando ExitCode 0 con este test sin `-f`.
+      # Depende de #31 (checkMemory ya no devuelve unhealthy): hasta ese merge, /health
+      # baja a 503 bajo carga y este test marcaria el contenedor en rojo.
+      test: ["CMD", "curl", "-f", "-s", "-o", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     deploy:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          # 3G, no 2G: medido con la imagen 7f91291 (2026-10-19) el RSS del proceso Go
+          # en reposo es 1075 MB y un solo kb_search anade 619 MB de Python => 1696 MB
+          # (83 % de 2G) con UNA llamada; dos tools concurrentes no cabian.
+          memory: 3G
         reservations:
           cpus: '0.5'
           memory: 1G

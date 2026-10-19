@@ -197,19 +197,18 @@ tools:
           description: "How to return results: 'text' (plain), 'json' (structured), 'markdown' (tables), 'png' (chart image)"
         __files__:
           type: array
-          description: "Alternative: attach files as __files__ parameter. The tool will download them automatically."
+          description: "Files to analyze as objects {url, name} or {name, content}. A res:// url is streamed from the internal resource endpoint; content is base64-encoded file data."
           items:
             type: object
             properties:
-              type:
-                type: string
               url:
                 type: string
                 format: resource-uri
               name:
                 type: string
-              id:
+              content:
                 type: string
+                description: "Base64-encoded file content, used instead of url. Max 100MB decoded."
       required:
         - question
 

@@ -193,24 +193,25 @@ def main() -> None:
         filename = sanitize_filename(arguments.get("filename", "audio.wav"))
         language = arguments.get("language", "") or None
 
-        # Resolve file_uri via ToolContext (backward compat: fall back to file_path)
+        # Prefer a server-injected resource (nothing populates it today); the real
+        # client path is the file_path argument.
         ctx = ToolContext(request)
         try:
-            resource = ctx.file("file_uri")
-            file_uri = resource.uri
+            resource = ctx.file("file_path")
+            file_path = resource.uri
         except (KeyError, TypeError):
-            file_uri = arguments.get("file_path", "").strip()
+            file_path = arguments.get("file_path", "").strip()
 
-        if not file_uri and not audio_b64:
+        if not file_path and not audio_b64:
             write_response({
                 "success": False,
                 "request_id": request_id,
-                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_uri' (res:// URI) or 'audio_base64' (base64-encoded audio)"}
+                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_path' (res:// URI or server path) or 'audio_base64' (base64-encoded audio)"}
             })
             return
 
-        if file_uri:
-            if file_uri.startswith("res://"):
+        if file_path:
+            if file_path.startswith("res://"):
                 # Use ToolContext to read bytes, pass to whisper as BytesIO
                 try:
                     data = resource.read_bytes()
@@ -233,7 +234,7 @@ def main() -> None:
                     })
                     return
             else:
-                text, error = transcribe_file(file_uri, language=language)
+                text, error = transcribe_file(file_path, language=language)
         else:
             text, error = transcribe_base64(audio_b64, filename=filename, language=language)
 
@@ -260,7 +261,7 @@ def main() -> None:
                 "text": text,
                 "word_count": word_count,
                 "language": language,
-                "source": file_uri or filename
+                "source": file_path or filename
             }
         })
 

@@ -33,9 +33,9 @@ input_schema:
         ''markdown'' (tables), ''png'' (chart image)'
     __files__:
       type: array
-      description: Files to analyze as objects {url, name}; a res:// URI is streamed
-        from the internal resource endpoint. The first file with a supported extension
-        is used.
+      description: Files to analyze as objects {url, name} or {name, content}; a res://
+        url is streamed from the internal resource endpoint. The first file with a
+        supported extension is used.
       items:
         type: object
         properties:
@@ -43,6 +43,8 @@ input_schema:
             type: string
             format: resource-uri
           name:
+            type: string
+          content:
             type: string
   required:
   - question

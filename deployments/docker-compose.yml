@@ -87,6 +87,15 @@ services:
       # que cada key_env sea unico. Con una sola entrada basta MCP_AUTH_KEY; con
       # N, <CLIENT>_AUTH_KEY.
       MCP_AUTH_KEY: ${MCP_AUTH_KEY:?MCP_AUTH_KEY is required}
+      # Sandbox de ejecución de código (tool data_analysis). Este contenedor NO
+      # monta docker.sock, así que el daemon no existe dentro: la única vía sería
+      # el fallback `exec()` restringido, que es evadible (cadena de subclases ->
+      # `_wrap_close.__init__.__globals__['system']`). Por defecto `true`: sin
+      # daemon, el tool responde SANDBOX_UNAVAILABLE en vez de ejecutar código
+      # generado por el LLM en el proceso del orquestador (con DATABASE_URL,
+      # MCP_AUTH_KEY y MCP_UPLOAD_API_KEY a mano).
+      # `false` solo en desarrollo local, y a sabiendas de lo anterior.
+      SANDBOX_REQUIRED: ${SANDBOX_REQUIRED:-true}
     dns:
       - 8.8.8.8
       - 1.1.1.1

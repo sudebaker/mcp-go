@@ -33,7 +33,7 @@ jobs:
         run: go test -race -count=1 ./internal/config/ ./internal/transport/ ./tests/
 
   python:
-    name: Python — tests de seguridad
+    name: Python — tests de seguridad y de herramientas
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -45,8 +45,20 @@ jobs:
           python -m pip install --disable-pip-version-check
           pytest==9.1.1 PyYAML==6.0.3 Jinja2==3.1.6
       # Mitigaciones SSRF, SSTI, ReDoS y deserialización YAML.
-      - name: pytest tests/test_security_mitigations.py
-        run: python -m pytest tests/test_security_mitigations.py -v
+      #
+      # Los tests de herramienta (`tools/*/test_*.py`) se recogen por glob, no por lista
+      # fija: así un test nuevo queda cableado en el mismo commit que lo trae, sin que
+      # nadie tenga que acordarse de añadirlo aquí — que es justo cómo se cuelan los
+      # verdes sin ancla. Si un tool test no puede correr en este job, declara su
+      # `skipif` con el motivo; no se queda fuera de la colección.
+      - name: pytest (seguridad + tests de herramientas)
+        run: |
+          files="tests/test_security_mitigations.py"
+          for f in tools/*/test_*.py; do
+            if [ -e "$f" ]; then files="$files $f"; fi
+          done
+          echo "pytest $files"
+          python -m pytest $files -v
 
   lint:
     name: golangci-lint

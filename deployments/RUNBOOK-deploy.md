@@ -9,18 +9,40 @@ desde el checkout desplegado, **nunca** desde un clon de trabajo.
 cd <checkout-de-produccion>
 git rev-parse --short HEAD            # SHA actual = punto de rollback
 docker ps --filter name=mcp-orchestrator --format '{{.Status}}'
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/health
+curl -s -w '\nHTTP %{http_code}\n' http://localhost:8080/health   # cuerpo + código
 docker logs --tail 200 mcp-orchestrator 2>&1 | grep -E "Auth enabled|MCP_AUTH_MODE|keyring"
 ```
 
-Guarda la salida de `/health` y de la línea de arranque: es el **baseline**. Un
-`/health` en 503 por `ollama`/`searxng` unhealthy era normal **hasta `7f91291`**
-(el `.env` apuntaba a `mac-mini.home` y a `localhost:8081`, que no resuelven desde
-el contenedor); desde ese deploy los 7 checks salen `healthy` y un 503 sí es
-señal. La excepción conocida es `memory`: con el `checkMemory` anterior (heap >
-500 MB → `unhealthy`) `/health` bajaba a 503 bajo carga y volvía sola al pasar el
-GC; **eso no justifica rollback**. El criterio de fallo es `config`, `postgres` y
-`rustfs` en rojo.
+Guarda el **cuerpo** de `/health` (no solo el código) y la línea de arranque: es
+el **baseline**. Desde `#36` el código HTTP no basta para juzgar, porque el
+servidor separa núcleo de dependencias opcionales:
+
+| `/health` | significado | criterio |
+|---|---|---|
+| `200` + `"status": "healthy"` | todos los checks en verde | baseline bueno |
+| `200` + `"status": "degraded"` | una dep opcional inalcanzable (`searxng`, `crawl4ai`, `rustfs`, `ollama`), heap elevado (250–500 MB) o sin tools | **no** justifica rollback: el servidor sigue sirviendo las tools que no usan esa dep |
+| `503` + `"status": "unhealthy"` | fallo de núcleo | rollback si no se recupera solo en un reintento |
+
+Fallo de núcleo = `config` sin cargar, `postgres` con el ping fallido, heap por
+encima del umbral duro (500 MB) o una dependencia declarada `Critical: true` que
+no responde. Hoy **ninguna dep externa es crítica**, así que un 503 en este host
+sale de config/postgres/memoria: no lo provoca `ollama`, `searxng` ni `rustfs`.
+Un 503 por `ollama`/`searxng` unhealthy **era** normal hasta `7f91291` (el `.env`
+apuntaba a `mac-mini.home` y a `localhost:8081`, que no resuelven desde el
+contenedor); desde ese deploy esas deps se ven como `degraded`, no como 503.
+
+La única señal de núcleo que puede aparecer y desaparecer sola es `memory`: con
+el check de `#36`, un pico de heap da 503 y vuelve a 200 al pasar el GC — **eso
+no justifica rollback**. Hay trabajo abierto (`#31`, `#35`) para que la memoria
+nunca tumbe `/health`.
+
+`dependencies` da el estado de cada check con los mismos valores
+(`healthy`/`degraded`/`unhealthy`): *qué* dependencia se cayó se lee ahí, no en
+el código HTTP. `rustfs` caído se ve como `dependencies.rustfs: degraded` con
+`200`, nunca como 503: el deploy no se revierte por eso, pero las tools que
+necesitan `rustfs_storage` (`kb_*`, `/upload`) fallarán en el smoke (ver §5).
+`redis` no se sondea hoy — el checker se construye con cliente `nil` — así que ni
+aparece en `dependencies` ni produce 503: no lo uses como criterio.
 
 ## 1. Preflight del `.env` (obligatorio, no arranca nada)
 
@@ -77,6 +99,7 @@ agotó: mira tools concurrentes antes de tocar los límites.
 
 | gate | esperado |
 |---|---|
+| `/health` | `200` + `"status": "healthy"` (o `degraded` si una dep opcional del host sigue caída, §0). Un `503` es fallo de núcleo → §6 |
 | `POST /mcp` `initialize` **sin** `Authorization` | `401` |
 | `POST /mcp` `initialize` con bearer inválido | `401` |
 | `POST /mcp` `initialize` con bearer válido | `200` + cabecera `Mcp-Session-Id` |
@@ -91,8 +114,11 @@ cierra el agujero de auth por sí solo.
 
 **El estado de `docker ps` no es un gate.** Hasta `7f91291` el `healthcheck` del
 compose era `curl -s -o /dev/null` (sin `-f`): devolvía 0 con `/health` a 503, así
-que el contenedor se reportaba `healthy` con el servidor sin poder servir. El gate
-es el **código HTTP de `/health`**, no la columna `STATUS`.
+que el contenedor se reportaba `healthy` con el servidor sin poder servir. Con el
+healthcheck con `-f` (`#34`), `unhealthy` sí implica `/health` no-2xx, pero
+`degraded` también deja el contenedor `healthy`: el gate es el **código +
+`"status"` de `/health`**, y la columna `STATUS` solo confirma que el proceso no
+se ha caído.
 
 **Smoke repetido sobre el mismo contenedor:** con el `checkMemory` anterior, dos
 `tests/mcp_test_client.py` seguidos contra el mismo contenedor de `7f91291` hacen
@@ -102,8 +128,11 @@ smoke por contenedor, o reiniciar `mcp-server` entre corridas.
 
 ## 6. Rollback
 
-Disparador: `/health` con `config`, `postgres` o `rustfs` en rojo, o un gate de
-auth que devuelve lo contrario de lo esperado y no se explica por el baseline.
+Disparador: `/health` en **503** de forma sostenida (`"status": "unhealthy"`, §0 —
+fallo de núcleo), o un gate de auth que devuelve lo contrario de lo esperado y no
+se explica por el baseline. Una dependencia opcional en `degraded` (`searxng`,
+`crawl4ai`, `rustfs`, `ollama`) **no** dispara rollback: se anota en el parte y se
+sigue; el servidor conserva las tools que no dependen de ella.
 
 ```bash
 docker compose down

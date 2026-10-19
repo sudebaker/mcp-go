@@ -91,6 +91,18 @@ Returns server information and available endpoints.
 
 Basic health check endpoint.
 
+**Status codes:**
+
+| Code | When |
+|------|------|
+| `200` | `healthy` or `degraded` (degraded still serves traffic) |
+| `503` | `unhealthy` — a check reports that the process cannot serve |
+
+A `503` is what the container `HEALTHCHECK` reads as "replace me", so only
+checks that mean exactly that are allowed to report `unhealthy`. The `memory`
+check never does: it reports the heap as a fraction of the detected memory
+budget (container cgroup limit, else `GOMEMLIMIT`) and caps at `degraded`.
+
 **Response:**
 ```json
 {
@@ -134,6 +146,14 @@ Detailed health check with system information.
 Prometheus metrics endpoint for monitoring.
 
 **Format:** Prometheus text/plain
+
+Memory-related series (alert on the ratio, not on `/health`):
+
+| Metric | Meaning |
+|--------|---------|
+| `mcp_health_heap_alloc_bytes` | Current heap allocation |
+| `mcp_health_memory_budget_bytes` | Detected budget: container cgroup limit, else `GOMEMLIMIT`, else `0` |
+| `mcp_health_memory_used_ratio` | Heap as a fraction of the budget (`0` when unknown) |
 
 ---
 

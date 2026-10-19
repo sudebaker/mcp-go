@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -30,6 +31,10 @@ import (
 // (internal/executor/subprocess.go): ClientSessionFromContext(ctx).SessionID()
 // → sessionStore.Get. The "whoami" tool below does the same thing, so the
 // assertion covers the real rule and not a copy of it.
+
+// identityClient bounds every probe: http.DefaultClient has no timeout, so a
+// wedged server would hang the whole package instead of failing one test.
+var identityClient = &http.Client{Timeout: 10 * time.Second}
 
 type identityHarness struct {
 	store *session.Store
@@ -104,10 +109,15 @@ func newIdentityHarness(t *testing.T, tokens map[string]string) *identityHarness
 	return &identityHarness{store: store, url: ts.URL, ts: ts}
 }
 
-// rpcResult posts one JSON-RPC message and returns the raw response plus the
-// parsed JSON payload of the last data frame (the endpoint answers either JSON
-// or an SSE stream).
-func (h *identityHarness) rpc(t *testing.T, token, sessionID string, payload map[string]interface{}) (*http.Response, map[string]interface{}) {
+// rpc posts one JSON-RPC message and returns the status code, the response
+// headers and the payload of the last data frame carrying an id (the endpoint
+// answers either plain JSON or an SSE stream).
+//
+// It returns values instead of the *http.Response on purpose: the body is read
+// and closed here, so handing the response back would invite a second Close at
+// the call site — a pattern that silences bodyclose while hiding who owns the
+// resource.
+func (h *identityHarness) rpc(t *testing.T, token, sessionID string, payload map[string]interface{}) (int, http.Header, map[string]interface{}) {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -128,7 +138,7 @@ func (h *identityHarness) rpc(t *testing.T, token, sessionID string, payload map
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := identityClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -158,12 +168,12 @@ func (h *identityHarness) rpc(t *testing.T, token, sessionID string, payload map
 	if parsed == nil && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &parsed)
 	}
-	return resp, parsed
+	return resp.StatusCode, resp.Header, parsed
 }
 
 func (h *identityHarness) initialize(t *testing.T, token string) string {
 	t.Helper()
-	resp, _ := h.rpc(t, token, "", map[string]interface{}{
+	status, header, _ := h.rpc(t, token, "", map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
@@ -173,19 +183,19 @@ func (h *identityHarness) initialize(t *testing.T, token string) string {
 			"clientInfo":      map[string]string{"name": "identity-test", "version": "1.0.0"},
 		},
 	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("initialize returned %d", resp.StatusCode)
+	if status != http.StatusOK {
+		t.Fatalf("initialize returned %d", status)
 	}
-	sessionID := resp.Header.Get("Mcp-Session-Id")
+	sessionID := header.Get("Mcp-Session-Id")
 	if sessionID == "" {
-		t.Fatalf("initialize response carried no Mcp-Session-Id header (headers: %v)", resp.Header)
+		t.Fatalf("initialize response carried no Mcp-Session-Id header (headers: %v)", header)
 	}
 	return sessionID
 }
 
 func (h *identityHarness) whoami(t *testing.T, token, sessionID string) string {
 	t.Helper()
-	resp, payload := h.rpc(t, token, sessionID, map[string]interface{}{
+	status, _, payload := h.rpc(t, token, sessionID, map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/call",
@@ -194,8 +204,8 @@ func (h *identityHarness) whoami(t *testing.T, token, sessionID string) string {
 			"arguments": map[string]interface{}{"probe": "x"},
 		},
 	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("tools/call returned %d", resp.StatusCode)
+	if status != http.StatusOK {
+		t.Fatalf("tools/call returned %d", status)
 	}
 	if payload == nil {
 		t.Fatalf("tools/call returned no JSON-RPC frame")
@@ -254,7 +264,7 @@ func TestSessionIdentity_SurvivesAcrossRequests(t *testing.T) {
 func TestSessionIdentity_ModernProtocolStillCarriesSession(t *testing.T) {
 	h := newIdentityHarness(t, map[string]string{"alice": "alice-token-123456"})
 
-	resp, payload := h.rpc(t, "alice-token-123456", "", map[string]interface{}{
+	status, header, payload := h.rpc(t, "alice-token-123456", "", map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
@@ -264,8 +274,8 @@ func TestSessionIdentity_ModernProtocolStillCarriesSession(t *testing.T) {
 			"clientInfo":      map[string]string{"name": "identity-test", "version": "1.0.0"},
 		},
 	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("initialize returned %d", resp.StatusCode)
+	if status != http.StatusOK {
+		t.Fatalf("initialize returned %d", status)
 	}
 	if negotiated, _ := payload["result"].(map[string]interface{}); negotiated != nil {
 		version, _ := negotiated["protocolVersion"].(string)
@@ -273,7 +283,7 @@ func TestSessionIdentity_ModernProtocolStillCarriesSession(t *testing.T) {
 			t.Fatalf("server negotiated the session-less modern era (%q): the session id that carries the KB identity is gone", version)
 		}
 	}
-	sessionID := resp.Header.Get("Mcp-Session-Id")
+	sessionID := header.Get("Mcp-Session-Id")
 	if sessionID == "" {
 		t.Fatalf("initialize for protocol 2026-07-28 minted no session id: the KB identity has no carrier")
 	}
@@ -288,7 +298,7 @@ func TestSessionIdentity_ModernProtocolStillCarriesSession(t *testing.T) {
 func TestSessionIdentity_NoIdentityWithoutToken(t *testing.T) {
 	h := newIdentityHarness(t, map[string]string{"alice": "alice-token-123456"})
 
-	resp, _ := h.rpc(t, "", "", map[string]interface{}{
+	status, header, _ := h.rpc(t, "", "", map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
@@ -298,10 +308,10 @@ func TestSessionIdentity_NoIdentityWithoutToken(t *testing.T) {
 			"clientInfo":      map[string]string{"name": "identity-test", "version": "1.0.0"},
 		},
 	})
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("initialize without a token returned %d, want 401", resp.StatusCode)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("initialize without a token returned %d, want 401", status)
 	}
-	if got := resp.Header.Get("Mcp-Session-Id"); got != "" {
+	if got := header.Get("Mcp-Session-Id"); got != "" {
 		t.Fatalf("unauthenticated initialize minted a session id %q", got)
 	}
 	if n := len(h.store.GetAll()); n != 0 {

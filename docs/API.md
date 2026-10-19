@@ -646,6 +646,7 @@ upload:
 | LLM_API_URL | http://localhost:11434 | LLM API base URL. With `LLM_API_FORMAT=openai` it must already end in `/v1`, because the code appends `/chat/completions` |
 | LLM_MODEL | llama3 | LLM model |
 | LLM_API_FORMAT | ollama | Wire format. `ollama` → `{LLM_API_URL}/api/chat` (native); `openai` → `{LLM_API_URL}/chat/completions` |
+| LLM_REQUEST_TIMEOUT | 60 | Seconds `canvas_diagram` waits for its own `{LLM_API_URL}/api/generate` call |
 
 The five tools that use an LLM (`batch_summarize`, `data_analysis`, `document_classifier`,
 `regulation_diff`, `vision_ocr`) read the answer from `message.content`. On a *thinking* model
@@ -655,6 +656,14 @@ leaves `message.content` empty, which the tools surface as `Could not parse LLM 
 `think: false` on the native endpoint (Ollama ignores the field on models without that
 capability) and, if a model answers only in the reasoning channel, falls back to
 `message.thinking` instead of returning an empty string.
+
+`canvas_diagram` does **not** go through `tools/common/retry.py`: it calls `/api/generate`
+directly, always in Ollama's native format (it does not read `LLM_API_FORMAT`). It sends
+`think: false` too, and reports `structured_content.llm_fallback: true` — plus a note in the
+response text — when an LLM was configured but returned no usable DSL, instead of claiming
+`used_llm: true` for a map built from the description. Measured against `qwen3.5:9b` with a
+6-line description: 30 s → timeout → description fallback (3 nodes, 0 edges) before, 4 s →
+LLM DSL (5 nodes, 8 edges) after.
 
 ### Database Configuration
 | Variable | Default | Description |

@@ -58,6 +58,11 @@ CANVAS_COLORS = {
 LAYOUTS = ["horizontal", "vertical", "radial", "auto"]
 ALLOWED_OUTPUT_DIR = "/data/output"
 
+# /api/generate with a thinking model used to take 115s and return nothing;
+# with `think: false` the same prompt answers in ~14s. 30s (the previous
+# constant) sat between the two and made the timeout a coin toss.
+DEFAULT_LLM_TIMEOUT = 60.0
+
 
 def get_rustfs_client() -> Optional[Minio]:
     if not MINIO_AVAILABLE:
@@ -175,6 +180,18 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
+def llm_timeout() -> float:
+    """Timeout for the /api/generate call, overridable per deployment."""
+    raw = os.environ.get("LLM_REQUEST_TIMEOUT", "")
+    try:
+        value = float(raw)
+        if value > 0:
+            return value
+    except ValueError:
+        pass
+    return DEFAULT_LLM_TIMEOUT
+
+
 def call_llm(api_url: str, model: str, prompt: str) -> Optional[str]:
     if not REQUESTS_AVAILABLE:
         return None
@@ -185,16 +202,37 @@ def call_llm(api_url: str, model: str, prompt: str) -> Optional[str]:
             "prompt": prompt,
             "stream": False,
             "options": {"num_ctx": 2048, "temperature": 0.1},
+            # A thinking model spends the whole budget reasoning: /api/generate
+            # then returns `response` empty with the text in `thinking`, which
+            # ends up in the silent `dsl = description` fallback. Measured on
+            # qwen3.5:9b: 115.9s and response="" without the flag, 13.9s and a
+            # usable DSL with it. Models without thinking ignore the field
+            # (llama3.2:1b answers identically with and without it).
+            "think": False,
         }
 
-        response = requests.post(f"{api_url}/api/generate", json=payload, timeout=30)
+        response = requests.post(
+            f"{api_url}/api/generate", json=payload, timeout=llm_timeout()
+        )
 
         if response.status_code == 200:
             result = response.json()
-            return result.get("response", "").strip()
+            text = (result.get("response") or "").strip()
+            if not text and (result.get("thinking") or "").strip():
+                # Reasoning is not DSL: falling back to it would produce a
+                # canvas full of prose. Report it instead of passing it off.
+                logger.warning(
+                    "LLM answered only in the reasoning channel",
+                    extra_data={"model": model},
+                )
+            return text or None
 
         return None
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "LLM call failed",
+            extra_data={"model": model, "error": str(e)},
+        )
         return None
 
 
@@ -590,7 +628,7 @@ def parse_dsl_to_canvas(dsl: str, layout: str = "horizontal") -> dict:
 
 def generate_from_description(
     description: str, layout: str, llm_api_url: Optional[str], llm_model: str
-) -> tuple[dict, str]:
+) -> tuple[dict, str, bool]:
     dsl = None
 
     if llm_api_url:
@@ -600,6 +638,7 @@ def generate_from_description(
         if dsl and '->' not in dsl and '→' not in dsl and len(dsl.strip()) < 3:
             dsl = None  # Fall back to using description directly
 
+    used_llm = bool(dsl)
     if not dsl:
         # If no LLM or LLM failed, create simple DSL from description
         # Try to parse natural language arrows like "A -> B -> C"
@@ -611,7 +650,7 @@ def generate_from_description(
     canvas_json = parse_dsl_to_canvas(dsl, layout)
     final_layout = canvas_json.get("layout", layout)
 
-    return canvas_json, final_layout
+    return canvas_json, final_layout, used_llm
 
 
 def main() -> None:
@@ -645,7 +684,7 @@ def main() -> None:
         if layout not in LAYOUTS:
             layout = "horizontal"
 
-        canvas_json, final_layout = generate_from_description(
+        canvas_json, final_layout, used_llm = generate_from_description(
             description, layout, llm_api_url, llm_model
         )
 
@@ -700,6 +739,12 @@ def main() -> None:
         response_text += f"**Nodes:** {len(canvas_json.get('nodes', []))}\n"
         response_text += f"**Connections:** {len(canvas_json.get('edges', []))}\n\n"
 
+        if llm_api_url and not used_llm:
+            response_text += (
+                "**Note:** LLM requested but returned no usable DSL; the map was "
+                "built from the description directly.\n\n"
+            )
+
         if rustfs_url:
             response_text += f"**Saved to (RustFS):** {rustfs_url}\n\n"
         elif saved_path:
@@ -721,7 +766,8 @@ def main() -> None:
                     "edge_count": len(canvas_json.get("edges", [])),
                     "rustfs_url": rustfs_url,
                     "local_path": saved_path,
-                    "used_llm": llm_api_url is not None,
+                    "used_llm": used_llm,
+                    "llm_fallback": llm_api_url is not None and not used_llm,
                 },
             }
         )

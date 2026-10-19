@@ -98,6 +98,52 @@ func stubOllama(t *testing.T, served map[string][]string) *httptest.Server {
 	return srv
 }
 
+// stubOpenAICompatible es el caso que quedó sin anclar: un endpoint que solo
+// habla el protocolo OpenAI (`/v1/models` sí, `/api/tags` y `/api/show` no).
+// Ahí la capacidad de visión no es consultable, y callarlo era un verde falso.
+func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	var hits []string
+	record := func(r *http.Request) {
+		mu.Lock()
+		hits = append(hits, r.URL.Path)
+		mu.Unlock()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		type model struct {
+			ID string `json:"id"`
+		}
+		out := struct {
+			Object string  `json:"object"`
+			Data   []model `json:"data"`
+		}{Object: "list"}
+		for _, id := range servedIDs {
+			out.Data = append(out.Data, model{ID: id})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	notOllama := func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	}
+	mux.HandleFunc("/api/tags", notOllama)
+	mux.HandleFunc("/api/show", notOllama)
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), hits...)
+	}
+}
+
 // runPreflight ejecuta el script real con el .env dado y devuelve stdout+stderr
 // junto al código de salida (el gate son los dos: un aviso no debe romper el exit 0).
 func runPreflight(t *testing.T, envBody string) (string, int) {
@@ -240,6 +286,29 @@ func TestPreflightLLM_hostUnreachableWarns(t *testing.T) {
 	require.Contains(t, out, "no puedo listar modelos", "output:\n%s", out)
 	require.NotContains(t, out, "está servido", "output:\n%s", out)
 	require.NotContains(t, out, "NO lo sirve", "output:\n%s", out)
+}
+
+// TestPreflightLLM_openAICompatibleCannotVerifyVision ancla 9b4c8ce: cuando el
+// endpoint no expone /api/show (proveedor OpenAI-compatible), el preflight
+// comprobaba el tag y se callaba la visión — una línea verde sobre un requisito
+// que nadie verificó. Ahora lo dice como aviso, con la misma severidad que los
+// otros dos (si alguien lo degrada a `ok`, el assert de `warn ` y el recuento caen).
+func TestPreflightLLM_openAICompatibleCannotVerifyVision(t *testing.T) {
+	srv, hits := stubOpenAICompatible(t, "qwen3.5:9b")
+
+	out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b"))
+
+	require.Equal(t, 0, code, "no poder verificar no es un error de deploy:\n%s", out)
+	require.Contains(t, out, "ok    LLM_MODEL=qwen3.5:9b está servido por "+srv.URL, "output:\n%s", out)
+	require.Contains(t, out, "warn  no puedo verificar la visión de qwen3.5:9b: "+srv.URL+" no expone /api/show", "output:\n%s", out)
+	require.Contains(t, out, "1 aviso(s)", "el no-dato tiene que contar como aviso:\n%s", out)
+	require.NotContains(t, out, "declara visión", "sin /api/show no se puede afirmar nada:\n%s", out)
+	require.NotContains(t, out, "NO lo sirve", "el tag está servido según /v1/models:\n%s", out)
+
+	// El aviso solo tiene sentido si el script realmente intentó /api/show.
+	seen := strings.Join(hits(), " ")
+	require.Contains(t, seen, "/v1/models", "output:\n%s", out)
+	require.Contains(t, seen, "/api/show", "no se intentó comprobar la capacidad:\n%s", out)
 }
 
 // TestPreflight_envIsAGate: sin las variables que compose exige, el preflight

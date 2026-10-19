@@ -190,8 +190,13 @@ services:
     ports:
       - "${RUSTFS_PUBLISH_HOST:-127.0.0.1}:9000:9000"
     environment:
-      RUSTFS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY_ID:?RUSTFS_ACCESS_KEY_ID is required}
-      RUSTFS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_ACCESS_KEY:?RUSTFS_SECRET_ACCESS_KEY is required}
+      # OJO con los nombres: la imagen de RustFS lee RUSTFS_ACCESS_KEY y
+      # RUSTFS_SECRET_KEY; el cliente S3 del server Go y de los tools Python lee
+      # RUSTFS_ACCESS_KEY_ID / RUSTFS_SECRET_ACCESS_KEY. Se traduce aqui para
+      # que un unico par en .env sirva a los dos; si no, RustFS arranca con las
+      # credenciales por defecto (rustfsadmin) y todo acceso S3 responde 401.
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY_ID:?RUSTFS_ACCESS_KEY_ID is required}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_ACCESS_KEY:?RUSTFS_SECRET_ACCESS_KEY is required}
     volumes:
       - rustfs-data:/data
     networks:

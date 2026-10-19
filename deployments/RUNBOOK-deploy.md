@@ -74,9 +74,12 @@ Desde el incidente de `LLM_MODEL=qwen3.5:9b-32k` lleva además una sección
 un sufijo inexistente como `-32k` sigue en rojo. Cuando el modelo está servido,
 consulta además `/api/show` y avisa si **no declara `vision`**: `analyze_image`
 (`tools/vision_ocr`) necesita esa capacidad y un tag solo-texto la rompe sin
-dejar rastro en `/health`. Es **aviso, no error** —el host del LLM puede estar
-apagado y eso no impide desplegar el orquestador—, pero un `warn` ahí significa
-5 tools muertos con `/health` en verde: no se salta.
+dejar rastro en `/health`. Si el endpoint no expone `/api/show` (proveedor
+OpenAI-compatible), avisa de que la visión **no se pudo verificar** en vez de
+callarlo: la sección nunca da un «todo bien» que no ha comprobado. Es **aviso,
+no error** —el host del LLM puede estar apagado y eso no impide desplegar el
+orquestador—, pero un `warn` ahí significa 5 tools muertos con `/health` en
+verde: no se salta.
 
 ## 2. Backup y rename
 

@@ -237,6 +237,10 @@ else
                 else
                     warn "LLM_MODEL=$llm_model no declara visión: analyze_image (tools/vision_ocr) fallará con imágenes"
                 fi
+            else
+                # Endpoint OpenAI-compatible sin /api/show: el tag está servido pero
+                # la capacidad no es consultable. Se dice, no se calla.
+                warn "no puedo verificar la visión de $llm_model: $llm_url no expone /api/show"
             fi
         else
             served="$(printf '%s' "$tags" | grep -oE '"(name|id)":"[^"]+"' \

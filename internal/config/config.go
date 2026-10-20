@@ -91,7 +91,10 @@ type ServerConfig struct {
 	RateLimitBurst int `yaml:"rate_limit_burst"`
 	// ShutdownTimeout defines how long to wait for graceful shutdown
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
-	// AllowedOrigins is the list of permitted CORS origins (empty = all)
+	// AllowedOrigins is the list of permitted CORS origins (empty = all).
+	// Empty has a second consequence: with ADMIN_API_KEY set, the admin surface
+	// is refused entirely instead of served with wildcard CORS — see
+	// docs/AUTH.md ("Admin endpoints").
 	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 

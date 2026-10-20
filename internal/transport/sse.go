@@ -399,9 +399,25 @@ func (s *MCPServer) Start() error {
 	return s.httpServer.ListenAndServe()
 }
 
-// registerAdminRoutes sets up admin endpoints with auth, rate limiting, and CORS.
-// Only registers if admin key and DB are configured.
+// registerAdminRoutes sets up admin endpoints with admin-key auth, rate
+// limiting, and restricted CORS. Only registers if admin key, DB and an
+// explicit CORS origin list are configured.
+//
+// Fail-closed: with ADMIN_API_KEY set and server.allowed_origins empty the
+// endpoints are REFUSED, never served with a wildcard CORS policy. The admin
+// surface carries delete/export operations behind a password-equivalent key,
+// and an empty origin list turns its CORS into "reflect any browser Origin",
+// letting every web page the operator has open probe it. Unlike the MCP
+// endpoints — which keep their intentional permissive default for first-boot
+// onboarding — a refused admin mount only takes the admin API offline until the
+// origin list is explicit. See docs/AUTH.md ("Admin endpoints").
 func (s *MCPServer) registerAdminRoutes(mux *http.ServeMux) {
+	if s.adminKey != "" && len(s.allowedOrigins) == 0 {
+		log.Error().
+			Msg("Admin endpoints refused: ADMIN_API_KEY is set but server.allowed_origins is empty — the admin surface is never served with wildcard CORS; set explicit origins in configs/config.yaml (server allowed_origins) or unset ADMIN_API_KEY")
+		return
+	}
+
 	if s.adminKey == "" || s.db == nil {
 		log.Warn().Msg("Admin endpoints disabled: ADMIN_API_KEY or DB not configured")
 		return
@@ -498,12 +514,10 @@ func (s *MCPServer) registerAdminRoutes(mux *http.ServeMux) {
 	handler := auth.BearerAuth(s.adminKeyHash, auth.OnEmpty503, rateLimitedAdminMux)
 	handler = AdminCORSMiddleware(s.allowedOrigins)(handler)
 
-	if s.adminKey != "" && len(s.allowedOrigins) == 0 {
-		log.Warn().Msg("ADMIN_API_KEY is set but CORS allowed_origins is empty — admin endpoints accessible from any origin")
-	}
-
 	mux.Handle("/admin/", handler)
-	log.Info().Msg("Admin endpoints enabled on /admin/")
+	log.Info().
+		Strs("allowed_origins", s.allowedOrigins).
+		Msg("Admin endpoints enabled on /admin/ with origin-restricted CORS")
 }
 
 // Shutdown gracefully shuts down the server.

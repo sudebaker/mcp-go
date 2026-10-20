@@ -189,21 +189,51 @@ services:
       - "network.security=internal"
       - "network.description=Base de datos vectorial (KB)"
 
+  # ─── whisper ───
+  # AIR-GAPPED ESTRICTO: el modelo va DENTRO de la imagen (deployments/Dockerfile.whisper,
+  # multi-stage: un stage lo descarga en el BUILD y el final sólo hace COPY). El
+  # despliegue no tira de internet nunca y no hay servicio de fetch en `up`. Antes
+  # de esto, con la caché vacía y el servicio aislado en mcp-internal,
+  # `POST /v1/audio/transcriptions` devolvía 500 con LocalEntryNotFoundError.
+  #
+  # Coste: imagen ~1.9 GB (~+484 MB por faster-whisper-small). Si el modelo cambia
+  # (WHISPER_MODEL_ID) hay que RECONSTRUIR la imagen: no se baja en runtime.
   whisper:
-    image: fedirz/faster-whisper-server:latest-cpu
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper
+      args:
+        WHISPER_MODEL_ID: ${WHISPER_MODEL_ID:-Systran/faster-whisper-small}
+    # Tag fijo por despliegue; nunca `latest` en producción (ver RUNBOOK §7).
+    image: whisper-airgapped:${WHISPER_IMAGE_TAG:-local}
     container_name: whisper
     environment:
-      WHISPER_MODEL: Systran/faster-whisper-small
-      WHISPER_DEVICE: cpu
-      WHISPER_COMPUTE_TYPE: int8
+      # Config del server es pydantic con env_nested_delimiter="__": DOBLE barra
+      # baja. `WHISPER_MODEL=...` (una sola) se ignoraba en silencio.
+      WHISPER__MODEL: ${WHISPER_MODEL_ID:-Systran/faster-whisper-small}
+      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__COMPUTE_TYPE: int8
       HF_HOME: /root/.cache/huggingface
-      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface
-    volumes:
-      - whisper-models:/root/.cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface/hub
+      # Offline a propósito: la caché viene en la imagen. Si faltara, el error sale
+      # inmediato y claro en vez de tras un timeout de red.
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    # Sin volumen: la caché es de la imagen. (El volumen deployments_whisper-models
+    # del diseño anterior queda huérfano; ver RUNBOOK §7.)
     networks:
       - mcp-internal
     command: ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "${WHISPER_BIND_HOST:-0.0.0.0}", "--port", "8000"]
     restart: unless-stopped
+    healthcheck:
+      # Liveness, NO prueba de modelo: /health responde 200 aunque el modelo no se
+      # pueda cargar (la carga es perezosa, en la primera transcripción). El gate
+      # real del modelo es una transcripción, ver RUNBOOK §7.
+      test: ["CMD", "/root/faster-whisper-server/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
@@ -419,8 +449,6 @@ networks:
 # VOLÚMENES PERSISTENTES
 # ═══════════════════════════════════════════════
 volumes:
-  whisper-models:
-    driver: local
   mcp-data:
     driver: local
   postgres-data:

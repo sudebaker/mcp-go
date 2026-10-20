@@ -1,0 +1,13 @@
+# Contexto de build de deployments/ (imagen whisper-airgapped, Dockerfile.whisper).
+# La imagen sólo necesita el Dockerfile y la base: el modelo se baja en el build.
+# Nada de secretos ni del árbol de despliegue dentro del contexto.
+.env
+.env.*
+!.env.example
+*.md
+migrations/
+scripts/
+searxng-settings.yml
+u00261/
+.git
+.gitignore

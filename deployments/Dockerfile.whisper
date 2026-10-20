@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+# ─────────────────────────────────────────────────────────────────────────────
+# whisper-airgapped — speaches / faster-whisper con el modelo DENTRO de la imagen
+#
+# Por qué existe: el servicio `whisper` vive sólo en la red `mcp-internal`
+# (internal: true), sin salida a internet. Con la caché de HuggingFace vacía,
+# faster-whisper no puede bajar el modelo y cada `POST /v1/audio/transcriptions`
+# devuelve HTTP 500 con `LocalEntryNotFoundError`. Bajarlo durante el DESPLIEGUE
+# (servicio de un solo uso dentro de `docker compose up`) cambia un fallo por
+# otro: si huggingface.co no responde, whisper no arranca. Directriz del jefe:
+# air-gapped estricto, el despliegue no tira de internet NUNCA.
+#
+# Diseño: dos stages.
+#   1) `model`  — descarga el snapshot CTranslate2 al construir la imagen.
+#   2) runtime  — misma base, sólo `COPY` de la caché. Sin red en runtime.
+# El build necesita internet UNA vez (y sólo el build); el despliegue no.
+#
+# Coste: ~+484 MB con faster-whisper-small (imagen final ~1.9 GB). `medium`
+# (~1.5 GB) y `large-v3` (~3 GB) crecen mucho más: se habla ANTES de cambiarlos.
+# ─────────────────────────────────────────────────────────────────────────────
+ARG BASE_IMAGE=fedirz/faster-whisper-server:latest-cpu
+
+# ─── stage 1: descarga del modelo (necesita red) ─────────────────────────────
+FROM ${BASE_IMAGE} AS model
+
+ARG WHISPER_MODEL_ID=Systran/faster-whisper-small
+# Caché a un path propio para copiarlo entero y sin ambigüedad al stage final.
+ENV HF_HOME=/models
+
+RUN /root/faster-whisper-server/.venv/bin/python -c "\
+from huggingface_hub import snapshot_download; \
+p = snapshot_download(repo_id='${WHISPER_MODEL_ID}', cache_dir='/models/hub'); \
+print('whisper: modelo descargado en', p)" \
+    && test -n "$(ls -A /models/hub)"
+
+# ─── stage 2: runtime (sin red, offline explícito) ───────────────────────────
+FROM ${BASE_IMAGE} AS runtime
+
+# ARG global re-declarado: en un stage sólo se ve si se vuelve a declarar.
+ARG BASE_IMAGE=fedirz/faster-whisper-server:latest-cpu
+ARG WHISPER_MODEL_ID=Systran/faster-whisper-small
+
+# Config del server: pydantic con env_nested_delimiter="__" → DOBLE barra baja.
+# `WHISPER_MODEL=...` (una sola) se ignoraba en silencio y el server corría con
+# los defaults de la imagen.
+ENV WHISPER__MODEL=${WHISPER_MODEL_ID} \
+    WHISPER__INFERENCE_DEVICE=cpu \
+    WHISPER__COMPUTE_TYPE=int8 \
+    HF_HOME=/root/.cache/huggingface \
+    HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+# La caché va en la imagen: ni volumen ni descarga en el arranque. Si el modelo
+# faltara, el error sale inmediato y claro en vez de tras un timeout de red.
+COPY --from=model /models/hub /root/.cache/huggingface/hub
+
+# El CMD heredado de la base es `uv run uvicorn ...`: `uv run` intenta resolver e
+# instalar el proyecto (build-system.requires → hatchling desde pypi.org) y en un
+# contenedor SIN red muere con "Could not connect, are you offline?". Arrancamos
+# el uvicorn del venv ya instalado, que no toca la red.
+CMD ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+
+# El server carga el modelo en la PRIMERA transcripción (lazy): `/health` da 200
+# aunque el modelo no cargue. El gate real es una transcripción, ver RUNBOOK §7.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD ["/root/faster-whisper-server/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+
+LABEL org.opencontainers.image.title="whisper-airgapped" \
+      org.opencontainers.image.description="speaches 1.0.3 (faster-whisper-server) con el modelo CTranslate2 embebido; arranca sin red" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}" \
+      whisper.model.id="${WHISPER_MODEL_ID}"

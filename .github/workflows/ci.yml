@@ -40,10 +40,15 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
+      # `requests` y `tenacity` no son de los tests: son dependencias de producto
+      # (`tools/common/retry.py`, que es el cliente LLM de los cinco tools con LLM, igual
+      # que en `deployments/Dockerfile`). Sin ellas un `tools/*/test_*.py` que las importe
+      # sale `skipped` por `importorskip` — recogido pero sin ancla, que es el verde que
+      # ya nos ha costado dos rondas. Fijadas al vuelo con Python 3.14.
       - name: Dependencias de los tests (fijadas)
         run: >-
           python -m pip install --disable-pip-version-check
-          pytest==9.1.1 PyYAML==6.0.3 Jinja2==3.1.6
+          pytest==9.1.1 PyYAML==6.0.3 Jinja2==3.1.6 requests==2.34.2 tenacity==9.2.1
       # Mitigaciones SSRF, SSTI, ReDoS y deserialización YAML.
       #
       # Los tests de herramienta (`tools/*/test_*.py`) se recogen por glob, no por lista

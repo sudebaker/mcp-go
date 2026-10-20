@@ -1,5 +1,5 @@
 name: batch_summarize
-description: 'Resume múltiples documentos. Input: file_uris, summary_type (individual/master/both).
+description: 'Resume múltiples documentos. Input: __files__, summary_type (individual/master/both).
   Output: summaries + master summary opcional.'
 command: python3
 args:
@@ -8,12 +8,17 @@ timeout: 300s
 input_schema:
   type: object
   properties:
-    file_uris:
+    __files__:
       type: array
-      description: Files to summarize (resource URIs)
+      description: Files to summarize as objects {url, name}.
       items:
-        type: string
-        format: resource-uri
+        type: object
+        properties:
+          url:
+            type: string
+            format: resource-uri
+          name:
+            type: string
       minItems: 1
     summary_type:
       type: string
@@ -31,4 +36,4 @@ input_schema:
       default: 500
       description: Maximum length of summary in characters
   required:
-  - file_uris
+  - __files__

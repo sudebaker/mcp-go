@@ -160,8 +160,17 @@ def download_file(url: str) -> io.BytesIO:
     if url.startswith("res://"):
         token = url[len("res://"):]
         host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+        request = urllib.request.Request(f"http://{host}/internal/resource/{token}")
+        # The endpoint validates Authorization since the Bearer guard
+        # (sidecar phase 2): it wants the shared sidecar secret exactly as
+        # tools/common/resources/resource.py sends it. Without the token
+        # configured the request still goes out without the header and the
+        # SERVER decides — the check never skips at that side.
+        shared = os.environ.get("SANDBOX_API_TOKEN", "").strip()
+        if shared:
+            request.add_header("Authorization", f"Bearer {shared}")
         try:
-            resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
+            resp = urllib.request.urlopen(request)
             return io.BytesIO(resp.read())
         except urllib.error.HTTPError as e:
             if e.code == 401:
@@ -171,9 +180,10 @@ def download_file(url: str) -> io.BytesIO:
                 # than 5 minutes ago. Surface the remedy, not the raw HTTP code.
                 raise Exception(
                     "Resource token invalid (single-use, 5-minute TTL): the "
-                    "res:// uri was already consumed or expired. Re-upload the "
-                    "file with POST /upload (2 headers: Authorization Bearer + "
-                    "X-Session-ID) and pass the fresh uri."
+                    "res:// uri was already consumed or expired, or the tool "
+                    "container has no SANDBOX_API_TOKEN for the Bearer guard. "
+                    "Re-upload the file with POST /upload (2 headers: "
+                    "Authorization Bearer + X-Session-ID) and pass the fresh uri."
                 ) from e
             raise Exception(f"Failed to resolve resource: HTTP {e.code}") from e
         except Exception as e:

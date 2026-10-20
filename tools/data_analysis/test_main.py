@@ -20,6 +20,9 @@ Pinned:
 import importlib.util
 import os
 import sys
+import urllib.error
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -97,3 +100,42 @@ def test_legacy_backend_false_when_ping_fails(monkeypatch):
     monkeypatch.setattr(sandbox_module, "DockerSandboxedExecutor", _DeadExecutor)
 
     assert main.docker_sandbox_available() is False
+
+
+# --- wire-level: the res:// download must carry the Bearer -------------------
+#
+# /internal/resource answers 401 to any request without
+# Authorization: Bearer <SANDBOX_API_TOKEN> since the sidecar phase 2 guard.
+# tools/common/test_res_headers.py pins the same contract for the individual
+# clients; here the assertion runs through data_analysis's own sink so the
+# two res:// paths (file_url fallback and __files__ loop) keep a wire-level
+# reference: main._read_resource_bytes -> common.resources.Resource.
+
+
+def test_res_download_carries_bearer_on_the_wire(monkeypatch):
+    from common.res_stub import TEST_SANDBOX_TOKEN, res_guard_stub
+
+    server, seen = res_guard_stub(TEST_SANDBOX_TOKEN)
+    monkeypatch.setenv("SANDBOX_API_TOKEN", TEST_SANDBOX_TOKEN)
+    monkeypatch.setenv("MCP_INTERNAL_HOST", f"127.0.0.1:{server.server_port}")
+    try:
+        assert main._read_resource_bytes("res://stub-token") == b"a,b\n1,2\n"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [f"Bearer {TEST_SANDBOX_TOKEN}"]
+
+
+def test_res_download_without_secret_gets_401(monkeypatch):
+    from common.res_stub import TEST_SANDBOX_TOKEN, res_guard_stub
+
+    server, _seen = res_guard_stub(TEST_SANDBOX_TOKEN)
+    monkeypatch.delenv("SANDBOX_API_TOKEN", raising=False)
+    monkeypatch.setenv("MCP_INTERNAL_HOST", f"127.0.0.1:{server.server_port}")
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            main._read_resource_bytes("res://stub-token")
+        assert exc_info.value.code == 401
+    finally:
+        server.shutdown()
+        server.server_close()

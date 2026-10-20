@@ -26,6 +26,11 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
+# Varias herramientas declaran su test como tools/<tool>/test_main.py. Con el modo
+# de importacion por defecto (prepend) pytest importa ambos como el modulo
+# "test_main" y aborta la recoleccion con "import file mismatch", tumbando el job
+# de Python entero. importlib los carga por ruta y cada uno conserva su nombre.
+addopts = "--import-mode=importlib"
 markers = [
     "integration: marks tests as integration (requires external services)",
 ]

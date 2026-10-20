@@ -369,7 +369,7 @@ tools:
 
   # Config Auditor
   - name: "config_auditor"
-    description: "Audita configs en busca de secretos hardcodeados, puertos peligrosos, debug mode. Soporta YAML, JSON, TOML, INI, ENV. Output: findings + security score (0-100)."
+    description: "Audita ficheros de configuracion (YAML, JSON, TOML, INI, .env) en busca de secretos hardcodeados, puertos peligrosos, debug mode, valores vacios e IPs hardcodeadas. Sin LLM: findings derivados del contenido + security score (0-100)."
     command: "python3"
     args: ["/app/tools/config_auditor/main.py"]
     timeout: "120s"
@@ -378,26 +378,29 @@ tools:
       properties:
         __files__:
           type: array
-          description: "Configuration files to audit"
+          minItems: 1
+          description: "Ficheros de configuracion a auditar ({url, name})"
           items:
             type: object
             properties:
               url:
                 type: string
                 format: resource-uri
+                description: "res://<token> de un fichero subido o URL http(s)"
               name:
                 type: string
+                description: "Nombre con extension; decide el parser (yaml/json/toml/ini/env)"
         rules:
           type: array
           items:
             type: string
             enum: ["secrets", "empty_required", "dangerous_ports", "debug_mode", "hardcoded_ips"]
-          description: "Rules to apply (default: all)"
+          description: "Reglas a aplicar (por defecto: todas)"
         severity_filter:
           type: string
           enum: ["all", "critical", "high", "medium"]
           default: "all"
-          description: "Filter findings by severity"
+          description: "Severidad minima reportada (high incluye critical); no altera el score"
       required:
         - __files__
 

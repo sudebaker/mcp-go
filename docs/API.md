@@ -380,15 +380,68 @@ Compares two versions of a document or regulation.
 
 ### config_auditor
 
-Audits configuration files for security issues.
+Audits configuration files for security problems. It reads the file and derives
+every finding from its content — no LLM call. Formats are picked from the
+filename extension: `.yaml`/`.yml`, `.json`, `.toml`, `.ini`/`.cfg`/`.conf`,
+`.env`; anything else is scanned as plain text (line rules only, structural rules
+skipped). A YAML/JSON/TOML/INI file that fails to parse is still audited line by
+line and the failure is reported in `notes`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| __files__ | array | Yes | Configuration files to audit |
-| rules | array | No | `secrets`, `empty_required`, `dangerous_ports`, `debug_mode`, `hardcoded_ips` |
-| severity_filter | string | No | `all`, `critical`, `high`, `medium` |
+| __files__ | array | Yes | `{url, name}` entries. `url` is a `res://<token>` from `POST /upload` or an http(s) URL (SSRF-validated); `name` must carry the extension |
+| rules | array | No | `secrets`, `empty_required`, `dangerous_ports`, `debug_mode`, `hardcoded_ips` (default: all) |
+| severity_filter | string | No | Minimum severity reported: `all` (default), `critical`, `high` (critical + high), `medium`. It only trims the reported list — the score always reflects the whole audit |
 
-**Output:** Findings array + security score (0-100)
+**Rules**
+
+| Rule | Severity | Flags |
+|------|----------|-------|
+| `secrets` | critical | `password`/`secret`/`token`/`api_key`/`private_key`/`client_secret`… with a literal value. Environment references (`${VAR}`), empty strings, `<placeholders>` and commented-out lines are not reported; the value is redacted in the output |
+| `dangerous_ports` | high | Ports 22, 2375/2376, 3389, 6379, 27017, 9200, 11211 bound or dialled |
+| `debug_mode` | medium | `debug: true` / `DEBUG=1`, from the parsed tree or a line match |
+| `empty_required` | medium | Keys declared with no value (`timeout:` in YAML, `TIMEOUT=` in `.env`) |
+| `hardcoded_ips` | medium | Literal IPv4 addresses; `0.0.0.0`, `127.0.0.1` and `255.255.255.255` are treated as bind targets, not findings |
+
+**Output:** `structured_content.findings` (each with `file`, `rule`, `severity`,
+`field`, `line` — `null` for structural findings —, `current_value`,
+`description`, `recommendation`), plus `score`, `summary`, `total_findings`,
+`findings_by_severity`, per-file reports in `files`, and `errors` when a file
+could not be read. `score` starts at 100 and subtracts 25 per `critical`, 15 per
+`high` and 5 per `medium`, floored at 0.
+
+Example (abridged, from a real `POST /upload` → `res://` audit):
+
+```json
+{
+  "findings": [
+    {
+      "file": "ca-bad-config.yaml",
+      "rule": "secrets",
+      "severity": "critical",
+      "field": "password",
+      "line": 8,
+      "current_value": "<redacted, 12 chars>"
+    },
+    {
+      "file": "ca-bad-config.yaml",
+      "rule": "empty_required",
+      "severity": "medium",
+      "field": "database.timeout",
+      "line": null,
+      "current_value": ""
+    }
+  ],
+  "score": 40,
+  "summary": "Audited 1 file(s). 6 finding(s): 1 critical, 1 high, 4 medium. security score 40/100.",
+  "total_findings": 6,
+  "findings_by_severity": {"critical": 1, "high": 1, "medium": 4}
+}
+```
+
+A `res://` token is single-use: the resource stream deletes it on the first
+read, so each audit needs a fresh upload (the same is true for every tool that
+resolves `res://`).
 
 ---
 

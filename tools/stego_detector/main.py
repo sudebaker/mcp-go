@@ -33,7 +33,7 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def analyze_lsb(image: Image.Image) -> dict[str, Any]:
+def analyze_lsb(image: "Image.Image") -> dict[str, Any]:
     img_array = np.array(image)
     if len(img_array.shape) == 2:
         channels = [img_array]
@@ -78,7 +78,7 @@ def analyze_lsb(image: Image.Image) -> dict[str, Any]:
     }
 
 
-def analyze_chi_square(image: Image.Image) -> dict[str, Any]:
+def analyze_chi_square(image: "Image.Image") -> dict[str, Any]:
     img_array = np.array(image.convert("L"))
     histogram = np.bincount(img_array.flatten(), minlength=256)[:256]
 
@@ -102,7 +102,7 @@ def analyze_chi_square(image: Image.Image) -> dict[str, Any]:
     }
 
 
-def analyze_entropy(image: Image.Image, data: bytes | None = None) -> dict[str, Any]:
+def analyze_entropy(image: "Image.Image", data: bytes | None = None) -> dict[str, Any]:
     img_array = np.array(image.convert("L"))
     histogram = np.bincount(img_array.flatten(), minlength=256)[:256]
     total = img_array.size

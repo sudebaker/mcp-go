@@ -123,7 +123,7 @@ def write_response(response: dict[str, Any]) -> None:
     print(json.dumps(response, default=str))
 
 
-def preprocess_image(image_path: str) -> np.ndarray:
+def preprocess_image(image_path: str) -> "np.ndarray":
     """Preprocess image for better OCR results."""
     img = cv2.imread(image_path)
     if img is None:

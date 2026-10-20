@@ -43,7 +43,7 @@ except ImportError:
 _template_env = None
 
 
-def get_template_env() -> Environment:
+def get_template_env() -> "Environment":
     """Get or create cached Jinja2 environment with sandbox security.
 
     SECURITY: Uses SandboxedEnvironment to prevent template injection attacks
@@ -106,7 +106,7 @@ def generate_pdf(
     html.write_pdf(str(output_path), stylesheets=stylesheets)
 
 
-def render_incident_report(data: dict[str, Any], env: Environment) -> str:
+def render_incident_report(data: dict[str, Any], env: "Environment") -> str:
     """Render incident report template."""
     template = env.get_template("incident.html")
 
@@ -131,7 +131,7 @@ def render_incident_report(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
-def render_meeting_report(data: dict[str, Any], env: Environment) -> str:
+def render_meeting_report(data: dict[str, Any], env: "Environment") -> str:
     """Render meeting minutes template."""
     template = env.get_template("meeting.html")
 
@@ -157,7 +157,7 @@ def render_meeting_report(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
-def render_audit_report(data: dict[str, Any], env: Environment) -> str:
+def render_audit_report(data: dict[str, Any], env: "Environment") -> str:
     """Render audit report template."""
     template = env.get_template("audit.html")
 
@@ -183,7 +183,7 @@ def render_audit_report(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
-def render_executive_summary_report(data: dict[str, Any], env: Environment) -> str:
+def render_executive_summary_report(data: dict[str, Any], env: "Environment") -> str:
     """Render executive summary report template."""
     template = env.get_template("executive_summary.html")
 
@@ -206,7 +206,7 @@ def render_executive_summary_report(data: dict[str, Any], env: Environment) -> s
     return template.render(**context)
 
 
-def render_formal_report(data: dict[str, Any], env: Environment) -> str:
+def render_formal_report(data: dict[str, Any], env: "Environment") -> str:
     """Render formal report with charts template."""
     template = env.get_template("formal_report.html")
 
@@ -259,7 +259,7 @@ def render_formal_report(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
-def render_corporate_email(data: dict[str, Any], env: Environment) -> str:
+def render_corporate_email(data: dict[str, Any], env: "Environment") -> str:
     """Render corporate email template."""
     template = env.get_template("corporate_email.html")
 
@@ -289,7 +289,7 @@ def render_corporate_email(data: dict[str, Any], env: Environment) -> str:
     return template.render(**context)
 
 
-def render_llm_response(data: dict[str, Any], env: Environment) -> str:
+def render_llm_response(data: dict[str, Any], env: "Environment") -> str:
     """Render LLM response as PDF report with corporate styling."""
     template = env.get_template("llm_response.html")
 

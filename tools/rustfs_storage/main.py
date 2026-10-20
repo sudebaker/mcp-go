@@ -28,6 +28,7 @@ try:
 except ImportError:
     MINIO_AVAILABLE = False
     S3Error = Exception
+    Minio = None  # type: ignore  # annotation 'Optional[Minio]' must stay resolvable
 
 
 MAX_UPLOAD_SIZE_MB = 100

@@ -36,6 +36,7 @@ try:
 except ImportError:
     MINIO_AVAILABLE = False
     S3Error = Exception
+    Minio = None  # type: ignore  # annotation 'Optional[Minio]' must stay resolvable
 
 
 DEFAULT_TIMEOUT = 10

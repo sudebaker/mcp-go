@@ -401,6 +401,7 @@ El `code` se ejecuta con el mismo arnés que hoy, porque el prompt del LLM depen
 | `emit_chunk(type, data)` | función | escribe `__CHUNK__:{json}` en stdout (`tools/common/sandbox.py:28,424-427`) |
 | `emit_result(success, output, structured, files)` | función | escribe `__RESULT__:{json}` (`tools/common/sandbox.py:29,429-438`) |
 | `safe_files` | objeto con `read_csv`, `to_csv`, `read_excel`, `to_excel`, `open_read`, `open_write`, … | **hoy no existe** en el arnés de contenedor, pero el prompt lo exige (`tools/data_analysis/main.py:1069`); son los mismos helpers que el fallback ya expone como nombres sueltos (`tools/common/sandbox.py:764-789`) |
+| `__import__` | portón `sandbox_import` | **no es el builtin** (corrección t_52311b49, ver §15): solo admite módulos cuyo raíz esté en `SANDBOX_ALLOWED_MODULES` — `pandas`, `numpy`, `matplotlib`, `json`, `datetime`, `math`, `re`, `collections` — y niega `os`/`sys`/`subprocess`/`socket`/… y `level != 0` (`tools/common/safe_import.py`, fail-closed: sin el portón el bootstrap no ejecuta el código del LLM) |
 | `print` | builtin | el `output` se captura como stdout |
 | Directorio de entrada | `/data` (ro) | `safe_files` no puede escribir aquí |
 | Directorio de salida | `/tmp/output` (rw) | aquí van PNG/CSV que el sidecar devuelve en `files` |
@@ -409,8 +410,11 @@ El `code` se ejecuta con el mismo arnés que hoy, porque el prompt del LLM depen
 **Decisión fijada**: en v1, `np` y `plt` son módulos reales y `safe_files` existe, acotado a
 `/data` (ro) y `/tmp/output` (rw). Es una corrección de deriva entre el prompt y el arnés, no un
 debilitamiento: el contenedor sigue sin red, sin escritura fuera de `/tmp/output` y sin
-`open()`/`__import__`. Si la fase 2 no puede garantizarlo, el arreglo alternativo es corregir el
-prompt (fase 3), no dejar el contrato mintiendo.
+`open()` crudo. `__import__` **existe** desde t_52311b49 (§15) pero no es el builtin del
+intérprete: es un portón de whitelist (`sandbox_import`, `tools/common/safe_import.py`) que
+permite al payload del LLM escribir `import pandas as pd` (e `import matplotlib.pyplot as plt`)
+y niega el resto con `ImportError` — la lista exacta está en la tabla de §7.1 y su enforcing,
+demostrado en §15.
 
 Las variables `INPUT_DIR`/`OUTPUT_DIR` del orquestador (`tools/data_analysis/main.py:565-566`)
 dejan de tener sentido para el contenedor: el contrato fija `/data` y `/tmp/output` dentro del
@@ -618,3 +622,63 @@ Comportamiento de ejecución sin cambios.
 - `go vet ./...` ok · `go build -o /tmp/mcp-server-phase3-check ./cmd/server` ok ·
   `go test -count=1 ./...` → 11 packages ok (sin cambios Go en esta rama).
 - `gofmt -l .` → vacío.
+
+---
+
+## 15. Fase 3.1 — portón de `__import__` en el arnés (implementada)
+
+**Estado**: implementada por backend (t_52311b49), a raíz del smoke honestamente ROJO de la
+FASE 2-bis: con el engine arreglado (#68) el payload real del LLM llegaba al `exec` y moría con
+`NameError "__import__ not found"` — el arnés de §7.1 tenía `safe_import` **escrito pero nunca
+vinculado** (el binding estaba comentado en `sandbox_bootstrap.py`) y el fallback in-process
+tampoco lo exponía. El 124 falso del engine (`#68`) lo enmascaraba desde siempre.
+
+**Decisión**: la opción 1 de la tarjeta, sin debilitar nada. `__import__` vuelve a existir en
+los builtins restringidos, pero **no es el builtin del intérprete**: es `sandbox_import`
+(`tools/common/safe_import.py`, módulo compartido sin dependencias) que solo admite módulos
+cuyo raíz esté en `SANDBOX_ALLOWED_MODULES` (`pandas`, `numpy`, `matplotlib`, `json`,
+`datetime`, `math`, `re`, `collections`) y niega imports relativos. Se añade `matplotlib`
+porque el propio prompt (regla 10, `main.py`) ordena `import matplotlib.pyplot as plt` para
+`output_format=png` — sin ella el fix habría muerto en el siguiente smoke con imagen.
+
+Se cambia la **clase** del bug, no solo el sitio reportado:
+
+- `tools/data_analysis/sandbox_bootstrap.py` (arnés del contenedor): vincula
+  `"__import__": sandbox_import` y **fail-closed** — si el portón no está importable, el
+  bootstrap se niega a ejecutar el código del LLM en vez de correr sin gate.
+- `tools/data_analysis/main.py::execute_code_safely` (fallback in-process, `SANDBOX_REQUIRED=false`):
+  recibe el mismo portón.
+
+Descartadas la opción 2 (normalizar el código generado / endurecer el prompt: innecesaria con el
+portón) y cualquier cambio de API del sidecar (§4 intacto) o de los límites del contenedor (§7
+intacto, verificado abajo).
+
+### 15.1 Verificación (comandos ejecutados y salida real)
+
+- Suite py completa:
+  `uv run --python 3.14 --with pytest==9.1.1 --with PyYAML==6.0.3 --with Jinja2==3.1.6 --with
+  requests==2.34.2 --with tenacity==9.2.1 python -m pytest tests/test_security_mitigations.py
+  tools/*/test_*.py` → **92 passed, 1 skipped** (1 skip: el payload pandas del fallback exige
+  pandas, ausente del venv slim; corre en el contenedor/E2E).
+- Regresión nueva `tools/data_analysis/test_sandbox_bootstrap.py` (17 test): el payload del
+  criterio `import pandas as pd … print(len(df))` pasa por el bootstrap real en subprocess con
+  stubs (exit 0, `__RESULT__:{success: true}`), `import os`/`subprocess.check_output` negados,
+  `eval` sigue denegado, y el fallback in-process obedece el mismo portón.
+- **Imagen real** (`docker build tools/data_analysis/sandbox.Dockerfile`):
+  `docker run --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true
+  --user nobody:nogroup -e MCP_SANDBOX_CODE=<b64> INPUT_DIR=/data OUTPUT_DIR=/tmp/output`:
+  - `import pandas as pd … print(len(df))` → exit 0, imprime el nº de filas del CSV montado.
+  - `import os …` → exit 1, `SandboxImportError: Import of 'os' is not allowed in the sandbox.
+    Allowed modules: collections, datetime, json, math, matplotlib, numpy, pandas, re`; el
+    payload no llega a ejecutarse.
+  - `import matplotlib.pyplot as plt` → exit 0.
+- **E2E vía sidecar**: `go build ./cmd/sandbox-sidecar` + `SANDBOX_API_TOKEN=…`
+  `POST /v1/execute` con `code="import pandas as pd\n\nprint(len(df))"` e `input_data` records
+  (vía A) → **HTTP 200, success=true, exit_code=0, execution_time_ms=1461, "3" en output**,
+  `sandbox.limits` íntegros (`network: none, read_only: true, user: nobody`) y 0 contenedores
+  residuales. Frente a la evidencia ROJO de FASE 2-bis (`exit_code=1, ms=4531`,
+  `"__import__ not found"`), el shape exacto del fallo queda corregido en toda la vía.
+- E2E de la tool completa (`analyze_data` → LLM real gpt-oss:20b en ollama → sidecar → sandbox):
+  `success=true`, análisis real (groupby + tabla markdown), sin `SANDBOX_UNAVAILABLE` ni errores
+  verbatim en el happy path.
+- `go test -count=1 ./...` → 11 packages ok (sin cambios Go en esta rama). `go vet ./...` ok.

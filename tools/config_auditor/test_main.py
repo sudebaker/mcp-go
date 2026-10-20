@@ -247,7 +247,9 @@ class ConfigAuditorTest(unittest.TestCase):
         response = self.audit([{"url": "res://tok-missing", "name": "gone.yaml"}])
         self.assertFalse(response["success"])
         self.assertEqual(response["error"]["code"], "NO_FILES")
-        self.assertIn("gone.yaml", response["error"]["details"][0]["file"])
+        # error.details is a string per protocol contract (see docs/DEVELOPMENT.md),
+        # so per-file errors render inline instead of as an array.
+        self.assertIn("gone.yaml", response["error"]["details"])
 
     def test_docker_api_port_is_caught_without_a_url(self):
         response = self.audit([{"url": "res://tok-docker", "name": "daemon.yaml"}])

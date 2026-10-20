@@ -225,6 +225,18 @@ def collect_files(
     return files, errors
 
 
+def format_file_errors(errors: List[Dict[str, str]]) -> str:
+    """Render per-file read errors as one details string.
+
+    The subprocess protocol contract (docs/DEVELOPMENT.md) says error.details
+    is a string; anything structured goes in structured_content, never here.
+    """
+    return "; ".join(
+        f"{e.get('file', 'unknown')}: {e.get('error', 'unknown')}"
+        for e in errors
+    )
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
@@ -629,7 +641,7 @@ def main() -> None:
                     "error": {
                         "code": "NO_FILES",
                         "message": "No readable files provided in __files__",
-                        "details": errors,
+                        "details": format_file_errors(errors),
                     },
                 }
             )
@@ -658,7 +670,7 @@ def main() -> None:
                     "error": {
                         "code": "NO_FILES",
                         "message": "No readable configuration files in __files__",
-                        "details": errors,
+                        "details": format_file_errors(errors),
                     },
                 }
             )

@@ -83,28 +83,29 @@ import (
 // MCPServer wraps the mcp-go library server with additional functionality.
 // It provides HTTP serving, middleware chaining, and management endpoints.
 type MCPServer struct {
-	mcpServer       *server.MCPServer            // Core MCP server implementation
-	streamServer    *server.StreamableHTTPServer // Streamable HTTP handler
-	sseServer       *server.SSEServer            // Legacy SSE server
-	httpServer      *http.Server                 // Go HTTP server instance
-	addr            string                       // Listen address (host:port)
-	serverName      string                       // Service name for logging/health
-	version         string                       // Semantic version
-	tools           []config.ToolConfig          // Tool configurations for docs
-	rateLimiter     *RateLimiter                 // Rate limiting middleware (nil if disabled)
-	tracer          *tracing.Tracer              // Distributed tracing
-	allowedOrigins  []string                     // CORS allowed origins (empty = all)
-	uploadConfig    config.UploadConfig          // Upload endpoint configuration
-	filesDir        string                       // Directory for serving generated files via /files/
-	healthChecker   *health.Checker              // Health checker for dependency status
-	resourceManager *resources.ResourceManager   // Resource resolver/token manager
-	keyring         *auth.Keyring                // Bearer-token keyring for /mcp, /sse, /message, /upload
-	adminKey        string                       // ADMIN_API_KEY for admin endpoints (empty = disabled)
-	adminKeyHash    [32]byte                     // SHA-256 of adminKey, pre-computed for time-constant compare
-	db              *sql.DB                      // Database connection for admin endpoints
-	stopCh          chan struct{}
-	stopCleanupOnce sync.Once
-	maxMCPBodySize  int64
+	mcpServer               *server.MCPServer            // Core MCP server implementation
+	streamServer            *server.StreamableHTTPServer // Streamable HTTP handler
+	sseServer               *server.SSEServer            // Legacy SSE server
+	httpServer              *http.Server                 // Go HTTP server instance
+	addr                    string                       // Listen address (host:port)
+	serverName              string                       // Service name for logging/health
+	version                 string                       // Semantic version
+	tools                   []config.ToolConfig          // Tool configurations for docs
+	rateLimiter             *RateLimiter                 // Rate limiting middleware (nil if disabled)
+	tracer                  *tracing.Tracer              // Distributed tracing
+	allowedOrigins          []string                     // CORS allowed origins (empty = all)
+	uploadConfig            config.UploadConfig          // Upload endpoint configuration
+	filesDir                string                       // Directory for serving generated files via /files/
+	healthChecker           *health.Checker              // Health checker for dependency status
+	resourceManager         *resources.ResourceManager   // Resource resolver/token manager
+	keyring                 *auth.Keyring                // Bearer-token keyring for /mcp, /sse, /message, /upload
+	adminKey                string                       // ADMIN_API_KEY for admin endpoints (empty = disabled)
+	adminKeyHash            [32]byte                     // SHA-256 of adminKey, pre-computed for time-constant compare
+	internalResourceKeyHash [32]byte                     // SHA-256 of SANDBOX_API_TOKEN guarding /internal/resource (zero = refuse all)
+	db                      *sql.DB                      // Database connection for admin endpoints
+	stopCh                  chan struct{}
+	stopCleanupOnce         sync.Once
+	maxMCPBodySize          int64
 }
 
 // SetResourceManager sets the resource manager used by the MCP server.
@@ -321,9 +322,23 @@ func (s *MCPServer) Start() error {
 	// Files endpoint (GET /files/{tool}/{filename}) - serve generated files
 	mux.HandleFunc("/files/", s.handleFiles)
 
-	// Internal resource streaming endpoint (GET /internal/resource/{token})
-	// Not protected by auth middleware; relies on Docker network isolation.
-	mux.HandleFunc("/internal/resource/", s.handleInternalResource)
+	// Internal resource streaming endpoint (GET /internal/resource/{token}).
+	//
+	// Guarded with Authorization: Bearer <SANDBOX_API_TOKEN> — the shared
+	// secret the sandbox sidecar presents when it resolves res:// URIs
+	// (docs/SANDBOX_SIDECAR_API.md §5.2). Fail-closed: if the variable is
+	// unset, malformed or an .env.example placeholder, the endpoint answers
+	// 401 to every request instead of falling back to "network isolation is
+	// enough". Docker network segmentation still applies on top of it, not
+	// instead of it.
+	resourceKeyHash, resourceKeyErr := internalResourceKeyHash()
+	if resourceKeyErr != nil {
+		log.Error().
+			Err(resourceKeyErr).
+			Msg("Internal resource endpoint refuses every request with 401: configure a valid SANDBOX_API_TOKEN (openssl rand -hex 32) shared with the sandbox sidecar and the tool subprocesses")
+	}
+	s.internalResourceKeyHash = resourceKeyHash
+	mux.Handle("/internal/resource/", s.internalResourceHandler())
 
 	// Admin endpoints (protected with ADMIN_API_KEY)
 	s.registerAdminRoutes(mux)

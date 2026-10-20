@@ -81,6 +81,9 @@ func requiredEnv(llmURL, llmModel string, extra ...string) string {
 		"RUSTFS_ACCESS_KEY_ID=test-id",
 		"RUSTFS_PUBLIC_URL=http://localhost:9000",
 		"RUSTFS_SECRET_ACCESS_KEY=test-secret",
+		// requerida por docker-compose desde el sidecar (contrato #58,
+		// fase 2): sin ella compose aborta el up -d.
+		"SANDBOX_API_TOKEN=test-sandbox-fixture-token",
 		"SANDBOX_REQUIRED=true",
 		"LLM_API_URL=" + llmURL,
 		"LLM_MODEL=" + llmModel,

@@ -544,4 +544,77 @@ Lista mínima que devops debe poder demostrar con salida real:
   el cuerpo de `docker_sandbox_available()` (`tools/data_analysis/main.py:519-540`) por una sonda
   del sidecar, añade `sandbox_backend()` y mapea errores según §6.2. Al desaparecer el `ping()`
   local, la guarda de `SANDBOX_REQUIRED` deja de depender del paquete `docker` dentro del
-  contenedor.
+  contenedor. **Implementada** — ver §14.
+
+---
+
+## 14. Fase 3 — cliente HTTP del orquestador (implementada)
+
+**Estado**: implementada por backend. El cliente vive en `tools/common/sandbox.py`; la firma
+pública `execute_in_sandbox(code, input_data, config, on_chunk) -> SandboxResult` y el tipo
+`SandboxResult` quedan intactos según §13. No toca `internal/sidecar` ni el servicio, ni compose.
+
+### 14.1 Selección de backend
+
+| `SANDBOX_API_URL` | `sandbox_backend()` | Comportamiento |
+|---|---|---|
+| unset / vacía | `none` | idéntico a antes de esta fase: intento de Docker local, guarda `SANDBOX_REQUIRED` con el código y texto `SANDBOX_UNAVAILABLE` de siempre, y fallback `exec()` restringido solo si `SANDBOX_REQUIRED=false` |
+| configurada | `sidecar` | `POST {SANDBOX_API_URL}/v1/execute` con `Authorization: Bearer <SANDBOX_API_TOKEN>`. **No existe fallback** a docker ni a `exec()`: cualquier fallo del sidecar o del transporte sale como `SandboxResult(success=False)` con el error mapeado (§6.2) |
+
+### 14.2 `SidecarSandboxedExecutor` — mapping to §4
+
+- Petición §4.3: `code`, `input_data` por la vía A (`format: "records"`, `name: "input.csv"`; un
+  dict suelto se envuelve en una lista de un record) y los límites de `SandboxConfig` convertidos a
+  los campos contractuales (`timeout_seconds`, `memory_limit_mb` desde el valor estilo Docker
+  `"512m"`, `cpu_limit`, `pids_limit`).
+- Cabeceras: `Authorization` SIEMPRE (sin `SANDBOX_API_TOKEN` la llamada ni se envía: error
+  fail-closed del lado orquestador), `Content-Type: application/json; charset=utf-8` y
+  `Idempotency-Key` = uuid por petición (§9: el cliente no reintenta; la clave hace
+  determinístico cualquier reenvío accidental del transporte).
+- Timeout de conexión: `timeout_seconds + 15` (§8, obligatorio).
+- `200`: `SandboxResult` directo del envelope — `output`, `chunks` (re-emitidos por el callback
+  igual que en docker), `files`, `execution_time_ms` (la medición del sidecar, §4.4) y
+  `exit_code`. Los campos aditivos (`request_id`, `error_code`, `output_truncated`, `warnings`,
+  `sandbox`) se ignoran como fija §4.4.
+- Errores §6.1 con el mapa §6.2: `400/413/409` → `SandboxResult(success=False)` con
+  `error.message` del sidecar verbatim (fallo de integración: bug del llamador, sin reintento);
+  `401/429/5xx` y fallos de transporte → `SandboxResult(success=False, error="Sandbox service
+  unavailable: …")`.
+
+### 14.3 Sonda de disponibilidad y guardas
+
+- `sidecar_reachable()` (`tools/common/sandbox.py`) hace `GET /v1/health` (ruta sin auth, §3;
+  no envía el secreto) con timeout de 2 s y devuelve `(ok, razón)`; en `503 degraded` incluye el
+  `status` del sidecar en la razón. Nunca lanza.
+- `docker_sandbox_available()` (`tools/data_analysis/main.py`) despacha por backend: con
+  `sidecar` decide la sonda; con `none` conserva el `ping()` de Docker de siempre. El código y
+  texto `SANDBOX_UNAVAILABLE` de la guarda `SANDBOX_REQUIRED` no cambian (§6.2).
+
+### 14.4 `res://` en data_analysis
+
+Las dos ramas de data_analysis que descargaban `res://` con un `urllib.request.urlopen` pelado —
+sin cabecera, que es exactamente lo que el guard Bearer de la fase 2 convierte en 401 — pasan
+por `tools/common/resources/resource.py` (el mismo cliente que usan las 12 tools
+in-container), que añade el Bearer. data_analysis sigue leyendo y parseando el fichero en la
+tool (el resumen de la df alimenta el prompt del LLM, `tools/data_analysis/main.py:1071`) y la
+ejecución viaja como vía A (`input_data` records). La vía B (`inputs[].resource_uri`, resuelta
+por el sidecar según §5) queda soportada por la API para un consumidor futuro; data_analysis
+todavía no la usa: con archivos enormes el límite de §4.3 (10 MiB en `records`) se aplica y
+convierte en 400.
+
+Nota de compatibilidad (< 3.14): las anotaciones que se evaluaban en import
+(`Optional[Minio]`, `pd.DataFrame`) estallaban en Python < 3.14 al faltar minio/pandas
+(PEP 649 las vuelve lazy en 3.14 — por eso el CI no lo ve); quedan tipadas `Any` y con el
+alias `Minio = None  # type: ignore`, igual que el patrón que ya existía en el fichero.
+Comportamiento de ejecución sin cambios.
+
+### 14.5 Verificación de esta fase (comandos ejecutados y salida real)
+
+- pytest con la misma versión (3.14.7) y dependencias fijadas del job python de CI, sin pandas:
+  `uv run --python 3.14 --with pytest==9.1.1 --with PyYAML==6.0.3 --with Jinja2==3.1.6 --with
+  requests==2.34.2 --with tenacity==9.2.1 python -m pytest tests/test_security_mitigations.py
+  tools/*/test_*.py` → **74 passed in 10.12s** (22 de seguridad + 20 nuevos en
+  `tools/common/test_sandbox.py` + 4 nuevos en `tools/data_analysis/test_main.py` + preexistentes).
+- `go vet ./...` ok · `go build -o /tmp/mcp-server-phase3-check ./cmd/server` ok ·
+  `go test -count=1 ./...` → 11 packages ok (sin cambios Go en esta rama).
+- `gofmt -l .` → vacío.

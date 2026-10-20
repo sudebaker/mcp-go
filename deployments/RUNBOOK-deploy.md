@@ -147,3 +147,100 @@ No se tocan volúmenes (`postgres`, `rustfs`): no hay pérdida de datos en el
 rollback. Lo único que sobrevive al rollback es la migración
 `003_admin_audit.sql` — es aditiva e idempotente, y una versión anterior del
 binario la ignora.
+
+## 7. Egress a internet: bloqueo del operador (falso positivo de `web_scraper`)
+
+**Síntoma.** `web_scraper` funciona contra Wikipedia pero con `example.com`
+devuelve, en el campo `error` del tool:
+
+```
+http://example.com  -> Connection error: ('Connection aborted.', BadStatusLine('<!DOCTYPE html>'))
+https://example.com -> Connection error: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+```
+
+**No es el stack.** Medido el 2026-10-20 en el host de trabajo (LAN
+192.168.88.0/24) y **también dentro de la imagen**, así que no depende de
+Docker, del DNS del compose ni del tool:
+
+```bash
+$ docker create --name diagreq --dns 8.8.8.8 --entrypoint python3 mcp-go:nonroot -c '...'
+$ docker start -a diagreq
+http://example.com  -> ConnectionError : ('Connection aborted.', BadStatusLine('<!DOCTYPE html>\n'))
+https://example.com -> ConnectionError : ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+http://example.org  -> HTTP 200 577 bytes          # misma imagen, misma red, misma resolución
+```
+
+Y en el propio host, con socket crudo contra la IP real (104.20.23.154, Cloudflare):
+
+```bash
+$ curl -sv http://example.com
+* Established connection to example.com (104.20.23.154 port 80) from 192.168.88.13
+> GET / HTTP/1.1
+* Received HTTP/0.9 when not allowed
+< <!DOCTYPE html>
+* Invalid response header
+```
+
+El cuerpo de esa respuesta (904 bytes, **sin línea de estado HTTP**) es la causa:
+
+```html
+<title>Contenido bloqueado</title>
+<h1>Contenido bloqueado por requerimiento de la Autoridad Competente
+    comunicado a esta Operadora</h1>
+```
+
+**Diagnóstico.** El operador de acceso inyecta una página de bloqueo en el puerto
+80 y resetea el 443 (`Recv failure`, exit 35). El filtro casa por dominio (Host/SNI),
+no por IP: contra la misma IP 104.20.23.154, `Host: example.org` da `HTTP/1.1 200`
+y `Host: cloudflare.com` da `301`. Como el cuerpo inyectado **no empieza por
+`HTTP/1.x`**, `http.client` levanta `BadStatusLine('<!DOCTYPE html>')` — el nombre
+del error engaña: no hay una respuesta HTTP mal formada del servidor remoto, hay
+un HTML crudo inyectado en el camino.
+
+Descartado con esa misma medición: DNS interno del contenedor (resuelve a IPs
+reales de Cloudflare, igual con `--dns 8.8.8.8` que sin él), proxy mal
+configurado (no hay ninguna variable `*_PROXY` en el entorno del contenedor) y
+retry/timeout (`web_scraper` usa `timeout=30` y el fallo es inmediato, no un
+corte por tiempo).
+
+**Comprobación en 5 segundos** (no despliega nada, no toca contenedores):
+
+```bash
+deployments/scripts/egress-probe.sh                 # pareja de control example.org / example.com
+deployments/scripts/egress-probe.sh --in-container mcp-go:nonroot   # lo mismo dentro de la imagen
+```
+
+Salida real en esta red:
+
+```
+== http://example.org/
+   status line    HTTP/1.1 200 OK
+   veredicto      CLEAN — HTTP 200
+== http://example.com/
+   status line    (ninguna)
+   bytes / curl   904 bytes, exit 0
+   veredicto      INTERCEPTED — respuesta sin línea de estado HTTP con cuerpo HTML: página inyectada por la red (marcador: 'Contenido bloqueado')
+```
+
+**Qué hacer.**
+
+1. **Dominio bloqueado y es solo una prueba** (p.ej. un smoke con `example.com`):
+   usa `example.org`, que sirve desde la misma IP de Cloudflare y en esta red sale
+   `200`. `example.com` **no** es un objetivo válido de gate de egress aquí.
+2. **Dominio bloqueado y es un destino real del negocio**: la salida directa no
+   existe, hay que enrutar por otra vía. Sin tocar código: define `HTTP_PROXY` /
+   `HTTPS_PROXY` / `NO_PROXY` en `deployments/.env` (bloque «SALIDA A INTERNET» de
+   `.env.example`) y recrea solo el servidor con `docker compose up -d mcp-server`.
+   `requests` y el cliente HTTP de Go las respetan; `NO_PROXY` **tiene** que
+   cubrir los servicios internos (`searxng`, `crawl4ai`, `ollama`, `rustfs`,
+   `postgres`, ...) o esas llamadas también saldrán por el proxy y fallarán.
+   El compose ya propaga las tres con valor por defecto vacío (= salida directa):
+   un despliegue sin ellas se comporta exactamente igual que antes.
+3. **Se quiere discutir el bloqueo con el operador** es asunto del usuario, no del
+   deploy: no hay nada que arreglar en la imagen.
+
+**Rollback de este cambio.** El compose solo añade tres variables vacías por
+defecto y el resto es documentación + script de sonda: `git revert <SHA>` y, si
+se había definido proxy, borrar esas líneas del `.env` y `docker compose up -d
+mcp-server`. Sin datos implicados (no toca volúmenes) y sin migraciones.
+

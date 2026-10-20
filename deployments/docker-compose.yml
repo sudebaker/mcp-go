@@ -96,6 +96,19 @@ services:
       # MCP_AUTH_KEY y MCP_UPLOAD_API_KEY a mano).
       # `false` solo en desarrollo local, y a sabiendas de lo anterior.
       SANDBOX_REQUIRED: ${SANDBOX_REQUIRED:-true}
+      # SALIDA A INTERNET A TRAVÉS DE PROXY (opcional, vacío = salida directa).
+      # Solo hace falta cuando el host no puede llegar directo al destino: p.ej.
+      # el operador bloquea un dominio que el tool web_scraper necesita (ver
+      # RUNBOOK-deploy.md §7 — síntoma `BadStatusLine('<!DOCTYPE html>')` en :80
+      # y RST en :443). `requests` (web_scraper, crawl4ai) y el cliente HTTP de
+      # Go respetan estas variables, así que basta definirlas en .env; no hay
+      # que tocar código.
+      # OJO: NO_PROXY tiene que cubrir los servicios internos o sus llamadas
+      # saldrán por el proxy y fallarán (searxng, crawl4ai, ollama, rustfs,
+      # postgres, memgraph, opensearch, whisper, localhost).
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,searxng,crawl4ai,ollama,rustfs,postgres,memgraph,opensearch,whisper,mcp-server}
     dns:
       - 8.8.8.8
       - 1.1.1.1

@@ -494,7 +494,11 @@ func (e *Engine) waitForExit(parent context.Context, id string, timeout time.Dur
 	}
 	waitOnce := func(ctx context.Context) (waitMsg, error) {
 		var msg waitMsg
-		resp, err := e.do(ctx, http.MethodGet, "/containers/"+id+"/wait?condition=next-exit", "", nil)
+		// /containers/{id}/wait is a POST-only route on the Engine API: on
+		// Docker >= 29 (API 1.54) a GET answers 404 "page not found", an
+		// API error that must never be read as our deadline — POST is also
+		// what docker CLI's `wait` uses (FASE 2 regression, t_9f4bd493).
+		resp, err := e.do(ctx, http.MethodPost, "/containers/"+id+"/wait?condition=next-exit", "", nil)
 		if err != nil {
 			return msg, err
 		}
@@ -509,10 +513,16 @@ func (e *Engine) waitForExit(parent context.Context, id string, timeout time.Dur
 	if waitErr == nil {
 		return msg.StatusCode, false, nil
 	}
-	if errors.Is(waitErr, ErrDaemonUnreachable) {
+	// §4.4: 124+TimedOut is reserved for OUR deadline cutting the run. Every
+	// other wait failure — HTTP error, decode error, transport outage, client
+	// cancel — surfaces verbatim: disguising it as a timeout manufactured the
+	// "Execution timed out after 60 seconds" after ~1 s of life shipped in
+	// FASE 2 (t_9f4bd493). The deferred stopContainer in Run still reaps the
+	// container on these paths; on cancellation the error propagates to Run.
+	if runCtx.Err() != context.DeadlineExceeded {
 		return 0, false, waitErr
 	}
-	// Deadline (ours or the client's) — enforce §7: kill before responding.
+	// Sidecar-imposed timeout — enforce §7: kill before responding.
 	killCtx, kcancel := context.WithTimeout(parent, 5*time.Second)
 	resp, killErr := e.do(killCtx, http.MethodPost, "/containers/"+id+"/kill", "", nil)
 	if killErr == nil {

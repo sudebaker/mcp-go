@@ -33,6 +33,8 @@ type daemonCalls struct {
 
 	hooks    map[string]*hookOnce // signaled when the marked call reaches the daemon
 	releases map[string]chan struct{}
+
+	waitFault int // if != 0, POST-wait answers this HTTP status immediately
 }
 
 type hookOnce struct {
@@ -66,6 +68,21 @@ func (d *daemonCalls) bump(class string) {
 	d.counts[class]++
 }
 
+// setWaitFault makes POST-wait answer the given HTTP status immediately (0
+// disables it), simulating an API-level failure of the wait itself (a 404 on
+// a wrong method, a 500, ...). Guarded so handlers never race the test setup.
+func (d *daemonCalls) setWaitFault(status int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.waitFault = status
+}
+
+func (d *daemonCalls) waitFaultNow() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.waitFault
+}
+
 // newFakeDaemon starts the fake daemon on a fresh unix socket and returns an
 // Engine bound to it.
 func newFakeDaemon(t *testing.T) (*Engine, *daemonCalls) {
@@ -84,10 +101,12 @@ func newFakeDaemon(t *testing.T) (*Engine, *daemonCalls) {
 		hooks: map[string]*hookOnce{
 			"start": newHookOnce(),
 			"wait":  newHookOnce(),
+			"kill":  newHookOnce(),
 		},
 		releases: map[string]chan struct{}{
 			"start": make(chan struct{}),
 			"wait":  make(chan struct{}),
+			"kill":  make(chan struct{}),
 		},
 	}
 	ln, err := net.Listen("unix", sock)
@@ -129,6 +148,11 @@ func (d *daemonCalls) serve(w http.ResponseWriter, r *http.Request) {
 	case "wait":
 		d.bump(c)
 		d.hooks["wait"].once.Do(func() { close(d.hooks["wait"].ch) })
+		if s := d.waitFaultNow(); s != 0 { // fault injection: POST-wait fails at the API level
+			w.WriteHeader(s)
+			_, _ = w.Write([]byte(`{"message":"fake daemon fault"}`))
+			return
+		}
 		select {
 		case <-r.Context().Done(): // the disconnect this suite tests
 			return
@@ -137,6 +161,7 @@ func (d *daemonCalls) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"StatusCode":0}`))
 	case "kill":
 		d.bump(c)
+		d.hooks["kill"].once.Do(func() { close(d.hooks["kill"].ch) })
 		w.WriteHeader(http.StatusOK)
 	case "delete", "delete-volume", "volume-create":
 		d.bump(c)
@@ -159,7 +184,7 @@ func classifyDaemonCall(r *http.Request) string {
 		return "ping"
 	case m == http.MethodGet && strings.Contains(p, "/images/"):
 		return "image"
-	case m == http.MethodGet && strings.Contains(p, "/wait"):
+	case m == http.MethodPost && strings.Contains(p, "/wait"):
 		return "wait"
 	case m == http.MethodGet && strings.Contains(p, "/logs"):
 		return "logs"
@@ -271,5 +296,128 @@ func TestPrepareJobCleanupSurvivesClientCancel(t *testing.T) {
 	}
 	if volDeletes := d.count("delete-volume"); volDeletes == 0 {
 		t.Fatalf("VOLUME LEAK: failed-staging volume removal (delete-volume=%d) never reached the daemon", volDeletes)
+	}
+}
+
+// ---- waitForExit contract (t_9f4bd493) --------------------------------------
+//
+// The FASE 2 smoke failure (analyze_data, epicteto 18:19-18:23Z): the engine
+// polled /containers/{id}/wait with GET, Docker 29.4.0 answered 404 "page not
+// found", and the old mapping dressed ANY wait error as a sidecar deadline —
+// killing the container after ~1 s and answering 124 + "Execution timed out
+// after 60 seconds" with files=0. Three tests pin the corrected contract:
+// wait served by POST only, 124+TimedOut ONLY for our own deadline, and every
+// other wait failure surfaced verbatim with no kill.
+
+// waitOutcome bundles the waitForExit results for channel handoff.
+type waitOutcome struct {
+	code     int
+	timedOut bool
+	err      error
+}
+
+// TestWaitExitUsesPOSTAndResolves — classifyDaemonCall answers 404 for the
+// old GET-wait (like Docker >= 29) and serves the POST-wait. A healthy wait
+// must resolve exit 0 with no timeout and no kill; a GET regression would
+// come back as 124+TimedOut (the FASE 2 symptom) instead.
+func TestWaitExitUsesPOSTAndResolves(t *testing.T) {
+	e, d := newFakeDaemon(t)
+
+	done := make(chan waitOutcome, 1)
+	go func() {
+		c, to, err := e.waitForExit(context.Background(), "fake-container-id", 30*time.Second)
+		done <- waitOutcome{code: c, timedOut: to, err: err}
+	}()
+
+	select {
+	case <-d.hook("wait"):
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake daemon never saw the wait stream")
+	}
+	d.release("wait")
+
+	select {
+	case o := <-done:
+		if o.err != nil {
+			t.Fatalf("wait failed although the daemon served POST: %v", o.err)
+		}
+		if o.code != 0 || o.timedOut {
+			t.Fatalf("wait resolved as code=%d timedOut=%v — a 404/GET wait was dressed as a sidecar timeout", o.code, o.timedOut)
+		}
+		if kills := d.count("kill"); kills != 0 {
+			t.Fatalf("a healthy wait must not kill the container (kill=%d)", kills)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waitForExit blocked past the released wait")
+	}
+}
+
+// TestWaitTimeoutReports124 — the ONLY 124+TimedOut path: the sidecar deadline
+// expires while the daemon holds the stream. §7 requires the kill to reach the
+// daemon and the re-wait to resolve, with nil error (executor maps it to
+// EXECUTION_TIMEOUT itself).
+func TestWaitTimeoutReports124(t *testing.T) {
+	e, d := newFakeDaemon(t)
+
+	done := make(chan waitOutcome, 1)
+	go func() {
+		c, to, err := e.waitForExit(context.Background(), "fake-container-id", 200*time.Millisecond)
+		done <- waitOutcome{code: c, timedOut: to, err: err}
+	}()
+
+	select {
+	case <-d.hook("wait"): // stream held by the daemon (no release yet)
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake daemon never saw the wait stream")
+	}
+	select {
+	case <-d.hook("kill"): // the deadline reached the daemon as a kill
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sidecar deadline did not reach the daemon as a kill")
+	}
+	d.release("wait") // let the post-kill re-wait resolve
+
+	select {
+	case o := <-done:
+		if o.err != nil {
+			t.Fatalf("sidecar timeout must answer 124+TimedOut with nil error, got err=%v", o.err)
+		}
+		if o.code != 124 || !o.timedOut {
+			t.Fatalf("sidecar timeout answered code=%d timedOut=%v, want 124/true", o.code, o.timedOut)
+		}
+		if kills := d.count("kill"); kills == 0 {
+			t.Fatal("the timeout path must kill the container before answering")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waitForExit blocked past its own deadline+killing")
+	}
+}
+
+// TestWaitAPIErrorSurfaced — an API failure of the wait itself (here 500; the
+// reviewed-against 404-on-GET is the FASE 2 case) is NOT a timeout: it must
+// surface verbatim, with no timeout flag and NO kill of the container.
+func TestWaitAPIErrorSurfaced(t *testing.T) {
+	e, d := newFakeDaemon(t)
+	d.setWaitFault(http.StatusInternalServerError)
+
+	done := make(chan waitOutcome, 1)
+	go func() {
+		c, to, err := e.waitForExit(context.Background(), "fake-container-id", 30*time.Second)
+		done <- waitOutcome{code: c, timedOut: to, err: err}
+	}()
+
+	select {
+	case o := <-done:
+		if o.err == nil || !strings.Contains(o.err.Error(), "returned 500") {
+			t.Fatalf("wait API error must surface verbatim, got err=%v", o.err)
+		}
+		if o.code != 0 || o.timedOut {
+			t.Fatalf("an API error must not be dressed as 124/timeout (code=%d timedOut=%v)", o.code, o.timedOut)
+		}
+		if kills := d.count("kill"); kills != 0 {
+			t.Fatalf("an API error must not kill the container (kill=%d; reaping stays with Run's deferred cleanup)", kills)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waitForExit blocked on a faulted wait")
 	}
 }

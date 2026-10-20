@@ -16,6 +16,7 @@ Provides functions to extract text from various document formats:
 import io
 import json
 import os
+import urllib.error
 import urllib.request
 import yaml
 import ipaddress
@@ -162,6 +163,19 @@ def download_file(url: str) -> io.BytesIO:
         try:
             resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
             return io.BytesIO(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                # Server-side upload tokens are single-use with a 5-minute TTL
+                # (internal/resources/token.go). A 401 here almost always means
+                # this res:// uri was already read once or was uploaded more
+                # than 5 minutes ago. Surface the remedy, not the raw HTTP code.
+                raise Exception(
+                    "Resource token invalid (single-use, 5-minute TTL): the "
+                    "res:// uri was already consumed or expired. Re-upload the "
+                    "file with POST /upload (2 headers: Authorization Bearer + "
+                    "X-Session-ID) and pass the fresh uri."
+                ) from e
+            raise Exception(f"Failed to resolve resource: HTTP {e.code}") from e
         except Exception as e:
             raise Exception(f"Failed to resolve resource: {str(e)}") from e
 

@@ -1,0 +1,43 @@
+# sandbox-sidecar: the only service that talks to the Docker daemon
+# (docs/SANDBOX_SIDECAR_API.md §2). Multi-stage build: static Go binary,
+# minimal base, one responsibility per container.
+#
+# The sidecar runs as root INSIDE its container only to reach
+# /var/run/docker.sock (root:root on the host). Compose pairs it with
+# cap_drop: [ALL], no-new-privileges, read_only rootfs and a tmpfs /
+# (see docker-compose.yml) — the container has no privileges beyond the
+# socket the daemon exposes to it, and the SANDBOX containers it runs
+# hardened per §7: network none, read-only rootfs, nobody (65534).
+#
+# NOTE: pulling/building never happens inside a request (§3); the image
+# (mcp-python-sandbox:latest) must exist on the daemon host when the sidecar
+# starts — SANDBOX_BUILD_ON_MISSING stays false in v1.
+
+# ── Stage 1: build the static binary ────────────────────────────────────
+FROM golang:1.26-alpine AS go-builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/sandbox-sidecar ./cmd/sandbox-sidecar
+
+# ── Stage 2: minimal runtime ─────────────────────────────────────────────
+FROM alpine:3.22
+
+RUN adduser -D -g '' -s /sbin/nologin sandbox || true
+
+COPY --from=go-builder /out/sandbox-sidecar /usr/local/bin/sandbox-sidecar
+
+ENV SANDBOX_LISTEN_ADDR=":8080" \
+    SANDBOX_LOG_LEVEL="info"
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/sandbox-sidecar"]

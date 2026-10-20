@@ -37,7 +37,17 @@ class Resource:
             token = self._uri.removeprefix("res://")
             host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
             url = f"http://{host}/internal/resource/{token}"
-            self._response = urllib.request.urlopen(url)
+            request = urllib.request.Request(url)
+            # The endpoint validates Authorization since the Bearer guard
+            # (devops sidecar phase 2): it wants the shared sidecar secret
+            # exactly as the sandbox sidecar sends it in its own res://
+            # fetches (docs/SANDBOX_SIDECAR_API.md §5.2). Without the token
+            # configured the request still goes out without the header and
+            # the SERVER decides — the check never skips at that side.
+            shared = os.environ.get("SANDBOX_API_TOKEN", "").strip()
+            if shared:
+                request.add_header("Authorization", f"Bearer {shared}")
+            self._response = urllib.request.urlopen(request)
         return self._response
 
     def read_bytes(self) -> bytes:

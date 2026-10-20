@@ -1,0 +1,19 @@
+# Build contexts stay small: every Dockerfile in the repo copies an explicit
+# allow-list of paths (go.mod/go.sum, cmd/, internal/, .git/, configs/,
+# tools/, templates/). Everything else — including .worktrees/, bin/ and the
+# secrets below — must never enter a build context.
+*
+!cmd/
+!internal/
+!configs/
+!tools/
+!templates/
+!deployments/
+!go.mod
+!go.sum
+!.git/
+
+# Secrets never travel into a build context (house rule: no secrets in the
+# repo or in build args). Explicitly re-excluded after the !deployments/ rule.
+deployments/.env
+deployments/.env.*

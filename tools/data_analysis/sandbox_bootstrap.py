@@ -17,6 +17,14 @@ import os
 import traceback
 from pathlib import Path
 
+import pandas as pd
+import numpy as np
+import matplotlib
+
+# Agg before pyplot: the sandbox has no display and rootfs is read-only.
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
 
@@ -99,6 +107,26 @@ def main():
         emit_chunk("warning", {"message": f"SafeFileOperations not available: {e}"})
         safe_files = None
 
+    # df binding, fixed by the sidecar contract (docs/SANDBOX_SIDECAR_API.md
+    # §7.1): a single .csv inside the input dir becomes df; several files →
+    # df stays None and the code reaches each file through safe_files. The
+    # sidecar stages the inline input_data (records/csv) as exactly one CSV
+    # in that directory, so the same rule covers both input paths.
+    df = None
+    input_dir = os.environ.get("INPUT_DIR", "/data/input")
+    try:
+        csv_files = sorted(
+            p for p in Path(input_dir).iterdir()
+            if p.is_file() and p.suffix.lower() == ".csv"
+        )
+        if len(csv_files) == 1:
+            df = pd.read_csv(csv_files[0])
+        elif csv_files:
+            emit_chunk("warning", {"message": "df is None: multiple input files, use safe_files per file"})
+    except Exception as e:  # noqa: BLE001 — missing/empty input dir keeps df=None
+        emit_chunk("warning", {"message": f"df binding skipped: {e}"})
+        df = None
+
     # Restricted builtins - CRITICAL: Block dangerous operations
     restricted_builtins = {
         # Type constructors
@@ -168,8 +196,13 @@ def main():
         "__name__": "__sandbox__",
         "__doc__": None,
         # Pre-imported safe modules
-        "pd": __import__("pandas"),
-        "np": __import__("numpy"),
+        "pd": pd,
+        "np": np,
+        # Real modules per contract §7.1 (np/plt must exist; output_format=png
+        # depends on plt). Matplotlib is pinned to the Agg backend above.
+        "plt": plt,
+        # df binding above (None when no single CSV input)
+        "df": df,
         "json": __import__("json"),
         "datetime": __import__("datetime"),
         "math": __import__("math"),

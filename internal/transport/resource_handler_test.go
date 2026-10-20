@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -90,7 +91,7 @@ func (s *fakeStorage) Delete(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
-func TestHandleInternalResource(t *testing.T) {
+func TestHandleInternalResourceWithBearer(t *testing.T) {
 	store := session.New()
 	store.Set("sess1", "user-abc")
 	storage := newFakeStorage()
@@ -101,19 +102,76 @@ func TestHandleInternalResource(t *testing.T) {
 		t.Fatalf("PutForUser failed: %v", err)
 	}
 
-	s := &MCPServer{resourceManager: mgr}
-	req := httptest.NewRequest(http.MethodGet, "/internal/resource/"+strings.TrimPrefix(res.URI, "res://"), nil)
-	rec := httptest.NewRecorder()
-	s.handleInternalResource(rec, req)
+	token := "test-only-sandbox-token-0123456789abcdef"
+	requestURI := "/internal/resource/" + strings.TrimPrefix(res.URI, "res://")
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	// Test cases (boss acceptance criteria for /internal/resource):
+	//   1. no Authorization header        -> 401
+	//   2. valid Bearer SANDBOX_API_TOKEN -> 200
+	//   3. invalid bearer token           -> 401
+	//   (fail-closed: unset token config -> 401, covered by case 4)
+	cases := []struct {
+		name   string
+		hash   [32]byte
+		bearer string
+		want   int
+	}{
+		{name: "no token", hash: sha256.Sum256([]byte(token)), bearer: "", want: http.StatusUnauthorized},
+		{name: "valid token", hash: sha256.Sum256([]byte(token)), bearer: "Bearer " + token, want: http.StatusOK},
+		{name: "invalid token", hash: sha256.Sum256([]byte(token)), bearer: "Bearer wrong-value-token-99", want: http.StatusUnauthorized},
+		{name: "unconfigured token (fail closed)", hash: [32]byte{}, bearer: "Bearer anything-123", want: http.StatusUnauthorized},
 	}
-	body, _ := io.ReadAll(rec.Result().Body)
-	if string(body) != "hello" {
-		t.Fatalf("expected hello, got %s", body)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &MCPServer{resourceManager: mgr, internalResourceKeyHash: tc.hash}
+			req := httptest.NewRequest(http.MethodGet, requestURI, nil)
+			if tc.bearer != "" {
+				req.Header.Set("Authorization", tc.bearer)
+			}
+			rec := httptest.NewRecorder()
+			s.internalResourceHandler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+			if tc.want == http.StatusOK {
+				body, _ := io.ReadAll(rec.Result().Body)
+				if string(body) != "hello" {
+					t.Fatalf("expected hello, got %s", body)
+				}
+				if got := rec.Result().Header.Get("X-Resource-Name"); got != "file.txt" {
+					t.Fatalf("expected X-Resource-Name file.txt, got %s", got)
+				}
+			}
+		})
 	}
-	if got := rec.Result().Header.Get("X-Resource-Name"); got != "file.txt" {
-		t.Fatalf("expected X-Resource-Name file.txt, got %s", got)
+}
+
+func TestInternalResourceKeyHashRejectsBadTokens(t *testing.T) {
+	var zero [32]byte
+	for name, token := range map[string]string{
+		"empty":       "   ",
+		"badcharset":  "con espacios no",
+		"placeholder": "change_me",
+	} {
+		t.Setenv("SANDBOX_API_TOKEN", token)
+		hash, err := internalResourceKeyHash()
+		if err == nil {
+			t.Errorf("SANDBOX_API_TOKEN %q (%s): expected error, got hash %v", token, name, hash)
+		}
+		if hash != zero {
+			t.Errorf("SANDBOX_API_TOKEN %q (%s): zero hash expected, got %v", token, name, hash)
+		}
+	}
+
+	valid := "generated-openssl-rand-hex-32-value"
+	t.Setenv("SANDBOX_API_TOKEN", valid)
+	hash, err := internalResourceKeyHash()
+	if err != nil {
+		t.Fatalf("valid token rejected: %v", err)
+	}
+	if hash != sha256.Sum256([]byte(valid)) {
+		t.Fatal("hash mismatch for valid token")
 	}
 }

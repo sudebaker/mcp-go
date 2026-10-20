@@ -39,7 +39,7 @@ endurecimientos (ver §7).
 +-------------------+   stdin/stdout JSON    +--------------------------+
 | Go orchestrator   |----------------------->| Python tool (data_analysis)|
 |                   |                        |  tools/common/sandbox.py |
-|  /internal/       |<----- HTTP GET --------|  (cliente del sidecar)   |
+|  /internal/       |<----- HTTP GET --------|  (solo nombra res://)    |
 |  resource/{token} |   res://token           +------------+-------------+
 +-------------------+                                     |
         ^                                                 | HTTP POST /v1/execute
@@ -58,6 +58,10 @@ endurecimientos (ver §7).
                                               +--------------------------+
 ```
 
+La flecha HTTP GET se dibuja desde el tool porque el token viaja **a través de él** (lo recibe del
+orquestador y se lo entrega en `inputs[].resource_uri`), pero quien la ejecuta es el sidecar:
+regla 1 de §5 — el tool **no** abre ficheros, solo nombra.
+
 Fronteras fijadas:
 
 1. **El orquestador no monta el socket de Docker.** El sidecar es el único servicio con acceso
@@ -70,6 +74,12 @@ Fronteras fijadas:
 3. **El contenedor del sandbox no tiene red.** Heredado: `network="none"`
    (`tools/common/sandbox.py:185`).
 4. **El sidecar no se publica fuera de la red interna de compose.** Sin `ports:` hacia el host.
+5. **`/internal/resource` exige `Authorization: Bearer <SANDBOX_API_TOKEN>` desde la fase 2** —
+   guard fail-closed del orquestador (unset/malformado ⇒ 401, sin modo vacío). Llevan el mismo
+   token: el sidecar al resolver `res://` (§5.2) y `tools/common/resources/resource.py` — el
+   cliente que usan los 12 tools in-container para el streaming de recursos. El tool de
+   `data_analysis` NO es consumidor de este endpoint: solo nombra `res://<token>` y el sidecar
+   resuelve (regla 1 de §5).
 
 ---
 
@@ -277,6 +287,13 @@ Reglas de la vía B, fijadas:
    sidecar, no se escribe en logs.
 6. La salida (`files`) vuelve en base64 al orquestador, que es quien decide si persiste algo en
    RustFS. El sidecar no retiene nada: borra el directorio del job al responder (éxito o error).
+
+Nota de implementación (fase 2, sidecar): el estado del job no vive en un directorio de disco del
+sidecar — un path interno del contenedor no puede montarse en otro contenedor, porque el daemon
+resuelve los binds en el namespace del HOST. Se implementó con **volúmenes nombrados que el
+sidecar crea por job** (`mcp-sb-job-<job_id>`: input rw para staging, `/data` read-only para el
+sandbox) que se destruyen al responder; equivale a la regla 6 (nada se retiene) sin tocar el
+disco del sidecar, que además corre con rootfs read-only.
 
 Si el orquestador no puede emitir `res://` (p. ej. fichero generado en memoria), se usa la vía A.
 Las dos vías son excluyentes en una misma petición (`400` si llegan ambas).

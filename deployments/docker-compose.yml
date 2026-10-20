@@ -96,6 +96,18 @@ services:
       # MCP_AUTH_KEY y MCP_UPLOAD_API_KEY a mano).
       # `false` solo en desarrollo local, y a sabiendas de lo anterior.
       SANDBOX_REQUIRED: ${SANDBOX_REQUIRED:-true}
+      # ── Sandbox de ejecución aislada (contrato v1, merge #58) ──────────
+      # SANDBOX_API_TOKEN: secreto compartido tres lados: el guard de
+      # /internal/resource (401 sin token válido), el streaming in-container
+      # que hacen las tools (tools/common/resources/resource.py) y el
+      # sidecar (POST /v1/execute). Fail-closed: si falta el endpoint
+      # contesta 401 a todo.
+      SANDBOX_API_TOKEN: ${SANDBOX_API_TOKEN:?SANDBOX_API_TOKEN is required - generate with openssl rand -hex 32 (shared mcp-server + sandbox-sidecar)}
+      # URL base del sidecar para el cliente de fase 3. Vacío ⇒ backend
+      # «none»: la herramienta sigue respondiendo SANDBOX_UNAVAILABLE hasta
+      # que backend cablee el cliente HTTP (fase 3, PR aparte).
+      SANDBOX_API_URL: ${SANDBOX_API_URL:-}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-mcp-python-sandbox:latest}
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -360,6 +372,67 @@ services:
       - "ocu.component=search"
       - "network.security=internal"
       - "network.description=Motor de búsqueda full-text (evidencias)"
+
+  # ─── sandbox-sidecar ───
+  # ÚNICO servicio con docker.sock (contrato v1 §2: el orquestador nunca
+  # monta el socket). Ejecuta el código generado por el LLM en contenedores
+  # hardened (network none, rootfs read-only, cap_drop ALL, user nobody).
+  # Sin `ports:`: solo la red interna. La imagen del sandbox
+  # (mcp-python-sandbox:latest) debe existir en el host antes de arrancar:
+  # SANDBOX_BUILD_ON_MISSING no tiene modo en v1 y nunca se construye dentro
+  # de una petición.
+  sandbox-sidecar:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.sandbox-sidecar
+    container_name: sandbox-sidecar
+    environment:
+      # Secreto compartido con mcp-server (ver mcp-server.environment). Un
+      # solo .env, un solo valor; nunca un literal aquí.
+      SANDBOX_API_TOKEN: ${SANDBOX_API_TOKEN:?SANDBOX_API_TOKEN is required - generate with openssl rand -hex 32 (shared mcp-server + sandbox-sidecar)}
+      SANDBOX_LISTEN_ADDR: ${SANDBOX_LISTEN_ADDR:-:8080}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-mcp-python-sandbox:latest}
+      SANDBOX_INTERNAL_ORCHESTRATOR_URL: ${SANDBOX_INTERNAL_ORCHESTRATOR_URL:-http://mcp-server:8080}
+      SANDBOX_MAX_CONCURRENCY: ${SANDBOX_MAX_CONCURRENCY:-2}
+      SANDBOX_QUEUE_SIZE: ${SANDBOX_QUEUE_SIZE:-8}
+      SANDBOX_LOG_LEVEL: ${SANDBOX_LOG_LEVEL:-info}
+    volumes:
+      # ÚNICO bind del socket en toda la pila: rw (la API exige escritura en
+      # el socket). El contenedor NO tiene privilegios añadidos por el
+      # socket: cap_drop ALL + rootfs read-only + no-new-privileges, y los
+      # contenedores sandbox que lanza van más duros todavía (§7).
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      - mcp-internal
+    depends_on:
+      mcp-server:
+        condition: service_started
+    restart: unless-stopped
+    # /v1/health queda sin auth a propósito (§3): es el healthcheck del
+    # contenedor y no devuelve datos de usuario. El binario se auto-
+    # comprueba (-healthcheck) porque la imagen no lleva curl.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/sandbox-sidecar", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      - "network.security=internal"
+      - "network.description=Ejecución aislada (sandbox): único servicio con docker.sock"
 
   # ═══════════════════════════════════════════════
   # SERVICIOS EXTERNOS — Con acceso a internet (mcp-external)

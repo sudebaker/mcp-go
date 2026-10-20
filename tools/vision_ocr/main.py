@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 # Add the tools directory to the path so we can import common modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.resources import ToolContext
+from common.resources import Resource, ToolContext
 from common.validators import validate_file_path, validate_url_ssrf
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
@@ -409,11 +409,12 @@ def main() -> None:
                     data = resource.read_bytes()
                     suffix = Path(resource.name).suffix or ".jpg"
                 else:
-                    host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
-                    token = image_path[len("res://"):]
-                    import urllib.request
-                    resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
-                    data = resp.read()
+                    # No injected metadata: the URI is a bare res:// token —
+                    # stream it through the shared resource client, which
+                    # attaches the Bearer /internal/resource requires since
+                    # the sidecar phase 2 guard. A bare urlopen answers 401.
+                    resource_client = Resource(uri=image_path, name="", mime="", size=0, sha256="")
+                    data = resource_client.read_bytes()
                     suffix = ".jpg"
                 tmp_dir = Path("/data/tmp")
                 tmp_dir.mkdir(parents=True, exist_ok=True)

@@ -60,6 +60,13 @@ def fetch_resource(uri: str) -> tuple[bytes, str, str]:
     token = uri[len("res://"):]
     host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
     request = urllib.request.Request(f"http://{host}/internal/resource/{token}")
+    # The endpoint validates Authorization since the Bearer guard (sidecar
+    # phase 2): same convention as tools/common/resources/resource.py — attach
+    # the header only when SANDBOX_API_TOKEN is set; otherwise the request
+    # still goes out and the SERVER decides (fail-closed there).
+    shared = os.environ.get("SANDBOX_API_TOKEN", "").strip()
+    if shared:
+        request.add_header("Authorization", f"Bearer {shared}")
     with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
         data = response.read()
         name = response.headers.get("X-Resource-Name") or "audio"

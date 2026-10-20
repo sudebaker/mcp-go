@@ -237,7 +237,10 @@ func (e *Engine) PrepareJob(ctx context.Context, image string, inputs []JobInput
 		return nil, err
 	}
 	if err := e.seedVolume(ctx, image, vol, inputs); err != nil {
-		_ = e.VolumeRemove(ctx, vol)
+		// The request may have died mid-staging (client disconnect): the
+		// volume delete must still reach the daemon, or a failed staging
+		// leaks a volume — same no-orphan rule as Run below.
+		_ = e.VolumeRemove(context.WithoutCancel(ctx), vol)
 		return nil, err
 	}
 	return &JobStaging{VolumeName: vol}, nil
@@ -293,7 +296,10 @@ func (e *Engine) seedVolume(ctx context.Context, image, volName string, inputs [
 		return fmt.Errorf("seed helper create: %w", err)
 	}
 
-	cleanup := func() { _ = e.RemoveContainer(ctx, created.ID) }
+	// Helper removal must survive a mid-seed client disconnect — a canceled
+	// ctx here would orphan the helper container (same rule as Run).
+	cleanupCtx := context.WithoutCancel(ctx)
+	cleanup := func() { _ = e.RemoveContainer(cleanupCtx, created.ID) }
 	if err := e.post(ctx, "/containers/"+created.ID+"/start",
 		bytes.NewBuffer(nil), "", nil); err != nil {
 		cleanup()
@@ -430,16 +436,20 @@ func (e *Engine) Run(ctx context.Context, volName string, spec RunSpec) (RunResu
 	}
 	out.ContainerID = container.ID
 
-	// No-runaway guarantee: whatever path exits below, the container is
-	// killed (best effort if it already exited) and removed first.
+	// Same guarantee as §7, including the disconnect path: the daemon calls
+	// here must not inherit the request ctx (it is already canceled when the
+	// client disconnects or the server shuts down — the instant BEFORE the
+	// defer runs), or the kill+remove never reach the daemon and the
+	// container is orphaned, alive with no deadline left in force.
+	cleanupCtx := context.WithoutCancel(ctx)
 	var stopOnce sync.Once
 	stopContainer := func() {
 		stopOnce.Do(func() {
-			if resp, killErr := e.do(ctx, http.MethodPost, "/containers/"+out.ContainerID+"/kill", "", nil); killErr == nil {
+			if resp, killErr := e.do(cleanupCtx, http.MethodPost, "/containers/"+out.ContainerID+"/kill", "", nil); killErr == nil {
 				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 				_ = resp.Body.Close()
 			}
-			_ = e.RemoveContainer(ctx, out.ContainerID)
+			_ = e.RemoveContainer(cleanupCtx, out.ContainerID)
 		})
 	}
 	defer stopContainer()

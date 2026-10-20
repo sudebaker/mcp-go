@@ -305,6 +305,10 @@ export S3_OPERATION_TIMEOUT_SECONDS=1
    - Memory limits on executed code
    - Timeout protection
    - Resource limits
+   - No network, read-only rootfs, `user=nobody`, dropped capabilities, bounded tmpfs.
+     The authoritative isolation model and the sidecar API contract are in
+     [SANDBOX_SIDECAR_API.md](SANDBOX_SIDECAR_API.md) (§7). The orchestrator container never
+     mounts `docker.sock`: only the sandbox sidecar talks to the Docker daemon.
 
 4. **Logging & Monitoring**
    - All SSRF blocks logged

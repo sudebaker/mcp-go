@@ -142,6 +142,12 @@ The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
+The orchestrator container does **not** mount the Docker socket. Sandboxed execution runs through an
+isolated sidecar service with an HTTP API; its frozen v1 contract (endpoints, request/response
+shape, isolation model, limits and error codes) is
+[docs/SANDBOX_SIDECAR_API.md](docs/SANDBOX_SIDECAR_API.md), with a machine-readable schema in
+[docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml).
+
 ## Toolset Filtering
 
 The server can expose different subsets of tools without code changes, using **toolsets** defined in `configs/toolsets.yaml`.

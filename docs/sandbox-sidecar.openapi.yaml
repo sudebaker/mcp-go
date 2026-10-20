@@ -1,0 +1,439 @@
+openapi: 3.1.0
+info:
+  title: Sandbox sidecar execution API
+  version: "1.0.0"
+  description: |
+    HTTP contract for the isolated code-execution sidecar (v1).
+
+    Normative prose contract: docs/SANDBOX_SIDECAR_API.md. If both differ, the
+    Markdown document wins and this file is fixed in the same change.
+
+    The sidecar is the only service with access to the host Docker daemon; the
+    orchestrator never sees the socket. The container it spawns runs with
+    network=none, read_only=true, user=nobody and the resource limits described
+    in the contract.
+
+    Response fields `success`, `output`, `error`, `chunks`, `files`,
+    `execution_time_ms` and `exit_code` mirror SandboxResult.to_dict()
+    (tools/common/sandbox.py:72-81) so the Python client does not change shape.
+servers:
+  - url: http://sandbox-sidecar:8080
+    description: Internal Docker compose network only (no published ports)
+security:
+  - bearerToken: []
+tags:
+  - name: execution
+  - name: ops
+
+paths:
+  /v1/health:
+    get:
+      tags: [ops]
+      operationId: health
+      summary: Liveness and readiness of the sidecar
+      security: []
+      responses:
+        "200":
+          description: Docker reachable and sandbox image present
+          headers:
+            X-Sandbox-Contract:
+              $ref: "#/components/headers/SandboxContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Docker unreachable or sandbox image missing
+          headers:
+            X-Sandbox-Contract:
+              $ref: "#/components/headers/SandboxContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /v1/execute:
+    post:
+      tags: [execution]
+      operationId: execute
+      summary: Run untrusted Python code in a throwaway isolated container
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            Optional retry key, 1-128 chars of [A-Za-z0-9._:-]. Terminal
+            responses are cached for 300 s. Same key with a different body
+            returns 409 IDEMPOTENCY_CONFLICT.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteRequest"
+      responses:
+        "200":
+          description: |
+            A container ran and reached a terminal state, either success or a
+            code-level failure (exception, timeout, OOM). `success=false` here
+            is NOT an infrastructure error.
+          headers:
+            X-Sandbox-Contract:
+              $ref: "#/components/headers/SandboxContract"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteResponse"
+        "400":
+          description: Invalid request (INVALID_REQUEST) or limits above the sidecar maximum (LIMITS_REJECTED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or invalid bearer token (UNAUTHENTICATED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Idempotency-Key reused with a different body (IDEMPOTENCY_CONFLICT)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "413":
+          description: Request body or input file too large (PAYLOAD_TOO_LARGE)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Concurrency and queue full (OVERLOADED); includes Retry-After
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Internal sidecar failure (INTERNAL)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "502":
+          description: res:// input could not be fetched or failed verification (RESOURCE_UNAVAILABLE, RESOURCE_CORRUPT)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Docker unreachable (SANDBOX_UNAVAILABLE) or image missing (IMAGE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: Static shared secret, env SANDBOX_API_TOKEN on both sides.
+
+  headers:
+    SandboxContract:
+      description: Contract version implemented by this sidecar
+      schema:
+        type: string
+        const: v1
+
+  schemas:
+    ExecuteRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        request_id:
+          type: string
+          maxLength: 128
+          description: Caller-supplied trace id, echoed back. Generated if absent.
+        language:
+          type: string
+          enum: [python3]
+          default: python3
+        code:
+          type: string
+          minLength: 1
+          maxLength: 262144
+          description: Python source, executed by the in-image harness (df, pd, np, plt, emit_chunk, emit_result, print).
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
+          default: 60
+        memory_limit_mb:
+          type: integer
+          minimum: 64
+          maximum: 2048
+          default: 512
+          description: Applied as both mem_limit and memswap_limit (swap disabled).
+        cpu_limit:
+          type: number
+          minimum: 0.1
+          maximum: 2.0
+          default: 0.5
+          description: cpu_quota = cpu_limit * 100000 with cpu_period 100000.
+        pids_limit:
+          type: integer
+          minimum: 8
+          maximum: 256
+          default: 50
+        input_data:
+          description: |
+            Inline tabular data, mutually exclusive with `inputs`. Small
+            payloads only (<= 10 MiB serialised, <= 50000 records).
+          oneOf:
+            - $ref: "#/components/schemas/InputDataRecords"
+            - $ref: "#/components/schemas/InputDataCsv"
+        inputs:
+          type: array
+          maxItems: 3
+          description: |
+            Files already stored by the orchestrator, referenced by opaque
+            res:// token. Mutually exclusive with `input_data`. Mounted
+            read-only at /data inside the sandbox.
+          items:
+            $ref: "#/components/schemas/InputFile"
+
+    InputDataRecords:
+      type: object
+      additionalProperties: false
+      required: [format, records]
+      properties:
+        format:
+          type: string
+          const: records
+        records:
+          type: array
+          maxItems: 50000
+          items:
+            type: object
+        name:
+          type: string
+          pattern: "^[A-Za-z0-9._-]{1,128}$"
+          default: input.csv
+
+    InputDataCsv:
+      type: object
+      additionalProperties: false
+      required: [format, csv]
+      properties:
+        format:
+          type: string
+          const: csv
+        csv:
+          type: string
+          maxLength: 10485760
+        name:
+          type: string
+          pattern: "^[A-Za-z0-9._-]{1,128}$"
+          default: input.csv
+
+    InputFile:
+      type: object
+      additionalProperties: false
+      required: [name, resource_uri, size_bytes, sha256]
+      properties:
+        name:
+          type: string
+          pattern: "^[A-Za-z0-9._-]{1,128}$"
+        resource_uri:
+          type: string
+          pattern: "^res://[A-Za-z0-9_-]+$"
+          description: Opaque token; only the sidecar resolves it, against the orchestrator internal endpoint.
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 104857600
+        sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+          description: Verified before the container starts; mismatch => 502 RESOURCE_CORRUPT.
+        mime:
+          type: string
+          default: application/octet-stream
+
+    Chunk:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          description: status, warning, error, code_generated, result, ...
+        data:
+          type: object
+
+    ExecuteResponse:
+      type: object
+      required: [success, output, error, chunks, files, execution_time_ms, exit_code]
+      properties:
+        request_id:
+          type: string
+        success:
+          type: boolean
+        output:
+          type: string
+          description: Container logs (stdout+stderr), capped at SANDBOX_MAX_OUTPUT_BYTES; never cut mid-chunk-line.
+        error:
+          type: [string, "null"]
+          description: Human readable message, safe to surface to the MCP client.
+        error_code:
+          type: [string, "null"]
+          enum:
+            - EXECUTION_TIMEOUT
+            - EXECUTION_FAILED
+            - OUT_OF_MEMORY
+            - null
+        chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chunk"
+        files:
+          type: object
+          additionalProperties:
+            type: string
+            description: base64 content of each file written to /tmp/output
+          description: name -> base64; max 5 files and 25 MiB total.
+        execution_time_ms:
+          type: integer
+          minimum: 0
+        exit_code:
+          type: integer
+          description: 0 success, 124 sidecar timeout, 137 OOM kill.
+        output_truncated:
+          type: boolean
+          default: false
+        files_truncated:
+          type: boolean
+          default: false
+        warnings:
+          type: array
+          items:
+            type: string
+        sandbox:
+          type: object
+          properties:
+            image:
+              type: string
+            container_id:
+              type: string
+            limits:
+              type: object
+              properties:
+                timeout_seconds:
+                  type: integer
+                memory_limit_mb:
+                  type: integer
+                cpu_limit:
+                  type: number
+                pids_limit:
+                  type: integer
+                network:
+                  type: string
+                read_only:
+                  type: boolean
+                user:
+                  type: string
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - LIMITS_REJECTED
+            - UNAUTHENTICATED
+            - IDEMPOTENCY_CONFLICT
+            - PAYLOAD_TOO_LARGE
+            - OVERLOADED
+            - INTERNAL
+            - RESOURCE_UNAVAILABLE
+            - RESOURCE_CORRUPT
+            - SANDBOX_UNAVAILABLE
+            - IMAGE_UNAVAILABLE
+        message:
+          type: string
+        details:
+          type: object
+
+    ErrorEnvelope:
+      type: object
+      required: [success, error, output, chunks, files, execution_time_ms, exit_code]
+      properties:
+        request_id:
+          type: string
+        success:
+          type: boolean
+          const: false
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        output:
+          type: string
+        chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chunk"
+        files:
+          type: object
+          additionalProperties:
+            type: string
+        execution_time_ms:
+          type: integer
+        exit_code:
+          type: integer
+
+    Health:
+      type: object
+      required: [status, contract]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        contract:
+          type: string
+          const: v1
+        docker:
+          type: object
+          properties:
+            reachable:
+              type: boolean
+            api_version:
+              type: string
+        image:
+          type: object
+          properties:
+            name:
+              type: string
+            present:
+              type: boolean
+            id:
+              type: string
+        max_concurrency:
+          type: integer
+        inflight:
+          type: integer
+        queued:
+          type: integer

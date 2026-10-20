@@ -140,6 +140,36 @@ MCP_AUTH_MODE=off go run ./cmd/server -config configs/config.local.yaml
    `${VAR:?}` form so a compose config check fails when it is missing.
 4. Recreate the container and verify with a real call.
 
+## Admin endpoints (ADMIN_API_KEY)
+
+`/admin/` (KB user and collection delete/export, audit log) is a separate surface with its own
+single credential and its own CORS stance — it is not part of the MCP keyring:
+
+- **One shared key.** `ADMIN_API_KEY` is read from the environment at startup (`cmd/server/main.go`),
+  which also refuses the `.env.example` placeholder value. The server keeps only the SHA-256 digest
+  and compares it time-constantly (`auth.BearerAuth`).
+- **Strict CORS, no wildcard fallback.** `/admin/` is wrapped by `AdminCORSMiddleware`, which only
+  allows `GET`, `DELETE` and `OPTIONS`, and — unlike the general `CORSMiddleware` — treats an empty
+  `allowed_origins` list as a misconfiguration, never as "allow all".
+
+### Fail-closed on empty origins
+
+With `ADMIN_API_KEY` set and `server.allowed_origins` still empty, the admin endpoints are
+**not mounted at all**: startup logs `Admin endpoints refused: ADMIN_API_KEY is set but
+server.allowed_origins is empty` (error level, with the fix in the message) and `/admin/` answers
+`404` until the origin list is explicit. The refused mount only takes the admin API offline — the
+MCP endpoints keep their intentional permissive default, which LibreChat depends on.
+
+| Deployment state | `/admin/` behaviour |
+|------------------|---------------------|
+| `ADMIN_API_KEY` unset, or admin DB unset | disabled (warning log), `404` |
+| `ADMIN_API_KEY` set, `allowed_origins` empty | **refused** (error log): not mounted, `404` |
+| `ADMIN_API_KEY` set, `allowed_origins` explicit | enabled with origin-restricted CORS: a disallowed `Origin` gets `403` before the key is even checked; an allowed `Origin` reaches the bearer check; requests without `Origin` (curl) are not subject to CORS |
+
+Tests: `internal/transport/admin_cors_test.go` covers the three states above. `configs/config.yaml`
+ships with `allowed_origins` set for the epicteto deployment (`http://epicteto.home:3080`,
+LibreChat).
+
 ## Tests
 
 - `internal/auth/keyring_test.go` — mode resolution and the fail-fast parse table.

@@ -15,13 +15,16 @@ server:
   base_url: "${BASE_URL:-http://localhost:8080}"
   rate_limit_rps: 10
   rate_limit_burst: 20
-  # allowed_origins: CORS origins allowed to access MCP endpoints (/mcp, /sse, /message).
-  # If omitted or empty, allows all origins (*).
-  # Use a list of specific origins for production to prevent DNS rebinding attacks:
-  # allowed_origins:
-  #   - "http://localhost:3000"
-  #   - "https://lobe-chat.mycompany.com"
-  #   - "https://another-client.example.com"
+  # allowed_origins: CORS origins allowed to access the MCP endpoints
+  # (/mcp, /sse, /message) and the admin surface (/admin/).
+  #
+  # If omitted or empty, the MCP endpoints run permissive (any origin), but the
+  # admin surface is REFUSED (fail-closed): with ADMIN_API_KEY set, /admin/ is
+  # never served with a wildcard CORS policy. See docs/AUTH.md.
+  #
+  # For production, list the browser clients that need CORS explicitly.
+  allowed_origins:
+    - "http://epicteto.home:3080"   # LibreChat UI
 
 upload:
   enabled: true

@@ -193,6 +193,64 @@ case "$(printf '%s' "${ENV[SANDBOX_REQUIRED]:-}" | tr '[:upper:]' '[:lower:]')" 
 esac
 
 # ---------------------------------------------------------------------------
+# 7. Modelo LLM: LLM_MODEL debe existir en el servidor de LLM_API_URL
+# ---------------------------------------------------------------------------
+# Incidente real: el .env apuntaba a un tag que el host ya no servía
+# (`qwen3.5:9b-32k`). /health salía 200 (el LLM no es una dependencia sondeada)
+# pero los cinco tools con LLM devolvían "Permanent error from LLM API: 404".
+# Aviso, no error: el host del LLM puede estar apagado en el momento del deploy
+# y eso no impide desplegar el orquestador.
+echo
+echo "Modelo LLM (analyze_data, batch_summarize, regulation_diff, document_classifier, analyze_image):"
+llm_url="${ENV[LLM_API_URL]:-}"
+llm_model="${ENV[LLM_MODEL]:-}"
+if [ -z "$llm_url" ]; then
+    warn "sin LLM_API_URL en $ENV_FILE: esos 5 tools no podrán llamar al modelo"
+elif [ -z "$llm_model" ]; then
+    warn "sin LLM_MODEL en $ENV_FILE: los tools caen al default del código ('llama3'), que puede no existir en el host"
+else
+    tags="$(curl -sf --max-time 4 "${llm_url%/}/api/tags" 2>/dev/null \
+        || curl -sf --max-time 4 "${llm_url%/}/v1/models" 2>/dev/null || true)"
+    if [ -z "$tags" ]; then
+        warn "$llm_model: no puedo listar modelos en $llm_url (host apagado o inalcanzable), no se comprueba"
+    else
+        matched=0
+        if printf '%s' "$tags" | grep -qF "\"$llm_model\""; then
+            matched=1
+        else
+            # Ollama publica los tags con `:latest` cuando el .env los omite
+            # (`minicpm-v4.5` se sirve como `minicpm-v4.5:latest` y el show lo resuelve).
+            case "$llm_model" in
+                *:latest) ;;
+                *) printf '%s' "$tags" | grep -qF "\"$llm_model:latest\"" && matched=1 ;;
+            esac
+        fi
+        if [ "$matched" -eq 1 ]; then
+            ok "LLM_MODEL=$llm_model está servido por $llm_url"
+            # analyze_image (tools/vision_ocr) necesita capacidad de visión: un tag
+            # servido pero sin ella deja las tools de imagen fallando sin rastro en /health.
+            caps="$(curl -sf --max-time 4 -X POST "${llm_url%/}/api/show" \
+                -d "{\"name\":\"$llm_model\"}" 2>/dev/null | tr -d ' \n' || true)"
+            if [ -n "$caps" ]; then
+                if printf '%s' "$caps" | grep -q '"capabilities":\[[^]]*"vision"'; then
+                    ok "LLM_MODEL=$llm_model declara visión: analyze_image puede usarlo"
+                else
+                    warn "LLM_MODEL=$llm_model no declara visión: analyze_image (tools/vision_ocr) fallará con imágenes"
+                fi
+            else
+                # Endpoint OpenAI-compatible sin /api/show: el tag está servido pero
+                # la capacidad no es consultable. Se dice, no se calla.
+                warn "no puedo verificar la visión de $llm_model: $llm_url no expone /api/show"
+            fi
+        else
+            served="$(printf '%s' "$tags" | grep -oE '"(name|id)":"[^"]+"' \
+                | sed -E 's/.*:"//; s/"$//' | sort -u | paste -sd' ' - | cut -c1-220)"
+            warn "LLM_MODEL=$llm_model NO lo sirve $llm_url: los 5 tools con LLM fallarán con 404. Servidos: ${served}"
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 echo
 if [ "$errors" -gt 0 ]; then
     printf '%sPREFLIGHT FALLIDO%s: %d error(es), %d aviso(s). NO lanzar el up -d.\n' \

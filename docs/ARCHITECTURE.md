@@ -5,7 +5,7 @@ Moved from: ../README_ARCHITECTURE.md
 **Project**: MCP-Go Orchestrator Server  
 **Version**: See `VERSION` file  
 **Status**: Production Ready  
-**Last Updated**: 2026-04-02
+**Last Updated**: 2026-10-19
 
 ---
 
@@ -40,9 +40,9 @@ MCP-Go is a **Model Context Protocol (MCP) Orchestrator Server** that acts as a 
 
 | Layer | Technology | Purpose |
 |-------|-------------|---------|
-| Server Core | Go 1.23+ | HTTP server, protocol handling, subprocess management |
+| Server Core | Go 1.26+ | HTTP server, protocol handling, subprocess management |
 | Transport | mcp-go library | MCP protocol implementation |
-| Tools | Python 3.10+ | Tool implementations (18+ tools) |
+| Tools | Python 3.14 | Tool implementations (18+ tools) |
 | Configuration | YAML + gopkg.in/yaml.v3 | Type-safe config parsing |
 | Metrics | Prometheus | Observability |
 | Logging | zerolog | Structured JSON logging |

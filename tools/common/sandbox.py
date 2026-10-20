@@ -13,21 +13,49 @@ from typing import Any, Callable, Dict, Optional
 
 try:
     import docker
-    from docker.errors import APIError
+    from docker.errors import APIError, BuildError, DockerException, ImageNotFound
 
     DOCKER_AVAILABLE = True
 except ImportError:
     DOCKER_AVAILABLE = False
 
+    class _DockerUnavailable(Exception):
+        """Stand-in for the docker.errors types when the SDK is not installed."""
+
+    APIError = BuildError = DockerException = ImageNotFound = _DockerUnavailable
+
 
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
+
+# Canonical tag of the sandbox image. It is the only name the tool builds and
+# runs; SANDBOX_IMAGE overrides it for deployments that pre-build under another
+# tag (the image itself is identical).
+DEFAULT_SANDBOX_IMAGE = "mcp-python-sandbox:latest"
+
+# The Dockerfile lives in tools/data_analysis/ but its build context is the
+# repository root: it copies tools/common/*.py and
+# tools/data_analysis/sandbox_bootstrap.py. This is the same context CI uses.
+SANDBOX_DOCKERFILE = os.path.join("tools", "data_analysis", "sandbox.Dockerfile")
+
+
+def default_sandbox_image() -> str:
+    """Canonical image tag, or the SANDBOX_IMAGE override when set."""
+    return os.environ.get("SANDBOX_IMAGE") or DEFAULT_SANDBOX_IMAGE
+
+
+def sandbox_build_context() -> str:
+    """Repository root, i.e. the Docker build context sandbox.Dockerfile expects."""
+    # <root>/tools/common/sandbox.py -> <root>
+    return os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
 
 
 class SandboxConfig:
     def __init__(
         self,
-        image: str = "mcp-python-sandbox:latest",
+        image: Optional[str] = None,
         timeout_seconds: int = 60,
         memory_limit: str = "512m",
         cpu_limit: float = 0.5,
@@ -38,7 +66,7 @@ class SandboxConfig:
         writable_dir: str = "/data/output",
         max_file_size_mb: int = 100,
     ):
-        self.image = image
+        self.image = image or default_sandbox_image()
         self.timeout = timeout_seconds
         self.memory = memory_limit
         self.cpu = cpu_limit
@@ -105,17 +133,54 @@ class DockerSandboxedExecutor:
             DockerSandboxedExecutor.CHUNK_CALLBACK(chunk)
         return chunk
 
-    def build_image(self, dockerfile_path: str, tag: Optional[str] = None) -> bool:
+    def build_image(
+        self,
+        dockerfile_path: Optional[str] = None,
+        tag: Optional[str] = None,
+        context: Optional[str] = None,
+    ) -> bool:
+        """Build the sandbox image from its Dockerfile.
+
+        The context defaults to the repository root because that is what
+        sandbox.Dockerfile expects (``COPY tools/common/*.py``). Passing a
+        Dockerfile outside that context is a programming error: the build would
+        fail on the COPY, so it is rejected before talking to the daemon.
+        """
         tag = tag or self.config.image
+        build_context = os.path.abspath(context or sandbox_build_context())
+
+        dockerfile = dockerfile_path or SANDBOX_DOCKERFILE
+        if not os.path.isabs(dockerfile):
+            dockerfile = os.path.join(build_context, dockerfile)
+        dockerfile = os.path.abspath(dockerfile)
+
+        relative_dockerfile = os.path.relpath(dockerfile, build_context)
+        if relative_dockerfile == os.pardir or relative_dockerfile.startswith(
+            os.pardir + os.sep
+        ):
+            self.emit_chunk(
+                "error",
+                {
+                    "message": f"Dockerfile {dockerfile} is outside the build "
+                    f"context {build_context}"
+                },
+            )
+            return False
+        if not os.path.isfile(dockerfile):
+            self.emit_chunk(
+                "error", {"message": f"Dockerfile not found: {dockerfile}"}
+            )
+            return False
+
         try:
             self.client.images.build(
-                path=os.path.dirname(dockerfile_path),
-                dockerfile=os.path.basename(dockerfile_path),
+                path=build_context,
+                dockerfile=relative_dockerfile,
                 tag=tag,
                 rm=True,
             )
             return True
-        except APIError as e:
+        except (BuildError, DockerException) as e:
             self.emit_chunk("error", {"message": f"Failed to build image: {e}"})
             return False
 
@@ -123,17 +188,33 @@ class DockerSandboxedExecutor:
         try:
             self.client.images.get(self.config.image)
             return True
-        except APIError:
-            if self.config.build_on_missing:
-                dockerfile = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                    "tools",
-                    "data_analysis",
-                    "sandbox.Dockerfile",
-                )
-                if os.path.exists(dockerfile):
-                    return self.build_image(dockerfile)
+        except ImageNotFound:
+            pass
+        except APIError as e:
+            self.emit_chunk(
+                "error",
+                {
+                    "message": "Docker is not reachable, cannot use "
+                    f"{self.config.image}: {e}"
+                },
+            )
             return False
+
+        if not self.config.build_on_missing:
+            return False
+
+        dockerfile = os.path.join(sandbox_build_context(), SANDBOX_DOCKERFILE)
+        if not os.path.isfile(dockerfile):
+            self.emit_chunk(
+                "error",
+                {
+                    "message": f"Image {self.config.image} is missing and "
+                    f"{dockerfile} was not found"
+                },
+            )
+            return False
+        self.emit_chunk("status", {"message": f"Building image {self.config.image}"})
+        return self.build_image(dockerfile)
 
     def execute(
         self,

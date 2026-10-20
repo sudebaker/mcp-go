@@ -14,11 +14,14 @@ en el mismo cambio.
 ## 1. Problema y decisión
 
 Hoy `tools/common/sandbox.py` crea el cliente con `docker.from_env()`
-(`tools/common/sandbox.py:96`), es decir, habla directamente con el socket de Docker del host.
-El contenedor del orquestador **no** monta `docker.sock` (a propósito), así que `analyze_data`
-con `SANDBOX_REQUIRED=true` responde `SANDBOX_UNAVAILABLE`
-(`tools/data_analysis/main.py:1070-1085`). La ejecución de código del LLM está, por tanto,
-deshabilitada en producción.
+(`tools/common/sandbox.py:124`), es decir, habla directamente con el socket de Docker del host.
+El contenedor del orquestador **no** monta `docker.sock` (a propósito): la sonda
+`docker_sandbox_available()` hace un `ping()` real y falla
+(`tools/data_analysis/main.py:519-540`). Con `SANDBOX_REQUIRED=true` la llamada se rechaza con
+`SANDBOX_UNAVAILABLE` (`tools/data_analysis/main.py:1121-1136`); sin él, el tool degrada a
+ejecución restringida **en proceso** (`tools/data_analysis/main.py:1139-1144`), que es
+precisamente lo que no se quiere en producción. Por las dos vías, la ejecución de código del LLM
+en un aislamiento real está hoy deshabilitada.
 
 Decisión del responsable del proyecto: **vía (b), sidecar con API**. Un servicio aparte es el
 único que habla con el daemon de Docker y expone una API HTTP interna. El orquestador nunca ve
@@ -215,33 +218,33 @@ Cuerpo `200 OK`:
 
 **Compatibilidad obligatoria con el cliente actual.** Los siete primeros campos son exactamente
 el `dict` que hoy produce `SandboxResult.to_dict()` — `success`, `output`, `error`, `chunks`,
-`files`, `execution_time_ms`, `exit_code` (`tools/common/sandbox.py:72-81`) — con los mismos
+`files`, `execution_time_ms`, `exit_code` (`tools/common/sandbox.py:100-109`) — con los mismos
 tipos: `chunks` como lista de `{"type": str, "data": object}`
-(`tools/common/sandbox.py:102-106`) y `files` como mapa `nombre → base64`
-(`tools/common/sandbox.py:294-304`). Los campos `request_id`, `error_code`, `output_truncated`,
+(`tools/common/sandbox.py:130-134`) y `files` como mapa `nombre → base64`
+(`tools/common/sandbox.py:375-385`). Los campos `request_id`, `error_code`, `output_truncated`,
 `files_truncated`, `warnings` y `sandbox` son **aditivos**: la fase 3 los ignora al construir
 `SandboxResult`, y por eso el shape de `data_analysis` no cambia
-(`tools/data_analysis/main.py:566-573`).
+(`tools/data_analysis/main.py:619-626`).
 
 Reglas de los campos:
 
 - `output`: stdout+stderr concatenados del contenedor, igual que `logs` hoy
-  (`tools/common/sandbox.py:200`). Se capa a `SANDBOX_MAX_OUTPUT_BYTES` (por defecto
+  (`tools/common/sandbox.py:281`). Se capa a `SANDBOX_MAX_OUTPUT_BYTES` (por defecto
   1 048 576) y entonces `output_truncated=true`. `output` **siempre** incluye las líneas
   `__CHUNK__:` completas necesarias para que el cliente parsee `chunks`: se trunca por cola,
   nunca por medio de una línea.
 - `chunks`: lista ya parseada por el sidecar con el mismo protocolo de prefijos de hoy
-  (`CHUNK_PREFIX`/`RESULT_PREFIX`, `tools/common/sandbox.py:23-24`, parseo en
-  `tools/common/sandbox.py:433-443`). El sidecar **no** inventa chunks ni reordena.
+  (`CHUNK_PREFIX`/`RESULT_PREFIX`, `tools/common/sandbox.py:28-29`, parseo en
+  `tools/common/sandbox.py:514-524`). El sidecar **no** inventa chunks ni reordena.
 - `files`: contenido de `/tmp/output` del contenedor en base64. Máximo 5 ficheros y 25 MiB
   totales; lo que exceda **no** se incluye y se lista en `warnings` con
   `files_truncated=true` (la ejecución sigue siendo `success=true`).
 - `error`: `null` si `success=true`; si no, **texto legible en inglés**, apto para mostrarse tal
-  cual al cliente MCP (el cliente lo pone en `stderr`, `tools/data_analysis/main.py:564`).
+  cual al cliente MCP (el cliente lo pone en `stderr`, `tools/data_analysis/main.py:617`).
 - `error_code`: código máquina de la tabla §6, o `null`.
 - `execution_time_ms`: entero, medido por el sidecar desde la recepción de la petición hasta el
   final del contenedor (incluye arranque; igual criterio que hoy,
-  `tools/common/sandbox.py:144,206`).
+  `tools/common/sandbox.py:225,287`).
 - `exit_code`: código de salida del proceso ejecutado. Convenciones: `0` éxito; `124` timeout
   impuesto por el sidecar; `137` contenedor matado por el kernel (OOM).
 
@@ -250,8 +253,8 @@ Reglas de los campos:
 ## 5. Los ficheros: cómo viaja el dato
 
 Hoy el tool convierte el `DataFrame` completo a `records` y lo pasa inline
-(`tools/data_analysis/main.py:531,552`), y el sandbox lo vuelve a serializar a CSV dentro del
-contenedor (`tools/common/sandbox.py:161-172`). El diseño acordado es «fichero en RustFS», así
+(`tools/data_analysis/main.py:562,584`), y el sandbox lo vuelve a serializar a CSV dentro del
+contenedor (`tools/common/sandbox.py:241-252`). El diseño acordado es «fichero en RustFS», así
 que el contrato fija **dos vías y quién resuelve qué**:
 
 | Vía | Cuándo | Quién resuelve el almacenamiento |
@@ -325,12 +328,13 @@ no convertir un timeout del código en un `SANDBOX_UNAVAILABLE` falso.
 | Respuesta del sidecar | Lo que verá el cliente MCP |
 |---|---|
 | `200`, `success=true` | `SandboxResult(success=True, output=…, chunks=…, files=…, execution_time_ms=…, exit_code=…)` |
-| `200`, `success=false` | `SandboxResult(success=False, error=<error>, exit_code=…)` → `data_analysis` responde `EXECUTION_FAILED` con `details=stderr` (`tools/data_analysis/main.py:1111-1123`), **igual que hoy** |
-| `401`/`429`/`502`/`503`, conexión rechazada o timeout del HTTP | `SandboxResult(success=False, error="Sandbox service unavailable: …")` → la guarda de `SANDBOX_REQUIRED` responde `SANDBOX_UNAVAILABLE` (mismo código y mismo texto de hoy, `tools/data_analysis/main.py:1076-1083`; `tools/common/sandbox.py:754-761`) |
+| `200`, `success=false` | `SandboxResult(success=False, error=<error>, exit_code=…)` → `data_analysis` responde `EXECUTION_FAILED` con `details=stderr` (`tools/data_analysis/main.py:1170-1182`), **igual que hoy** |
+| `401`/`429`/`502`/`503`, conexión rechazada o timeout del HTTP | `SandboxResult(success=False, error="Sandbox service unavailable: …")` → la guarda de `SANDBOX_REQUIRED` responde `SANDBOX_UNAVAILABLE` (mismo código y mismo texto de hoy, `tools/data_analysis/main.py:1128-1136`; `tools/common/sandbox.py:835-842`) |
 | `400`/`413`/`409` | `SandboxResult(success=False, error=<message>)`; se registra como error de integración (es un bug del orquestador, no del usuario) |
 
 El texto `SANDBOX_UNAVAILABLE` y su código **no cambian**: la diferencia es que ahora se emite
-cuando el sidecar no responde, no cuando falta el paquete `docker`.
+cuando el sidecar no responde, no cuando el `ping()` al daemon falla desde el contenedor del
+orquestador (`tools/data_analysis/main.py:519-540`).
 
 ---
 
@@ -341,19 +345,19 @@ todos se conservan; la última fila son añadidos de esta fase.
 
 | Parámetro Docker | Valor | Hoy |
 |---|---|---|
-| `image` | `mcp-python-sandbox:latest` (fijada por `SANDBOX_IMAGE`, opcionalmente por digest) | `tools/common/sandbox.py:30` |
-| `network` | `none` | `tools/common/sandbox.py:185` |
-| `read_only` | `true` | `tools/common/sandbox.py:191` |
-| `user` | `nobody` (65534) | `tools/common/sandbox.py:193` |
-| `working_dir` | `/tmp` | `tools/common/sandbox.py:194` |
-| `tmpfs` | `/tmp` con `size=64M,mode=1777` | `tools/common/sandbox.py:192` |
-| `mem_limit` / `memswap_limit` | ambos = `memory_limit_mb` ⇒ swap prohibida | `tools/common/sandbox.py:186-187` |
-| `cpu_period` / `cpu_quota` | `100000` / `cpu_limit × 100000` | `tools/common/sandbox.py:188-189` |
-| `pids_limit` | 50 | `tools/common/sandbox.py:190` |
-| `auto_remove` / `remove` | `true` (sin contenedores huérfanos) | `tools/common/sandbox.py:184` |
-| Montaje de entrada | directorio del job en `/data`, **read-only** (un solo directorio, nunca un `host_path` del cliente) | `tools/common/sandbox.py:175` (`/tmp/input` ro), `:258` (`/data` ro) |
-| Montaje de salida | directorio del job en `/tmp/output`, rw | `tools/common/sandbox.py:176,259` |
-| Entorno | sin `env` del cliente; solo `MPLCONFIGDIR=/tmp/matplotlib` y la carga útil del código | `tools/common/sandbox.py:262-265` |
+| `image` | `mcp-python-sandbox:latest` (fijada por `SANDBOX_IMAGE`, opcionalmente por digest) | `tools/common/sandbox.py:34,69` |
+| `network` | `none` | `tools/common/sandbox.py:266` |
+| `read_only` | `true` | `tools/common/sandbox.py:272` |
+| `user` | `nobody` (65534) | `tools/common/sandbox.py:274` |
+| `working_dir` | `/tmp` | `tools/common/sandbox.py:275` |
+| `tmpfs` | `/tmp` con `size=64M,mode=1777` | `tools/common/sandbox.py:273` |
+| `mem_limit` / `memswap_limit` | ambos = `memory_limit_mb` ⇒ swap prohibida | `tools/common/sandbox.py:267-268` |
+| `cpu_period` / `cpu_quota` | `100000` / `cpu_limit × 100000` | `tools/common/sandbox.py:269-270` |
+| `pids_limit` | 50 | `tools/common/sandbox.py:271` |
+| `auto_remove` / `remove` | `true` (sin contenedores huérfanos) | `tools/common/sandbox.py:265` |
+| Montaje de entrada | directorio del job en `/data`, **read-only** (un solo directorio, nunca un `host_path` del cliente) | `tools/common/sandbox.py:256` (`/tmp/input` ro), `:339` (`/data` ro) |
+| Montaje de salida | directorio del job en `/tmp/output`, rw | `tools/common/sandbox.py:257,340` |
+| Entorno | sin `env` del cliente; solo `MPLCONFIGDIR=/tmp/matplotlib` y la carga útil del código | `tools/common/sandbox.py:343-345` |
 | `cap_drop` | `ALL` | **nuevo (endurece)** |
 | `security_opt` | `no-new-privileges:true` | **nuevo (endurece)** |
 | `ulimits` | `nofile=64:64`, `nproc=pids_limit` | **nuevo (endurece)** |
@@ -369,17 +373,17 @@ Prohibiciones explícitas (un incumplimiento es un fallo de conformidad, §12):
 ### 7.1 Contrato de ejecución **dentro** del contenedor
 
 El `code` se ejecuta con el mismo arnés que hoy, porque el prompt del LLM depende de él
-(`tools/data_analysis/main.py:1008-1017`). Siguen existiendo, con estos nombres y semántica:
+(`tools/data_analysis/main.py:1062-1069`). Siguen existiendo, con estos nombres y semántica:
 
 | Nombre | Tipo | Notas |
 |---|---|---|
-| `df` | `pandas.DataFrame` o `None` | si hay `input_data`/un único CSV de entrada; mismo rol que `tools/common/sandbox.py:408` |
-| `pd` | módulo `pandas` | igual que hoy (`tools/common/sandbox.py:405`) |
-| `np` | módulo `numpy` | **hoy es `None`** en el arnés de contenedor (`tools/common/sandbox.py:407`) aunque el prompt ordena usarlo (`tools/data_analysis/main.py:1012`) |
-| `plt` | módulo `matplotlib.pyplot` | **hoy es `None`** (`tools/common/sandbox.py:406`), y `output_format=png` depende de él |
-| `emit_chunk(type, data)` | función | escribe `__CHUNK__:{json}` en stdout (`tools/common/sandbox.py:23,343-346`) |
-| `emit_result(success, output, structured, files)` | función | escribe `__RESULT__:{json}` (`tools/common/sandbox.py:24,348-357`) |
-| `safe_files` | objeto con `read_csv`, `to_csv`, `read_excel`, `to_excel`, `open_read`, `open_write`, … | **hoy no existe** en el arnés de contenedor, pero el prompt lo exige (`tools/data_analysis/main.py:1016`); son los mismos helpers que el fallback ya expone como nombres sueltos (`tools/common/sandbox.py:683-709`) |
+| `df` | `pandas.DataFrame` o `None` | si hay `input_data`/un único CSV de entrada; mismo rol que `tools/common/sandbox.py:489` |
+| `pd` | módulo `pandas` | igual que hoy (`tools/common/sandbox.py:486`) |
+| `np` | módulo `numpy` | **hoy es `None`** en el arnés de contenedor (`tools/common/sandbox.py:488`) aunque el prompt ordena usarlo (`tools/data_analysis/main.py:1064`) |
+| `plt` | módulo `matplotlib.pyplot` | **hoy es `None`** (`tools/common/sandbox.py:487`), y `output_format=png` depende de él |
+| `emit_chunk(type, data)` | función | escribe `__CHUNK__:{json}` en stdout (`tools/common/sandbox.py:28,424-427`) |
+| `emit_result(success, output, structured, files)` | función | escribe `__RESULT__:{json}` (`tools/common/sandbox.py:29,429-438`) |
+| `safe_files` | objeto con `read_csv`, `to_csv`, `read_excel`, `to_excel`, `open_read`, `open_write`, … | **hoy no existe** en el arnés de contenedor, pero el prompt lo exige (`tools/data_analysis/main.py:1069`); son los mismos helpers que el fallback ya expone como nombres sueltos (`tools/common/sandbox.py:764-789`) |
 | `print` | builtin | el `output` se captura como stdout |
 | Directorio de entrada | `/data` (ro) | `safe_files` no puede escribir aquí |
 | Directorio de salida | `/tmp/output` (rw) | aquí van PNG/CSV que el sidecar devuelve en `files` |
@@ -391,7 +395,7 @@ debilitamiento: el contenedor sigue sin red, sin escritura fuera de `/tmp/output
 `open()`/`__import__`. Si la fase 2 no puede garantizarlo, el arreglo alternativo es corregir el
 prompt (fase 3), no dejar el contrato mintiendo.
 
-Las variables `INPUT_DIR`/`OUTPUT_DIR` del orquestador (`tools/data_analysis/main.py:534-535`)
+Las variables `INPUT_DIR`/`OUTPUT_DIR` del orquestador (`tools/data_analysis/main.py:565-566`)
 dejan de tener sentido para el contenedor: el contrato fija `/data` y `/tmp/output` dentro del
 sandbox, y el cliente ya no las propaga.
 
@@ -413,7 +417,7 @@ sandbox, y el cliente ya no las propaga.
 | `SANDBOX_JOB_DIR` | `/var/lib/sandbox/jobs` | — |
 
 Los valores por defecto del cliente siguen siendo los de hoy — 60 s, 512 MB, 0.5 CPU, 50 pids
-(`tools/data_analysis/main.py:539-550`, `tools/common/sandbox.py:31-34`) —, de modo que el
+(`tools/data_analysis/main.py:570-581`, `tools/common/sandbox.py:59-62`) —, de modo que el
 comportamiento observable no cambia al migrar.
 
 **Timeout en dos capas, con margen obligatorio**: el cliente HTTP debe usar
@@ -446,7 +450,8 @@ Orquestador (contenedor del MCP):
 |---|---|---|
 | `SANDBOX_API_URL` | vacío | URL base del sidecar. **Vacío ⇒ backend «none»** |
 | `SANDBOX_API_TOKEN` | vacío | secreto compartido con el sidecar |
-| `SANDBOX_REQUIRED` | `false` | **semántica intacta**: `true` ⇒ si el backend no está disponible, se deniega la ejecución; nunca se cae a `exec()` en el host (`tools/common/sandbox.py:754-761`) |
+| `SANDBOX_REQUIRED` | `false` | **semántica intacta**: `true` ⇒ si el backend no está disponible, se deniega la ejecución; nunca se cae a `exec()` en el host (`tools/common/sandbox.py:835-842`) |
+| `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | etiqueta de la imagen; la lee el tool (`tools/common/sandbox.py:34,69`) y el sidecar. **Debe coincidir en ambos lados** |
 
 Sidecar:
 
@@ -518,5 +523,8 @@ Lista mínima que devops debe poder demostrar con salida real:
   ahí, en la red interna, sin puertos publicados.
 - **Backend (fase 3)**: `tools/common/sandbox.py` mantiene la firma pública
   `execute_in_sandbox(code, input_data, config, on_chunk) -> SandboxResult` y el tipo
-  `SandboxResult` intactos; cambia el transporte (HTTP en vez de `docker.from_env()`), añade
-  `sandbox_backend()` para la guarda de `data_analysis` y mapea errores según §6.2.
+  `SandboxResult` intactos; cambia el transporte (HTTP en vez de `docker.from_env()`), sustituye
+  el cuerpo de `docker_sandbox_available()` (`tools/data_analysis/main.py:519-540`) por una sonda
+  del sidecar, añade `sandbox_backend()` y mapea errores según §6.2. Al desaparecer el `ping()`
+  local, la guarda de `SANDBOX_REQUIRED` deja de depender del paquete `docker` dentro del
+  contenedor.

@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -349,10 +354,205 @@ func (c *Checker) checkConfig(ctx context.Context) CheckResult {
 	return result
 }
 
-// checkMemory monitors Go runtime memory usage.
-// StatusHealthy: heap < 250MB
-// StatusDegraded: heap 250-500MB
-// StatusUnhealthy: heap > 500MB
+// Memory check thresholds. They are expressed as a fraction of the detected
+// memory budget instead of absolute megabytes: the same absolute number is
+// meaningless on a 512 MB host and on a 2 GB container.
+const (
+	// memoryDegradedRatio is the budget fraction at which the check reports degraded.
+	memoryDegradedRatio = 0.70
+	// memoryCriticalRatio is the budget fraction at which the process is close
+	// enough to an OOM kill to warrant an error log and an alert.
+	memoryCriticalRatio = 0.90
+
+	// Fallbacks used only when no budget can be detected (no cgroup, no
+	// GOMEMLIMIT): the historical absolute thresholds.
+	legacyDegradedBytes = 250 << 20
+	legacyCriticalBytes = 500 << 20
+
+	// cgroupUnlimited is the order of magnitude of the "no limit" sentinels:
+	// cgroup v1 reports ~9.22e18 bytes and cgroup v2 reports the literal "max".
+	cgroupUnlimited = int64(1) << 62
+)
+
+// memoryBudget returns the number of bytes the process is expected to live
+// within, or 0 when it cannot be detected. Resolution order: the container's
+// cgroup limit (the hard limit the kernel enforces), then the GOMEMLIMIT soft
+// limit, then zero.
+func memoryBudget() int64 {
+	if limit := cgroupMemoryLimit(); limit > 0 {
+		return limit
+	}
+	// debug.SetMemoryLimit(-1) reads the current soft limit without changing it.
+	if limit := debug.SetMemoryLimit(-1); limit > 0 && limit < math.MaxInt64 {
+		return limit
+	}
+	return 0
+}
+
+// cgroupMemoryLimit reads the memory limit of the cgroup this process runs in.
+// It resolves the process's own cgroup v2 path first (a container reports "/",
+// a systemd service reports its slice), then falls back to the well-known v2 and
+// v1 paths. Returns 0 when there is no limit file or the limit is "unlimited".
+func cgroupMemoryLimit() int64 {
+	paths := []string{}
+	if path := cgroupV2LimitPath(); path != "" {
+		paths = append(paths, path)
+	}
+	paths = append(paths,
+		"/sys/fs/cgroup/memory.max",                   // cgroup v2, container root
+		"/sys/fs/cgroup/memory/memory.limit_in_bytes", // cgroup v1
+	)
+	for _, path := range paths {
+		if limit := readCgroupBytesFile(path); limit > 0 {
+			return limit
+		}
+	}
+	return 0
+}
+
+// cgroupV2LimitPath resolves the memory.max file for this process's own cgroup
+// from /proc/self/cgroup (v2 line format: "0::/some/slice"). Returns "" when the
+// host is not on the v2 unified hierarchy or the file cannot be resolved.
+func cgroupV2LimitPath() string {
+	raw, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return ""
+	}
+	return resolveCgroupV2LimitPath(string(raw))
+}
+
+// resolveCgroupV2LimitPath is the pure part of cgroupV2LimitPath.
+func resolveCgroupV2LimitPath(procSelfCgroup string) string {
+	return resolveCgroupV2Path(procSelfCgroup, "memory.max")
+}
+
+// resolveCgroupV2Path maps the unified-hierarchy line of /proc/self/cgroup to a
+// file inside this process's own cgroup: a container reports "/", a systemd
+// service reports its slice. Returns "" when the host is not on the v2 unified
+// hierarchy.
+func resolveCgroupV2Path(procSelfCgroup, file string) string {
+	for _, line := range strings.Split(procSelfCgroup, "\n") {
+		rel, ok := strings.CutPrefix(strings.TrimSpace(line), "0::")
+		if !ok {
+			continue
+		}
+		return filepath.Join("/sys/fs/cgroup", rel, file)
+	}
+	return ""
+}
+
+// resolveCgroupV1Path maps the cgroup v1 memory-controller line of
+// /proc/self/cgroup ("12:memory:/docker/abc", or a shared controller list like
+// "4:cpu,memory:/x") to a file under the v1 mount point. Returns "" when the
+// memory controller does not appear, which is the normal case on a v2 host.
+func resolveCgroupV1Path(procSelfCgroup, file string) string {
+	for _, line := range strings.Split(procSelfCgroup, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		for _, controller := range strings.Split(parts[1], ",") {
+			if controller != "memory" {
+				continue
+			}
+			return filepath.Join("/sys/fs/cgroup/memory", parts[2], file)
+		}
+	}
+	return ""
+}
+
+// readCgroupBytesFile parses one single-valued cgroup memory file (memory.max,
+// memory.current, memory.limit_in_bytes, memory.usage_in_bytes) returning 0 for
+// a missing file, an unparseable value or an "unlimited" sentinel. The sentinel
+// guard is order-of-magnitude wide, so it only ever rejects nonsense: no real
+// usage comes near 2^62 bytes.
+func readCgroupBytesFile(path string) int64 {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "max" {
+		return 0
+	}
+	bytes, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || bytes <= 0 || bytes >= cgroupUnlimited {
+		return 0
+	}
+	return bytes
+}
+
+// memoryUsage returns the bytes the kernel currently charges to this process's
+// cgroup: memory.current on v2, memory.usage_in_bytes on v1. That is the number
+// the kernel compares with memory.max before the OOM killer fires, and it
+// includes what runtime.MemStats.HeapAlloc does not: runtime metadata, goroutine
+// stacks outside the heap, cgo allocations and mmaps. Returns 0 when no usage
+// file can be read, in which case callers fall back to the Go heap.
+func memoryUsage() int64 {
+	paths := make([]string, 0, 4)
+	if raw, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		proc := string(raw)
+		if path := resolveCgroupV2Path(proc, "memory.current"); path != "" {
+			paths = append(paths, path)
+		}
+		if path := resolveCgroupV1Path(proc, "memory.usage_in_bytes"); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	paths = append(paths,
+		"/sys/fs/cgroup/memory.current",               // cgroup v2, container root
+		"/sys/fs/cgroup/memory/memory.usage_in_bytes", // cgroup v1
+	)
+	for _, path := range paths {
+		if used := readCgroupBytesFile(path); used > 0 {
+			return used
+		}
+	}
+	return 0
+}
+
+// memorySignal picks the number the memory check scores against the budget: the
+// kernel's cgroup usage when it can be read, the Go heap otherwise. The source
+// is reported in the check message and the log, so an operator can tell "the
+// container is really close to memory.max" from "we only have the heap".
+func memorySignal(heapAlloc, cgroupUsage int64) (bytes int64, source string) {
+	if cgroupUsage > 0 {
+		return cgroupUsage, "cgroup"
+	}
+	return heapAlloc, "heap"
+}
+
+// classifyMemory maps memory usage in bytes to a health status for a given
+// budget. A budget of 0 falls back to the legacy absolute thresholds.
+//
+// Note the deliberate ceiling: memory pressure never yields StatusUnhealthy.
+// /health answers 503 only when a check means "this process cannot serve", and
+// the container HEALTHCHECK reads that as "replace me". Memory that grew during
+// a burst, heap or not, can still serve; calling it unhealthy turned a smoke run
+// into a flapping container. The alert for memory near its budget lives in the
+// error log and in the memory_current_ratio metric, not in the HTTP status.
+func classifyMemory(usedBytes, budget int64) (HealthStatus, string) {
+	degradedLimit, criticalLimit := int64(legacyDegradedBytes), int64(legacyCriticalBytes)
+	if budget > 0 {
+		degradedLimit = int64(float64(budget) * memoryDegradedRatio)
+		criticalLimit = int64(float64(budget) * memoryCriticalRatio)
+	}
+
+	switch {
+	case usedBytes > criticalLimit:
+		return StatusDegraded, " (memory near budget)"
+	case usedBytes > degradedLimit:
+		return StatusDegraded, " (elevated memory usage)"
+	default:
+		return StatusHealthy, ""
+	}
+}
+
+// checkMemory monitors memory usage against the detected budget, preferring the
+// kernel's own view of the process (cgroup memory.current / usage_in_bytes) and
+// falling back to the Go heap when no cgroup usage file is readable.
+// StatusHealthy: usage <= 70% of the budget
+// StatusDegraded: usage > 70% of the budget (including > 90%, see classifyMemory)
 func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -365,18 +565,37 @@ func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 
 	heapAllocMB := float64(m.HeapAlloc) / 1024 / 1024
 	sysMB := float64(m.Sys) / 1024 / 1024
+	budget := memoryBudget()
+	usedBytes, source := memorySignal(int64(m.HeapAlloc), memoryUsage())
+	usedMB := float64(usedBytes) / 1024 / 1024
 
-	result.Message = fmt.Sprintf("Heap: %.2f MB, Sys: %.2f MB", heapAllocMB, sysMB)
-
-	if heapAllocMB > 500 {
-		result.Status = StatusUnhealthy
-		result.Message += " (high memory usage)"
-		log.Warn().Float64("heap_mb", heapAllocMB).Msg("High memory usage detected")
-	} else if heapAllocMB > 250 {
-		result.Status = StatusDegraded
-		result.Message += " (elevated memory usage)"
+	if budget > 0 {
+		result.Message = fmt.Sprintf("Memory: %.2f MB (%s), heap: %.2f MB, sys: %.2f MB (budget %.0f MB, %.1f%%)",
+			usedMB, source, heapAllocMB, sysMB, float64(budget)/1024/1024,
+			float64(usedBytes)/float64(budget)*100)
 	} else {
-		result.Status = StatusHealthy
+		result.Message = fmt.Sprintf("Memory: %.2f MB (%s), heap: %.2f MB, sys: %.2f MB (budget unknown)",
+			usedMB, source, heapAllocMB, sysMB)
+	}
+
+	status, suffix := classifyMemory(usedBytes, budget)
+	result.Status = status
+	result.Message += suffix
+
+	switch suffix {
+	case " (memory near budget)":
+		log.Error().
+			Str("source", source).
+			Float64("memory_mb", usedMB).
+			Float64("heap_mb", heapAllocMB).
+			Float64("budget_mb", float64(budget)/1024/1024).
+			Msg("Memory near its budget")
+	case " (elevated memory usage)":
+		log.Warn().
+			Str("source", source).
+			Float64("memory_mb", usedMB).
+			Float64("heap_mb", heapAllocMB).
+			Msg("Elevated memory usage detected")
 	}
 
 	result.Duration = time.Since(start)
@@ -476,27 +695,49 @@ func GetHealthMetrics() map[string]float64 {
 		gcPauseNs = m.PauseNs[(m.NumGC+255)%256]
 	}
 
+	// Memory budget and how much of it the process really occupies: the kernel's
+	// cgroup usage when readable, the heap otherwise. Alert on the ratios, never
+	// on the HTTP status (see classifyMemory).
+	budget := float64(memoryBudget())
+	current := float64(memoryUsage())
+	usedRatio := 0.0
+	if budget > 0 {
+		usedRatio = float64(m.HeapAlloc) / budget
+	}
+	currentRatio := 0.0
+	if budget > 0 && current > 0 {
+		currentRatio = current / budget
+	}
+
 	return map[string]float64{
-		"heap_alloc_bytes":  float64(m.HeapAlloc),
-		"heap_sys_bytes":    float64(m.Sys),
-		"heap_idle_bytes":   float64(m.HeapIdle),
-		"heap_inuse_bytes":  float64(m.HeapInuse),
-		"stack_inuse_bytes": float64(m.StackInuse),
-		"gc_pause_ns":       float64(gcPauseNs),
-		"goroutines":        float64(runtime.NumGoroutine()),
-		"num_gc":            float64(m.NumGC),
+		"heap_alloc_bytes":     float64(m.HeapAlloc),
+		"heap_sys_bytes":       float64(m.Sys),
+		"heap_idle_bytes":      float64(m.HeapIdle),
+		"heap_inuse_bytes":     float64(m.HeapInuse),
+		"stack_inuse_bytes":    float64(m.StackInuse),
+		"gc_pause_ns":          float64(gcPauseNs),
+		"goroutines":           float64(runtime.NumGoroutine()),
+		"num_gc":               float64(m.NumGC),
+		"memory_budget_bytes":  budget,
+		"memory_used_ratio":    usedRatio,
+		"memory_current_bytes": current,
+		"memory_current_ratio": currentRatio,
 	}
 }
 
 var healthMetricDescs = map[string]*prometheus.Desc{
-	"heap_alloc_bytes":  prometheus.NewDesc("mcp_health_heap_alloc_bytes", "Health metric for heap_alloc_bytes", nil, nil),
-	"heap_sys_bytes":    prometheus.NewDesc("mcp_health_heap_sys_bytes", "Health metric for heap_sys_bytes", nil, nil),
-	"heap_idle_bytes":   prometheus.NewDesc("mcp_health_heap_idle_bytes", "Health metric for heap_idle_bytes", nil, nil),
-	"heap_inuse_bytes":  prometheus.NewDesc("mcp_health_heap_inuse_bytes", "Health metric for heap_inuse_bytes", nil, nil),
-	"stack_inuse_bytes": prometheus.NewDesc("mcp_health_stack_inuse_bytes", "Health metric for stack_inuse_bytes", nil, nil),
-	"gc_pause_ns":       prometheus.NewDesc("mcp_health_gc_pause_ns", "Health metric for gc_pause_ns", nil, nil),
-	"goroutines":        prometheus.NewDesc("mcp_health_goroutines", "Health metric for goroutines", nil, nil),
-	"num_gc":            prometheus.NewDesc("mcp_health_num_gc", "Health metric for num_gc", nil, nil),
+	"heap_alloc_bytes":     prometheus.NewDesc("mcp_health_heap_alloc_bytes", "Health metric for heap_alloc_bytes", nil, nil),
+	"heap_sys_bytes":       prometheus.NewDesc("mcp_health_heap_sys_bytes", "Health metric for heap_sys_bytes", nil, nil),
+	"heap_idle_bytes":      prometheus.NewDesc("mcp_health_heap_idle_bytes", "Health metric for heap_idle_bytes", nil, nil),
+	"heap_inuse_bytes":     prometheus.NewDesc("mcp_health_heap_inuse_bytes", "Health metric for heap_inuse_bytes", nil, nil),
+	"stack_inuse_bytes":    prometheus.NewDesc("mcp_health_stack_inuse_bytes", "Health metric for stack_inuse_bytes", nil, nil),
+	"gc_pause_ns":          prometheus.NewDesc("mcp_health_gc_pause_ns", "Health metric for gc_pause_ns", nil, nil),
+	"goroutines":           prometheus.NewDesc("mcp_health_goroutines", "Health metric for goroutines", nil, nil),
+	"num_gc":               prometheus.NewDesc("mcp_health_num_gc", "Health metric for num_gc", nil, nil),
+	"memory_budget_bytes":  prometheus.NewDesc("mcp_health_memory_budget_bytes", "Detected memory budget (cgroup limit or GOMEMLIMIT), 0 if unknown", nil, nil),
+	"memory_used_ratio":    prometheus.NewDesc("mcp_health_memory_used_ratio", "HeapAlloc as a fraction of the memory budget, 0 if unknown", nil, nil),
+	"memory_current_bytes": prometheus.NewDesc("mcp_health_memory_current_bytes", "Memory charged to the process cgroup (memory.current or memory.usage_in_bytes), 0 if unavailable", nil, nil),
+	"memory_current_ratio": prometheus.NewDesc("mcp_health_memory_current_ratio", "Cgroup memory usage as a fraction of the memory budget, 0 if unknown", nil, nil),
 }
 
 // ExportMetrics converts health metrics to Prometheus metric format for scraping.

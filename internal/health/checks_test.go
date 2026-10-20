@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -147,6 +148,365 @@ func TestChecker_CheckMemory(t *testing.T) {
 	}
 	if result.Duration == 0 {
 		t.Error("duration should be set")
+	}
+	// Regression: a heap over the old 500 MB absolute threshold used to report
+	// unhealthy, which turned /health into 503 and marked the container
+	// unhealthy after a smoke run. Memory pressure must never be fatal.
+	if result.Status == StatusUnhealthy {
+		t.Errorf("memory check must never report unhealthy, got %s (%s)", result.Status, result.Message)
+	}
+}
+
+func TestClassifyMemory_RelativeToBudget(t *testing.T) {
+	const budget = int64(2) << 30 // the 2G cgroup limit of the mcp-server container
+
+	tests := []struct {
+		name       string
+		heap       int64
+		wantStatus HealthStatus
+		wantSuffix string
+	}{
+		{"idle", 100 << 20, StatusHealthy, ""},
+		{"just under 70%", 1400 << 20, StatusHealthy, ""},
+		{"over 70%", 1500 << 20, StatusDegraded, " (elevated memory usage)"},
+		{"over 90%", 1900 << 20, StatusDegraded, " (memory near budget)"},
+		{"over budget", 3 << 30, StatusDegraded, " (memory near budget)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, suffix := classifyMemory(tt.heap, budget)
+			if status != tt.wantStatus {
+				t.Errorf("status: expected %s, got %s", tt.wantStatus, status)
+			}
+			if suffix != tt.wantSuffix {
+				t.Errorf("suffix: expected %q, got %q", tt.wantSuffix, suffix)
+			}
+			if status == StatusUnhealthy {
+				t.Error("classifyMemory must never return unhealthy")
+			}
+		})
+	}
+}
+
+func TestClassifyMemory_NoBudgetUsesLegacyThresholds(t *testing.T) {
+	tests := []struct {
+		name       string
+		heap       int64
+		wantStatus HealthStatus
+	}{
+		{"below 250MB", 100 << 20, StatusHealthy},
+		{"between 250MB and 500MB", 300 << 20, StatusDegraded},
+		{"above the old 500MB ceiling", 600 << 20, StatusDegraded},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, _ := classifyMemory(tt.heap, 0)
+			if status != tt.wantStatus {
+				t.Errorf("expected %s, got %s", tt.wantStatus, status)
+			}
+		})
+	}
+}
+
+func TestReadMemoryLimitFile(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+		want    int64
+	}{
+		{"cgroup v2 limit", "2147483648\n", 2 << 30},
+		{"cgroup v2 unlimited", "max\n", 0},
+		{"cgroup v1 unlimited sentinel", "9223372036854771712\n", 0},
+		{"empty file", "\n", 0},
+		{"garbage", "not-a-number\n", 0},
+		{"zero", "0\n", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := dir + "/" + tt.name
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatalf("writing fixture: %v", err)
+			}
+			if got := readCgroupBytesFile(path); got != tt.want {
+				t.Errorf("expected %d, got %d", tt.want, got)
+			}
+		})
+	}
+
+	if got := readCgroupBytesFile(dir + "/does-not-exist"); got != 0 {
+		t.Errorf("missing file: expected 0, got %d", got)
+	}
+}
+
+// TestReadMemoryCurrentFile covers the usage read that feeds the memory check.
+// Same parsing rules as the limit file, but the fixtures use the real file names
+// (memory.current on cgroup v2, memory.usage_in_bytes on v1) so the intent
+// survives a refactor of the shared parser.
+func TestReadMemoryCurrentFile(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		file    string
+		content string
+		want    int64
+	}{
+		{"memory.current", "1610612736\n", 1536 << 20},
+		{"memory.usage_in_bytes", "268435456\n", 256 << 20},
+		{"memory.current-without-newline", "8388608", 8 << 20},
+		{"memory.current-with-spaces", "  1048576  \n", 1 << 20},
+		{"memory.current-max", "max\n", 0},
+		{"memory.current-empty", "\n", 0},
+		{"memory.current-garbage", "NaN\n", 0},
+		{"memory.current-zero", "0\n", 0},
+		{"memory.usage_in_bytes-sentinel", "9223372036854771712\n", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			path := dir + "/" + tt.file
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatalf("writing fixture: %v", err)
+			}
+			if got := readCgroupBytesFile(path); got != tt.want {
+				t.Errorf("expected %d, got %d", tt.want, got)
+			}
+		})
+	}
+
+	// A missing usage file is the fallback trigger: the check must fall back to
+	// the Go heap, which memorySignal covers below.
+	if got := readCgroupBytesFile(dir + "/missing/memory.current"); got != 0 {
+		t.Errorf("missing memory.current: expected 0, got %d", got)
+	}
+}
+
+// TestMemorySignal_FallsBackToHeap covers hosts with no readable cgroup usage
+// file (bare metal, or cgroup v2 without the memory controller delegated): the
+// signal keeps behaving exactly as before this change.
+func TestMemorySignal_FallsBackToHeap(t *testing.T) {
+	const heap = int64(300 << 20)
+
+	used, source := memorySignal(heap, 0)
+	if source != "heap" {
+		t.Errorf("expected source %q, got %q", "heap", source)
+	}
+	if used != heap {
+		t.Errorf("expected the heap value %d, got %d", heap, used)
+	}
+}
+
+// TestMemorySignal_ScoresKernelUsageNotHeap is the regression test for the
+// finding that motivated this change: a process can sit at ~60% of its budget by
+// HeapAlloc while the kernel already charges it far more. The signal must follow
+// the kernel, and the result must still cap at degraded, never unhealthy.
+func TestMemorySignal_ScoresKernelUsageNotHeap(t *testing.T) {
+	const budget = int64(2) << 30
+
+	heap := int64(600 << 20)   // 29.3% of the budget: healthy if you only watch the heap
+	usage := int64(1500 << 20) // 73.2% of the budget, as the kernel sees it
+
+	used, source := memorySignal(heap, usage)
+	if source != "cgroup" {
+		t.Fatalf("expected source %q, got %q", "cgroup", source)
+	}
+	if used != usage {
+		t.Fatalf("expected the cgroup usage %d, got %d", usage, used)
+	}
+
+	status, _ := classifyMemory(used, budget)
+	if status != StatusDegraded {
+		t.Errorf("expected degraded for %.1f%% of the budget, got %s", float64(used)/float64(budget)*100, status)
+	}
+	if status, _ := classifyMemory(heap, budget); status != StatusHealthy {
+		t.Errorf("the heap alone should look healthy, got %s", status)
+	}
+
+	// Ceiling unchanged: even usage at (and above) the budget stays degraded.
+	for _, bytes := range []int64{2 << 30, 3 << 30} {
+		if status, _ := classifyMemory(bytes, budget); status == StatusUnhealthy {
+			t.Errorf("usage %d MB must never classify as unhealthy", bytes>>20)
+		}
+	}
+}
+
+func TestMemoryBudget_DetectsSomethingOnLinux(t *testing.T) {
+	// Not an assertion on a specific value: on a container this is the cgroup
+	// limit, on bare metal it may be 0 (no cgroup limit, no GOMEMLIMIT).
+	budget := memoryBudget()
+	if budget < 0 {
+		t.Errorf("budget must never be negative, got %d", budget)
+	}
+	t.Logf("detected memory budget: %d bytes (%.0f MB)", budget, float64(budget)/1024/1024)
+}
+
+func TestResolveCgroupV2LimitPath(t *testing.T) {
+	tests := []struct {
+		name string
+		proc string
+		want string
+	}{
+		{
+			name: "container root",
+			proc: "0::/\n",
+			want: "/sys/fs/cgroup/memory.max",
+		},
+		{
+			name: "systemd user slice",
+			proc: "0::/user.slice/user-1000.slice/session-3.scope\n",
+			want: "/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope/memory.max",
+		},
+		{
+			name: "v1 only host",
+			proc: "12:memory:/docker/abc\n1:name=systemd:/\n",
+			want: "",
+		},
+		{
+			name: "empty",
+			proc: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveCgroupV2LimitPath(tt.proc); got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestResolveCgroupV1Path(t *testing.T) {
+	tests := []struct {
+		name string
+		proc string
+		want string
+	}{
+		{
+			name: "docker container",
+			proc: "12:memory:/docker/abc\n1:name=systemd:/\n",
+			want: "/sys/fs/cgroup/memory/docker/abc/memory.usage_in_bytes",
+		},
+		{
+			name: "shared controller list",
+			proc: "4:cpu,cpuacct,memory:/x\n",
+			want: "/sys/fs/cgroup/memory/x/memory.usage_in_bytes",
+		},
+		{
+			name: "v1 root",
+			proc: "12:memory:/\n",
+			want: "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+		},
+		{
+			name: "v2 only host",
+			proc: "0::/user.slice/user-1000.slice/session-3.scope\n",
+			want: "",
+		},
+		{
+			name: "no memory controller",
+			proc: "4:cpu,cpuacct:/x\n1:name=systemd:/\n",
+			want: "",
+		},
+		{
+			name: "empty",
+			proc: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveCgroupV1Path(tt.proc, "memory.usage_in_bytes"); got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+// TestResolveCgroupV2Path_UsageFile pins that the same own-cgroup resolution the
+// budget uses also yields the memory.current file, so limit and usage are always
+// read from the same cgroup.
+func TestResolveCgroupV2Path_UsageFile(t *testing.T) {
+	const proc = "0::/user.slice/user-1000.slice/session-3.scope\n"
+	if got, want := resolveCgroupV2Path(proc, "memory.current"),
+		"/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope/memory.current"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+	if got, want := resolveCgroupV2LimitPath(proc), "/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope/memory.max"; got != want {
+		t.Errorf("limit path changed: expected %q, got %q", want, got)
+	}
+}
+
+func TestGetHealthMetrics_ExposesMemoryRatio(t *testing.T) {
+	metrics := GetHealthMetrics()
+	if _, ok := metrics["memory_budget_bytes"]; !ok {
+		t.Error("memory_budget_bytes metric is missing")
+	}
+	if ratio, ok := metrics["memory_used_ratio"]; !ok {
+		t.Error("memory_used_ratio metric is missing")
+	} else if ratio < 0 || ratio > 1 {
+		t.Errorf("memory_used_ratio out of range: %f", ratio)
+	}
+	if current, ok := metrics["memory_current_bytes"]; !ok {
+		t.Error("memory_current_bytes metric is missing")
+	} else if current < 0 {
+		t.Errorf("memory_current_bytes must never be negative: %f", current)
+	}
+	if ratio, ok := metrics["memory_current_ratio"]; !ok {
+		t.Error("memory_current_ratio metric is missing")
+	} else if ratio < 0 {
+		t.Errorf("memory_current_ratio must never be negative: %f", ratio)
+	}
+}
+
+// TestHighHeapSimulatedDoesNotFailHealth covers the deployed incident: after
+// 61 tool calls the heap sat at 531 MB and /health answered 503, so the image
+// HEALTHCHECK (curl -f /health) marked the container unhealthy even though the
+// process was serving and the GC reclaimed the heap seconds later.
+//
+// The simulated heap goes through the real classifier and the real aggregation
+// used by handleHealth (internal/transport/sse.go maps exactly StatusUnhealthy
+// to 503), so no unavailable memory budget is invented for the test.
+func TestHighHeapSimulatedDoesNotFailHealth(t *testing.T) {
+	const budget = int64(2) << 30 // the mcp-server compose memory limit
+
+	checker := NewChecker(&config.Config{Tools: []config.ToolConfig{{Name: "kb_search"}}}, nil, nil, nil)
+
+	for _, heap := range []int64{531 << 20, 1600 << 20, 2 << 30, 4 << 30} {
+		status, _ := classifyMemory(heap, budget)
+		if status == StatusUnhealthy {
+			t.Fatalf("heap %d MB must never classify as unhealthy", heap>>20)
+		}
+
+		results := []CheckResult{
+			{Name: "config", Status: StatusHealthy},
+			{Name: "memory", Status: status},
+		}
+		if overall := checker.GetOverallStatus(results); overall == StatusUnhealthy {
+			t.Errorf("heap %d MB: overall status must not be unhealthy (got %s, /health would answer 503)", heap>>20, overall)
+		}
+	}
+}
+
+// TestHighHeapDoesNotMaskFatalChecks is the other half of the contract: the
+// memory ceiling must not hide a dependency that really cannot serve.
+func TestHighHeapDoesNotMaskFatalChecks(t *testing.T) {
+	checker := NewChecker(&config.Config{Tools: []config.ToolConfig{{Name: "kb_search"}}}, nil, nil, nil)
+
+	status, _ := classifyMemory(2<<30, 2<<30) // at the budget: degraded
+	results := []CheckResult{
+		{Name: "config", Status: StatusHealthy},
+		{Name: "memory", Status: status},
+		{Name: "postgres", Status: StatusUnhealthy},
+	}
+
+	if overall := checker.GetOverallStatus(results); overall != StatusUnhealthy {
+		t.Errorf("expected unhealthy when a fatal check fails, got %s", overall)
 	}
 }
 

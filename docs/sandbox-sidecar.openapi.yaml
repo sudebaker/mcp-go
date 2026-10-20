@@ -15,7 +15,7 @@ info:
 
     Response fields `success`, `output`, `error`, `chunks`, `files`,
     `execution_time_ms` and `exit_code` mirror SandboxResult.to_dict()
-    (tools/common/sandbox.py:72-81) so the Python client does not change shape.
+    (tools/common/sandbox.py:100-109) so the Python client does not change shape.
 servers:
   - url: http://sandbox-sidecar:8080
     description: Internal Docker compose network only (no published ports)

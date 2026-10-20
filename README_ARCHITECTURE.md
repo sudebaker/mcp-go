@@ -2,7 +2,7 @@
 
 **Project:** MCP-Go Orchestrator Server  
 **Description:** Model Context Protocol server that orchestrates Python tools via subprocess execution with S3-compatible storage backend  
-**Stack:** Go 1.23+ | Python 3.11+ | Docker | PostgreSQL | Redis | RustFS
+**Stack:** Go 1.26+ | Python 3.14+ | Docker | PostgreSQL | Redis | RustFS
 
 ---
 
@@ -222,7 +222,13 @@ __RESULT__:{"success": true, ...}
 1. **Redis** - Ping with 2s timeout
 2. **PostgreSQL** - Ping with 2s timeout
 3. **Config** - Verify tools are defined
-4. **Memory** - Go runtime metrics (healthy < 250MB, degraded < 500MB)
+4. **Memory** - Kernel-measured memory usage against the detected budget
+   (`memory.current` / `memory.usage_in_bytes` of the process's own cgroup, else
+   the Go heap when no usage file is readable; budget from cgroup limit, else
+   `GOMEMLIMIT`, else legacy absolute thresholds). Degraded above 70% of the
+   budget, error log above 90%. **Never unhealthy**: `/health` only answers 503
+   when a check means "this process cannot serve", so memory that grew during a
+   burst cannot flip the container health status.
 
 **Key Functions:**
 - `NewChecker(cfg *config.Config, redisClient *redis.Client, db *sql.DB) *Checker` - Create checker

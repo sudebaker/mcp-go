@@ -27,7 +27,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.safe_file_ops import SafeFileOperations
-from common.sandbox import execute_in_sandbox, SandboxConfig
+from common.sandbox import (
+    execute_in_sandbox,
+    SandboxConfig,
+    default_sandbox_image,
+)
 from common.llm_cache import call_llm_with_cache
 from common.validators import validate_read_path, is_internal_url
 
@@ -265,14 +269,14 @@ def validate_request_input(
             output_format,
         )
 
-    # Validate file source (file_url, file_uris, or __files__ must be provided)
+    # Validate file source (file_url or __files__ must be provided)
     has_files_list = files_list and len(files_list) > 0
     has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
     if not has_files_list and not has_file_url:
         return (
             False,
-            "One of file_url, file_uris, or __files__ must be provided",
+            "One of file_url or __files__ must be provided",
             output_format,
         )
 
@@ -512,6 +516,30 @@ def extract_code(llm_response: str) -> str:
     return llm_response.strip()
 
 
+def docker_sandbox_available() -> bool:
+    """
+    Return True only when the Docker SDK is installed AND a daemon answers.
+
+    DOCKER_AVAILABLE only reports whether the `docker` package imported; the
+    container image ships the SDK but no /var/run/docker.sock, so a real ping
+    is the only reliable signal. Never raises.
+    """
+    try:
+        from common.sandbox import DOCKER_AVAILABLE, DockerSandboxedExecutor
+    except Exception:  # pragma: no cover - broken install
+        return False
+
+    if not DOCKER_AVAILABLE:
+        return False
+
+    try:
+        DockerSandboxedExecutor().client.ping()
+        return True
+    except Exception as exc:
+        logger.warning(f"Docker sandbox unavailable: {exc}")
+        return False
+
+
 def execute_code_in_sandbox(
     code: str,
     df: pd.DataFrame,
@@ -519,6 +547,9 @@ def execute_code_in_sandbox(
 ) -> dict:
     """
     Execute code in Docker sandbox with streaming support.
+
+    Degrades to execute_code_safely() when the daemon disappears between the
+    availability check and the call, unless SANDBOX_REQUIRED=true.
 
     Returns dict with keys: success, result, stdout, stderr, chunks
     """
@@ -537,7 +568,7 @@ def execute_code_in_sandbox(
         "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
     config = SandboxConfig(
-        image="mcp-python-sandbox:latest",
+        image=default_sandbox_image(),
         timeout_seconds=60,
         memory_limit="512m",  # Increased from 256m for data processing
         cpu_limit=0.5,
@@ -549,7 +580,29 @@ def execute_code_in_sandbox(
         max_file_size_mb=max_size_mb,
     )
 
-    result = execute_in_sandbox(code, df_dict, config, on_chunk)
+    try:
+        result = execute_in_sandbox(code, df_dict, config, on_chunk)
+    except Exception as exc:
+        # The docker SDK raises DockerException (not SandboxResult) when the
+        # daemon/socket is missing. Honour the hard gate, otherwise degrade.
+        if os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true":
+            logger.error(
+                f"Docker sandbox failed and SANDBOX_REQUIRED=true: {exc}"
+            )
+            return {
+                "success": False,
+                "result": None,
+                "stdout": "",
+                "stderr": (
+                    "Code execution denied: SANDBOX_REQUIRED=true but the Docker "
+                    f"sandbox failed ({exc}). Unsafe exec() on the host is blocked."
+                ),
+                "chunks": _chunks_sent,
+            }
+        logger.warning(
+            f"Docker sandbox failed ({exc}); falling back to restricted mode"
+        )
+        return execute_code_safely(code, df, request_id)
 
     stdout = ""
     stderr = ""
@@ -911,7 +964,7 @@ def main() -> None:
                         "request_id": request_id,
                         "error": {
                             "code": "INVALID_INPUT",
-                            "message": f"No supported data file found in file_uris. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                            "message": f"No supported data file found in __files__. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
                         },
                     }
                 )
@@ -962,7 +1015,7 @@ def main() -> None:
                             "request_id": request_id,
                             "error": {
                                 "code": "INVALID_INPUT",
-                                "message": "Neither 'content' (base64) nor 'url' provided in file_uris",
+                                "message": "Neither 'content' (base64) nor 'url' provided in __files__",
                             },
                         }
                     )
@@ -1065,11 +1118,9 @@ def main() -> None:
         emit_chunk("code_generated", {"code_length": len(code)})
 
         if use_sandbox:
-            # Early check: refuse to proceed if sandbox is required but Docker unavailable
             sandbox_required = os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true"
-            if sandbox_required:
-                from common.sandbox import DOCKER_AVAILABLE
-                if not DOCKER_AVAILABLE:
+            if not docker_sandbox_available():
+                if sandbox_required:
                     write_response({
                         "success": False,
                         "request_id": request_id,
@@ -1084,8 +1135,16 @@ def main() -> None:
                     })
                     return
 
-            emit_chunk("status", {"message": "Executing code in sandbox"})
-            exec_result = execute_code_in_sandbox(code, df, request_id)
+                # No daemon/socket: degrade to restricted in-process execution
+                # instead of failing the whole call.
+                emit_chunk(
+                    "warning",
+                    {"message": "Executing user code in restricted mode (no Docker sandbox)"},
+                )
+                exec_result = execute_code_safely(code, df, request_id)
+            else:
+                emit_chunk("status", {"message": "Executing code in sandbox"})
+                exec_result = execute_code_in_sandbox(code, df, request_id)
         else:
             # Guard: unsafe exec() blocked when SANDBOX_REQUIRED=true
             sandbox_required = os.environ.get("SANDBOX_REQUIRED", "false").lower() == "true"

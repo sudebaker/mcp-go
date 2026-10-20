@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
 	"github.com/sudebaker/mcp-go/internal/config"
 	mcptypes "github.com/sudebaker/mcp-go/internal/mcp"
@@ -44,6 +43,9 @@ type ProcessPool struct {
 	stopOnce    sync.Once
 	wg          sync.WaitGroup
 	execWg      sync.WaitGroup
+	// requireUserIdentity mirrors the executor flag: user-scoped tools refuse
+	// to run without a resolved identity when auth is enforced.
+	requireUserIdentity bool
 }
 
 // processSlot wraps a running subprocess with its communication pipes.
@@ -242,6 +244,11 @@ func (p *ProcessPool) startProcess(ctx context.Context, toolName string) (*proce
 
 // Execute runs a tool using a pooled subprocess.
 func (p *ProcessPool) Execute(ctx context.Context, toolName string, arguments map[string]interface{}) (*ExecuteResult, error) {
+	userID, err := resolveToolIdentity(ctx, p.sessionStore, toolName, p.requireUserIdentity)
+	if err != nil {
+		return nil, err
+	}
+
 	p.execWg.Add(1)
 	defer p.execWg.Done()
 
@@ -271,14 +278,8 @@ func (p *ProcessPool) Execute(ctx context.Context, toolName string, arguments ma
 	span.SetAttribute("request_id", requestID)
 	span.SetAttribute("tool_name", toolName)
 
-	userID := ""
-	if p.sessionStore != nil {
-		if sess := server.ClientSessionFromContext(ctx); sess != nil {
-			if uid, ok := p.sessionStore.Get(sess.SessionID()); ok {
-				userID = uid
-				span.SetAttribute("user_id", userID)
-			}
-		}
+	if userID != "" {
+		span.SetAttribute("user_id", userID)
 	}
 
 	subprocReq := mcptypes.SubprocessRequest{

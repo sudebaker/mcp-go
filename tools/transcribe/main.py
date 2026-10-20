@@ -11,6 +11,7 @@ import json
 import sys
 import os
 import tempfile
+import urllib.request
 import base64
 from pathlib import Path
 from typing import Any, Optional
@@ -36,6 +37,34 @@ MAX_AUDIO_SIZE_MB = 100
 
 SUPPORTED_FORMATS = {".mp3", ".mp4", ".wav", ".ogg", ".m4a", ".webm", ".flac", ".opus", ".mpeg", ".mpga"}
 ALLOWED_AUDIO_DIR = "/data"
+
+# Whisper picks its decoder from the filename and mime type we send, so a res://
+# resource needs its suffix recovered: /internal/resource/<token> returns the
+# original name in X-Resource-Name and the stored type in Content-Type.
+MIME_BY_SUFFIX = {
+    ".mp3": "audio/mpeg", ".mp4": "audio/mp4", ".wav": "audio/wav",
+    ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".webm": "audio/webm",
+    ".flac": "audio/flac", ".opus": "audio/ogg", ".mpeg": "audio/mpeg",
+    ".mpga": "audio/mpeg",
+}
+SUFFIX_BY_MIME = {mime: suffix for suffix, mime in MIME_BY_SUFFIX.items()}
+
+
+def fetch_resource(uri: str) -> tuple[bytes, str, str]:
+    """Read a res:// resource through the internal streaming endpoint.
+
+    Same contract doc_extractor uses for the document tools: the token resolves
+    against MCP_INTERNAL_HOST and the response carries the original filename and
+    content type. Returns (bytes, name, mime).
+    """
+    token = uri[len("res://"):]
+    host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
+    request = urllib.request.Request(f"http://{host}/internal/resource/{token}")
+    with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
+        data = response.read()
+        name = response.headers.get("X-Resource-Name") or "audio"
+        mime = (response.headers.get("Content-Type") or "").split(";")[0].strip()
+    return data, name, mime
 
 
 def read_request() -> dict[str, Any]:
@@ -193,38 +222,34 @@ def main() -> None:
         filename = sanitize_filename(arguments.get("filename", "audio.wav"))
         language = arguments.get("language", "") or None
 
-        # Resolve file_uri via ToolContext (backward compat: fall back to file_path)
+        # A server-injected resource wins; otherwise the documented client path is
+        # the file_path argument (res:// URI or a server path).
+        resource = None
         ctx = ToolContext(request)
         try:
-            resource = ctx.file("file_uri")
-            file_uri = resource.uri
+            resource = ctx.file("file_path")
+            file_path = resource.uri
         except (KeyError, TypeError):
-            file_uri = arguments.get("file_path", "").strip()
+            file_path = arguments.get("file_path", "").strip()
 
-        if not file_uri and not audio_b64:
+        if not file_path and not audio_b64:
             write_response({
                 "success": False,
                 "request_id": request_id,
-                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_uri' (res:// URI) or 'audio_base64' (base64-encoded audio)"}
+                "error": {"code": "MISSING_INPUT", "message": "Provide either 'file_path' (res:// URI or server path) or 'audio_base64' (base64-encoded audio)"}
             })
             return
 
-        if file_uri:
-            if file_uri.startswith("res://"):
-                # Use ToolContext to read bytes, pass to whisper as BytesIO
+        if file_path:
+            if file_path.startswith("res://"):
+                # An injected resource hands over its metadata; a bare URI (the
+                # documented client path) is resolved through /internal/resource,
+                # which returns the bytes plus the original name and type.
                 try:
-                    data = resource.read_bytes()
-                    suffix = Path(resource.name).suffix.lower()
-                    if suffix not in SUPPORTED_FORMATS:
-                        suffix = ".wav"
-                    mime_map = {
-                        ".mp3": "audio/mpeg", ".mp4": "audio/mp4", ".wav": "audio/wav",
-                        ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".webm": "audio/webm",
-                        ".flac": "audio/flac", ".opus": "audio/ogg", ".mpeg": "audio/mpeg",
-                        ".mpga": "audio/mpeg",
-                    }
-                    mime_type = mime_map.get(suffix, "audio/mpeg")
-                    text, error = transcribe_fileobj(io.BytesIO(data), resource.name, mime_type, language=language)
+                    if resource is not None:
+                        data, name, mime = resource.read_bytes(), resource.name, resource.mime
+                    else:
+                        data, name, mime = fetch_resource(file_path)
                 except Exception as e:
                     write_response({
                         "success": False,
@@ -232,8 +257,25 @@ def main() -> None:
                         "error": {"code": "RESOURCE_ERROR", "message": str(e)},
                     })
                     return
+
+                suffix = Path(name).suffix.lower()
+                if suffix not in SUPPORTED_FORMATS:
+                    suffix = SUFFIX_BY_MIME.get(mime, "")
+                if suffix not in SUPPORTED_FORMATS:
+                    write_response({
+                        "success": False,
+                        "request_id": request_id,
+                        "error": {
+                            "code": "UNSUPPORTED_FORMAT",
+                            "message": f"Cannot determine the audio format of {file_path} (name {name!r}, type {mime or 'unknown'}). Supported: {', '.join(sorted(SUPPORTED_FORMATS))}",
+                        },
+                    })
+                    return
+
+                mime_type = mime if mime.startswith("audio/") else MIME_BY_SUFFIX[suffix]
+                text, error = transcribe_fileobj(io.BytesIO(data), f"audio{suffix}", mime_type, language=language)
             else:
-                text, error = transcribe_file(file_uri, language=language)
+                text, error = transcribe_file(file_path, language=language)
         else:
             text, error = transcribe_base64(audio_b64, filename=filename, language=language)
 
@@ -260,7 +302,7 @@ def main() -> None:
                 "text": text,
                 "word_count": word_count,
                 "language": language,
-                "source": file_uri or filename
+                "source": file_path or filename
             }
         })
 

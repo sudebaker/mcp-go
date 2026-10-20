@@ -56,8 +56,13 @@ upload:
 # the server refuses to start.
 auth:
   keys:
+    # The variable name is arbitrary: the invariant is that every key_env is
+    # unique and is set in the environment. With a single entry it is
+    # MCP_AUTH_KEY, which is what deployments/.env.example ships and what
+    # deployments/docker-compose.yml passes into the container. Rename it here
+    # and in .env in the same change, or the server refuses to start.
     - user_id: amphora
-      key_env: MCP_AUTH_KEY_AMPHORA
+      key_env: MCP_AUTH_KEY
     # MCP_UPLOAD_API_KEY is declared as a keyring entry so the /upload endpoint
     # shares the single auth switch instead of having an on/off rule of its own.
     - user_id: legacy-upload
@@ -192,19 +197,18 @@ tools:
           description: "How to return results: 'text' (plain), 'json' (structured), 'markdown' (tables), 'png' (chart image)"
         __files__:
           type: array
-          description: "Alternative: attach files as __files__ parameter. The tool will download them automatically."
+          description: "Files to analyze as objects {url, name} or {name, content}. A res:// url is streamed from the internal resource endpoint; content is base64-encoded file data."
           items:
             type: object
             properties:
-              type:
-                type: string
               url:
                 type: string
                 format: resource-uri
               name:
                 type: string
-              id:
+              content:
                 type: string
+                description: "Base64-encoded file content, used instead of url. Max 100MB decoded."
       required:
         - question
 

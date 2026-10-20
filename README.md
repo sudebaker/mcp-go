@@ -2,7 +2,7 @@
 
 A Go-based MCP (Model Context Protocol) server that orchestrates external tools — primarily Python — for data analysis, OCR, report generation, knowledge base management, and more. Built for air-gapped and restricted-network deployments.
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker)](https://www.docker.com/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green?style=flat)](https://modelcontextprotocol.io/)
 
@@ -17,8 +17,8 @@ A Go-based MCP (Model Context Protocol) server that orchestrates external tools 
 
 ## Requirements
 
-- Go 1.23+
-- Docker and Docker Compose
+- Go 1.26+ (see `go.mod`)
+- Docker and Docker Compose — the server image ships the Python 3.14 runtime the tools run on
 - Optional: Ollama on the same Docker network
 
 ## Quick Start
@@ -135,18 +135,44 @@ go test ./...
 
 ## Docker Sandbox
 
-The Docker sandbox image (`mcp-python-sandbox:latest`) is used by `data_analysis` to run LLM-generated Pandas code in isolation.
+`data_analysis` runs LLM-generated Pandas code inside a hardened container: non-root user
+`nobody`, read-only root filesystem, no network, and CPU/memory/PID limits. The image tag is
+`mcp-python-sandbox:latest` — the only name the tool builds and runs.
+
+The build context is the **repository root**, not `tools/data_analysis/`: the Dockerfile copies
+`tools/common/*.py` and `tools/data_analysis/sandbox_bootstrap.py` from there.
 
 ```bash
 # Build from the repository root
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
-The orchestrator container does **not** mount the Docker socket. Sandboxed execution runs through an
-isolated sidecar service with an HTTP API; its frozen v1 contract (endpoints, request/response
-shape, isolation model, limits and error codes) is
+If the image is missing, the tool builds it on first use (`build_on_missing`, enabled by default)
+with that same Dockerfile and context, so a deployment that mounts `docker.sock` does not need a
+pre-build: it needs read access to the repository tree (the build context) and access to the
+daemon.
+
+The compose stack does not mount `/var/run/docker.sock` into `mcp-server` (that would be
+root-equivalent), so inside the container no Docker daemon is reachable and the sandbox degrades
+by design: `data_analysis` runs the generated code with the restricted in-process executor and
+logs `Executing user code in restricted mode (no Docker sandbox)`. Set `SANDBOX_REQUIRED=true`
+to remove that fallback: every call is then rejected with `SANDBOX_UNAVAILABLE`, both with
+`use_sandbox=true` and with `use_sandbox=false`.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | Image tag the tool builds and runs; set it when a deployment pre-builds under another name |
+| `SANDBOX_REQUIRED` | `false` | `true` disables every non-sandboxed fallback, so code only ever runs in the container |
+
+### Sidecar execution (contract frozen, not yet deployed)
+
+The planned replacement for the in-container Docker client is an isolated sidecar service: it is
+the only component with access to the Docker daemon and exposes an internal HTTP API, so the
+orchestrator never mounts the socket. The v1 contract — endpoints, request/response shape,
+isolation model, limits and error codes — is frozen in
 [docs/SANDBOX_SIDECAR_API.md](docs/SANDBOX_SIDECAR_API.md), with a machine-readable schema in
-[docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml).
+[docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml). Until the sidecar ships,
+the behaviour described above still applies.
 
 ## Toolset Filtering
 

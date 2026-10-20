@@ -10,11 +10,11 @@ import (
 
 func chainTestKeyring(t *testing.T, mode string, token string) *auth.Keyring {
 	t.Helper()
-	env := map[string]string{"MCP_AUTH_MODE": mode, "KEY_AMPHORA": token}
+	env := map[string]string{"MCP_AUTH_MODE": mode, "MCP_AUTH_KEY": token}
 	k, err := auth.BuildKeyring(func(key string) (string, bool) {
 		v, ok := env[key]
 		return v, ok
-	}, []auth.Entry{{UserID: "amphora", KeyEnv: "KEY_AMPHORA"}})
+	}, []auth.Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}})
 	if err != nil {
 		t.Fatalf("failed to build keyring: %v", err)
 	}

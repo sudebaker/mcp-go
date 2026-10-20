@@ -292,5 +292,47 @@ class TestIntegration(unittest.TestCase):
         self.assertIn("test text", result.text.lower())
 
 
+class TestResourceTokenResolution(unittest.TestCase):
+    """Regression coverage for t_4f9e838e bug 1.
+
+    Server-side res:// upload tokens are single-use with a 5-minute TTL
+    (internal/resources/token.go): a second GET /internal/resource/{token}
+    answers 401. The client must surface the actionable re-upload remedy,
+    not the raw urllib error, and keep reporting other HTTP codes.
+    """
+
+    def test_401_surfaces_single_use_remedy(self):
+        import urllib.error
+        from common.doc_extractor import download_file
+
+        err = urllib.error.HTTPError(
+            "http://localhost:8080/internal/resource/tok", 401, "Unauthorized",
+            None, BytesIO(b"token already used"),
+        )
+        with patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(Exception) as ctx:
+                download_file("res://tok-401")
+
+        message = str(ctx.exception)
+        self.assertIn("single-use, 5-minute TTL", message)
+        self.assertIn("Re-upload", message)
+        self.assertIn("X-Session-ID", message)
+        self.assertNotIn("HTTP Error 401", message)
+
+    def test_other_http_codes_report_status(self):
+        import urllib.error
+        from common.doc_extractor import download_file
+
+        err = urllib.error.HTTPError(
+            "http://localhost:8080/internal/resource/tok", 500, "Internal Server Error",
+            None, BytesIO(b"boom"),
+        )
+        with patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(Exception) as ctx:
+                download_file("res://tok-500")
+
+        self.assertIn("Failed to resolve resource: HTTP 500", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -192,7 +192,17 @@ def call_llm_with_retry(
         endpoint = f"{llm_api_url}/chat/completions"
     else:
         # Ollama native format: /api/chat with messages
-        messages = [{"role": "user", "content": prompt}]
+        # NOTE: in the native /api/chat format images must be inside each
+        # message ("messages[i].images"). Ollama ignores a root-level
+        # "images" key: the model then receives text only and answers
+        # "no image was attached" with HTTP 200 (false-OK reported in
+        # production by the analyze_image battery).
+        message: dict = {"role": "user", "content": prompt}
+        if images:
+            if len(images) > 10:
+                raise ValueError("Maximum 10 images allowed")
+            message["images"] = images
+        messages = [message]
 
         payload = {
             "model": llm_model,
@@ -208,11 +218,6 @@ def call_llm_with_retry(
                 "num_predict": max(1, min(4096, max_tokens)),
             },
         }
-
-        if images:
-            if len(images) > 10:
-                raise ValueError("Maximum 10 images allowed")
-            payload["images"] = images
 
         endpoint = f"{llm_api_url}/api/chat"
 

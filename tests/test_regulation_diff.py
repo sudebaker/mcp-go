@@ -139,5 +139,114 @@ class TestDiffCalculation(unittest.TestCase):
         self.assertGreater(deletions, 0)
 
 
+# --- Regression coverage for t_4f9e838e (bug 1: single-use res:// tokens) ----
+import importlib.util
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+_TOOL_MAIN = Path(__file__).resolve().parents[1] / "tools" / "regulation_diff" / "main.py"
+
+
+def _load_tool_module():
+    """Load tools/regulation_diff/main.py under its own module name; a plain
+    `import main` would collide with other tool mains in the pytest session."""
+    if "regulation_diff_tool_main" in sys.modules:
+        return sys.modules["regulation_diff_tool_main"]
+    spec = importlib.util.spec_from_file_location("regulation_diff_tool_main", _TOOL_MAIN)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["regulation_diff_tool_main"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestResourceResolutionRegression(unittest.TestCase):
+    """Regression coverage for t_4f9e838e bug 1 (regulation_diff side).
+
+    Server-side res:// tokens are one-shot (internal/resources/token.go): the
+    tool must fetch each uri exactly once per run — the same uri in both
+    __files__ slots resolves once internally — and a reused cross-call token
+    must fail with the actionable re-upload message, not a raw 401.
+    """
+
+    def setUp(self):
+        self.mod = _load_tool_module()
+        self.mod._FETCHED_BYTES.clear()
+
+    def _run_tool(self, files):
+        import io as _io
+        import json as _json
+        from unittest.mock import patch as _patch
+
+        request = {
+            "request_id": "pytest",
+            "context": {
+                "llm_api_url": "http://mock-llm:8080",
+                "llm_model": "mock-model",
+            },
+            "arguments": {"__files__": files, "output_format": "markdown"},
+        }
+        stdout = _io.StringIO()
+        with _patch("sys.stdin", _io.StringIO(_json.dumps(request))), \
+                _patch("sys.stdout", stdout), \
+                _patch.object(self.mod, "call_llm_with_cache", return_value="mock analysis"):
+            self.mod.main()
+        return _json.loads(stdout.getvalue())
+
+    def test_same_uri_in_both_slots_is_fetched_once(self):
+        fake = MagicMock()
+        fake.read.return_value = b"SECCION 1: multa 100 euros\n"
+        with patch("urllib.request.urlopen", return_value=fake) as fetch:
+            resp = self._run_tool([
+                {"url": "res://pytesttokdup", "name": "same.txt"},
+                {"url": "res://pytesttokdup", "name": "same.txt"},
+            ])
+
+        fetch.assert_called_once()
+        self.assertTrue(resp["success"], resp)
+        sc = resp["structured_content"]
+        self.assertEqual(sc["additions"], 0)
+        self.assertEqual(sc["deletions"], 0)
+        self.assertEqual(sc["sections_changed"], 0)
+        self.assertEqual(sc["analysis"], "mock analysis")
+
+    def test_two_distinct_uris_are_fetched_once_each(self):
+        old = MagicMock()
+        old.read.return_value = b"LINE OLD\n"
+        new = MagicMock()
+        new.read.return_value = b"LINE NEW\n"
+        with patch("urllib.request.urlopen", side_effect=[old, new]) as fetch:
+            resp = self._run_tool([
+                {"url": "res://pytesttokold", "name": "old.txt"},
+                {"url": "res://pytesttoknew", "name": "new.txt"},
+            ])
+
+        self.assertEqual(fetch.call_count, 2)
+        self.assertTrue(resp["success"], resp)
+        sc = resp["structured_content"]
+        self.assertEqual(sc["additions"], 1)
+        self.assertEqual(sc["deletions"], 1)
+
+    def test_cross_call_reused_token_fails_with_reupload_remedy(self):
+        import urllib.error
+
+        err = urllib.error.HTTPError(
+            "http://localhost:8080/internal/resource/tok", 401, "Unauthorized",
+            None, BytesIO(b"token already used"),
+        )
+        with patch("urllib.request.urlopen", side_effect=err):
+            resp = self._run_tool([
+                {"url": "res://pytesttokused", "name": "old.txt"},
+                {"url": "res://pytesttokused2", "name": "new.txt"},
+            ])
+
+        self.assertFalse(resp["success"], resp)
+        self.assertEqual(resp["error"]["code"], "EXECUTION_FAILED")
+        message = resp["error"]["message"]
+        self.assertIn("single-use, 5-minute TTL", message)
+        self.assertIn("Re-upload", message)
+        self.assertNotIn("HTTP Error 401", message)
+
+
 if __name__ == "__main__":
     unittest.main()

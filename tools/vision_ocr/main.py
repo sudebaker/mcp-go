@@ -521,7 +521,7 @@ def main() -> None:
             )
             return
 
-        llm_api_url = context.get("llm_api_url")
+        llm_api_url = context.get("llm_api_url") or os.environ.get("LLM_API_URL", "")
         llm_model = context.get("llm_model", "llava")  # Default to llava for vision
 
         # Allow override via explicit provider/model args

@@ -27,12 +27,31 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.doc_extractor import download_and_extract, extract_text_from_buffer, extract_inline_file
+from common.doc_extractor import download_file, download_and_extract, extract_text_from_buffer, extract_inline_file
 from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.llm_cache import call_llm_with_cache
 
 logger = get_logger(__name__, "regulation_diff")
+
+# Server-side resource tokens (res://) are single-use with a 5-minute TTL
+# (internal/resources/token.go). Within one tool execution each token must be
+# fetched exactly once; re-fetching the same token would hit the server's
+# one-shot validation and answer 401 ("token already used"). When both
+# __files__ slots carry the same uri (a repeated attachment), reuse the cached
+# bytes instead of a second HTTP read.
+_FETCHED_BYTES: dict[str, bytes] = {}
+
+
+def fetch_file_bytes(url: str) -> bytes:
+    """Resolve a res:// token or download a plain HTTP(S) url, once per uri."""
+    if not url:
+        raise ValueError("Empty file url")
+    if url in _FETCHED_BYTES:
+        return _FETCHED_BYTES[url]
+    data = download_file(url).read()
+    _FETCHED_BYTES[url] = data
+    return data
 
 
 def read_request() -> dict[str, Any]:
@@ -162,6 +181,10 @@ def main() -> None:
 
         ctx = ToolContext(request)
         use_tool_context = False
+        # Defaults so the extraction branch below stays name-bound whichever
+        # input shape arrived (ToolContext resources or __files__).
+        old_url = new_url = ""
+        old_data = new_data = ""
         try:
             old_resource = ctx.file("file_uri_1")
             new_resource = ctx.file("file_uri_2")
@@ -245,8 +268,14 @@ def main() -> None:
             old_extraction = extract_inline_file(old_data, old_filename)
             new_extraction = extract_inline_file(new_data, new_filename)
         else:
-            old_extraction = download_and_extract(old_url, old_filename)
-            new_extraction = download_and_extract(new_url, new_filename)
+            old_bytes = fetch_file_bytes(old_url)
+            new_bytes = fetch_file_bytes(new_url)
+            old_extraction = extract_text_from_buffer(
+                io.BytesIO(old_bytes), filename=old_filename
+            )
+            new_extraction = extract_text_from_buffer(
+                io.BytesIO(new_bytes), filename=new_filename
+            )
 
         diff_text, sections_changed, additions, deletions = calculate_diff(
             old_extraction.text, new_extraction.text

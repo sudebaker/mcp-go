@@ -307,9 +307,16 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| image_path | string | Yes | Local path, HTTP/HTTPS URL, or path to PDF file |
+| image_path | string | Yes | Image to analyze: `res://` upload token, HTTP/HTTPS URL, or a local path such as `/data/uploads/image.jpg` |
 | task | string | Yes | `ocr`, `describe`, `extract_entities`, `answer` |
 | question | string | Conditional | Required for `answer` task |
+| provider | string | No | `ollama` (default), `vision`, `openrouter`, `openai`, `anthropic`, `deepseek`, or a full URL |
+| model | string | No | Vision model name (defaults from context/env, e.g. `llava`) |
+
+A `res://` token is resolved through `GET /internal/resource/{token}` once per
+call (single-use, 5-minute TTL — see [Resource resolution flow](#resource-resolution-flow)).
+If resolution fails the tool answers `success: false` with `RESOURCE_ERROR`
+instead of a silent empty analysis.
 
 ---
 
@@ -372,9 +379,16 @@ Compares two versions of a document or regulation.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| __files__ | array | Yes | Exactly 2 files: [0]=old, [1]=new |
+| __files__ | array | Yes | Exactly 2 entries: `[0]` = old version, `[1]` = new version. Each is `{url: "res://<token>" or http(s) URL (SSRF-validated), name: "file.ext"}`; a plain uri string is also tolerated |
 | focus | string | No | Optional focus area |
-| output_format | string | No | `markdown` or `structured` |
+| output_format | string | No | `markdown` (default) or `structured` |
+
+Server-side `res://` tokens are single-use with a 5-minute TTL: each `res://`
+uri is read at most once per call (a repeated attachment — the same uri in
+both slots — resolves once internally). A token reused across calls or already
+expired makes the tool fail with a "Resource token invalid (single-use,
+5-minute TTL) ..." error asking for a re-upload
+(see [Resource resolution flow](#resource-resolution-flow)).
 
 ---
 
@@ -584,13 +598,11 @@ Uploads a file to the server for temporary storage. Files are stored in `/data/u
 ```
 POST /upload
 Content-Type: multipart/form-data
-Authorization: Bearer <token>          (required when MCP_AUTH_MODE=required)
+Authorization: Bearer ***          (required when MCP_AUTH_MODE=required)
 X-Session-ID: <session id>             (required) - decides the namespace; it must belong to the token identity
 
 FormData:
   - file: (required) binary file
-  - ttl: (optional) seconds until expiration (default: 3600, max: 86400)
-  - collection: (optional) subdirectory for organization
 ```
 
 The upload lands in the namespace of the MCP session named by `X-Session-ID`. The server resolves
@@ -603,13 +615,16 @@ of its own, `user_id: legacy-upload`).
 ```json
 {
   "success": true,
-  "path": "/data/uploads/vision/abc123def456.jpg",
-  "filename": "screenshot.jpg",
+  "uri": "res://4d1f9a2b8c3e5d70a9b1c2d3e4f50617",
+  "sha256": "9a0364b9e99bb480dd25e1f0284c8c5a4c1f0a1b2c3d4e5f60718293a4b5c6d7",
   "size": 81087,
   "content_type": "image/jpeg",
-  "expires_at": "2026-05-17T12:00:00Z"
+  "name": "screenshot.jpg"
 }
 ```
+
+The `uri` is **not** a storage path and not an HTTP URL: it is a one-shot download
+token. See [Resource resolution flow](#resource-resolution-flow).
 
 **Response (413 - File too large):**
 ```json
@@ -648,9 +663,62 @@ upload:
 
 **Security:**
 - Filename sanitization (removes path traversal attempts)
-- Content-Type validation against whitelist
+- Content-Type validation against whitelist (declared MIME must also match the
+  file's magic bytes: `audio/wav` is detected as `application/octet-stream` and
+  therefore answers `415` — send audio to `transcribe` via its `audio_base64`
+  argument instead of uploading the file)
 - Size limit enforcement
 - Unique filename generation (UUID-based)
+
+**Response (401 - missing or invalid identity):**
+```
+Missing X-Session-ID            (plaintext, when the header is absent)
+```
+With `MCP_AUTH_MODE=required` the bearer token is validated by the auth
+middleware before the handler runs. A valid bearer token is **not enough**:
+the `X-Session-ID` header (the `Mcp-Session-Id` of a previous `initialize` over
+`/mcp`) is mandatory too.
+
+**Response (403 - session of another identity):**
+```json
+{"success": false, "error": "X-Session-ID does not belong to the authenticated user"}
+```
+
+### Resource resolution flow
+
+`res://` uris are **upload tokens**, issued only by `POST /upload`. They are
+single-use (one download) and expire after **5 minutes**
+(`internal/resources/token.go`, `internal/resources/manager.go:20`). Tools
+resolve them server-side through `GET /internal/resource/{token}`, an endpoint
+open on the Docker network and never exposed externally.
+
+The full flow a client must follow:
+
+```
+1. POST /mcp  {"method": "initialize", ...}  (Bearer token required)
+   → response header Mcp-Session-Id: <session id>
+2. POST /upload  (multipart, field "file")
+   → MUST carry BOTH headers:
+       Authorization: Bearer <MCP_AUTH_KEY>
+       X-Session-ID: <session id>
+   → 200 {"success": true, "uri": "res://<token>", ...}
+   - without X-Session-ID → 401 even with a valid bearer token
+   - audio/wav → 415 (magic-byte check); use transcribe's audio_base64 instead
+3. Call the tool passing the res:// uri as the file argument
+   (e.g. `__files__` entries with `url` in regulation_diff and file-bundle
+   tools, `image_path` in analyze_image).
+4. The tool fetches  GET /internal/resource/<token>  once and processes bytes.
+5. A second read of the same token (or a token older than 5 minutes) answers
+   401 — re-upload the file and use the fresh uri. Every `res://token` is
+   read exactly once per tool call.
+```
+
+> **Note (battery finding, 2026-10):** the two-header requirement from step 2,
+> plus the single-use/5-minute token behaviour from steps 4-5, is why
+> `batch_summarize`, `document_classifier` and `regulation_diff` had been kept
+> "non-verifiable" in the production battery for weeks: a successful upload
+> alone proves nothing, and reusing the uri silently fails with plain
+> `HTTP Error 401: Unauthorized` unless the tool surfaces the reason.
 
 ---
 

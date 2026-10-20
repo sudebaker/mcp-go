@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,16 +25,24 @@ type probeLog struct {
 	mu     sync.Mutex
 	paths  []string
 	bodies []string
+	auths  []string // Authorization recibida (vacía si no se mandó)
+}
+
+// recordWithBody guarda ruta, cuerpo y cabecera de auth en el mismo índice, para
+// que AuthsFor(path) no se desalinee con BodiesFor(path).
+func (p *probeLog) recordWithBody(r *http.Request, body string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paths = append(p.paths, r.URL.Path)
+	p.bodies = append(p.bodies, body)
+	p.auths = append(p.auths, r.Header.Get("Authorization"))
 }
 
 // record guarda ruta y cuerpo y devuelve el cuerpo leído, para que el handler
 // pueda seguir decodificándolo (r.Body queda consumido).
 func (p *probeLog) record(r *http.Request) string {
 	body, _ := io.ReadAll(r.Body)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.paths = append(p.paths, r.URL.Path)
-	p.bodies = append(p.bodies, string(body))
+	p.recordWithBody(r, string(body))
 	return string(body)
 }
 
@@ -51,6 +60,22 @@ func (p *probeLog) BodiesFor(path string) []string {
 	for i, seen := range p.paths {
 		if seen == path && i < len(p.bodies) {
 			out = append(out, p.bodies[i])
+		}
+	}
+	return out
+}
+
+// AuthsFor devuelve las cabeceras Authorization recibidas en una ruta concreta.
+// Es lo que convierte el stub en un ancla de "#53 manda la key": un handler que
+// devuelve 200 sin mirar la cabecera no distingue un probe autenticado de uno
+// anónimo, y el script pasaría el test sin enviar nada.
+func (p *probeLog) AuthsFor(path string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for i, seen := range p.paths {
+		if seen == path && i < len(p.auths) {
+			out = append(out, p.auths[i])
 		}
 	}
 	return out
@@ -93,12 +118,44 @@ func requiredEnv(llmURL, llmModel string, extra ...string) string {
 	return strings.Join(append(lines, ""), "\n")
 }
 
+// bearerGate es la puerta que convierte el stub en un ancla de la cabecera: solo
+// deja pasar la petición con `Authorization: Bearer <token>` exacta. Con
+// reject=0 devuelve 401 (el caso del endpoint que pide credenciales); con 403,
+// el otro código con el que los gateways rechazan una key. Registra la cabecera
+// recibida, así el test puede afirmar qué mandó el script sin creerse un 200.
+func bearerGate(log *probeLog, token string, reject int, next http.HandlerFunc) http.HandlerFunc {
+	if reject == 0 {
+		reject = http.StatusUnauthorized
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		log.recordWithBody(r, string(body))
+
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="stub"`)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(reject)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		next(w, r)
+	}
+}
+
 // stubOllama reproduce lo mínimo que el preflight consulta: /api/tags para saber
 // qué hay servido, /api/show para las capacidades declaradas y /api/chat, que es
 // la ruta que el código CONSTRUYE para hablar con ollama. Sin esa tercera ruta el
 // stub aprobaba el catálogo y el probe del endpoint daba 404: un rojo falso sobre
 // el .env correcto (y antes de #53, un agujero que ningún test ejercitaba).
 func stubOllama(t *testing.T, served map[string][]string) (*httptest.Server, *probeLog) {
+	t.Helper()
+	return stubOllamaAuth(t, served, "", 0)
+}
+
+// stubOllamaAuth es stubOllama con /api/chat detrás de bearerGate. token vacío
+// deja la ruta abierta (comportamiento del stub original).
+func stubOllamaAuth(t *testing.T, served map[string][]string, token string, reject int) (*httptest.Server, *probeLog) {
 	t.Helper()
 
 	log := &probeLog{}
@@ -139,7 +196,7 @@ func stubOllama(t *testing.T, served map[string][]string) (*httptest.Server, *pr
 	})
 	// Respuesta mínima válida de /api/chat, la misma forma que devuelve Ollama.
 	// El cuerpo enviado queda registrado para poder anclar `think:false`.
-	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
+	chatOK := func(w http.ResponseWriter, r *http.Request) {
 		log.record(r)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -147,7 +204,19 @@ func stubOllama(t *testing.T, served map[string][]string) (*httptest.Server, *pr
 			"message": map[string]string{"role": "assistant", "content": "ok"},
 			"done":    true,
 		})
-	})
+	}
+	if token == "" {
+		mux.HandleFunc("/api/chat", chatOK)
+	} else {
+		mux.HandleFunc("/api/chat", bearerGate(log, token, reject, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model":   "stub",
+				"message": map[string]string{"role": "assistant", "content": "ok"},
+				"done":    true,
+			})
+		}))
+	}
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -162,6 +231,12 @@ func stubOllama(t *testing.T, served map[string][]string) (*httptest.Server, *pr
 // gateways: con y sin prefijo /v1 sobre la base.
 func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, *probeLog) {
 	t.Helper()
+	return stubOpenAICompatibleAuth(t, "", 0, servedIDs...)
+}
+
+// stubOpenAICompatibleAuth es lo mismo con la ruta de chat detrás de bearerGate.
+func stubOpenAICompatibleAuth(t *testing.T, token string, reject int, servedIDs ...string) (*httptest.Server, *probeLog) {
+	t.Helper()
 
 	log := &probeLog{}
 
@@ -172,8 +247,19 @@ func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, 
 			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "ok"}}},
 		})
 	}
-
 	mux := http.NewServeMux()
+	chat := func(path string) {
+		if token == "" {
+			mux.HandleFunc(path, chatOK)
+			return
+		}
+		mux.HandleFunc(path, bearerGate(log, token, reject, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "ok"}}},
+			})
+		}))
+	}
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		log.record(r)
 		type model struct {
@@ -189,8 +275,8 @@ func stubOpenAICompatible(t *testing.T, servedIDs ...string) (*httptest.Server, 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})
-	mux.HandleFunc("/chat/completions", chatOK)
-	mux.HandleFunc("/v1/chat/completions", chatOK)
+	chat("/chat/completions")
+	chat("/v1/chat/completions")
 	notOllama := func(w http.ResponseWriter, r *http.Request) {
 		log.record(r)
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -388,4 +474,118 @@ func TestPreflight_envIsAGate(t *testing.T) {
 	require.Equal(t, 1, code, "falta POSTGRES_PASSWORD y el preflight no abortó:\n%s", out)
 	require.Contains(t, out, "POSTGRES_PASSWORD no está en", "output:\n%s", out)
 	require.Contains(t, out, "PREFLIGHT FALLIDO", "output:\n%s", out)
+}
+
+// --- Ancla de la auth del probe (#53) -------------------------------------
+//
+// El probe del endpoint LLM pasó a mandar `Authorization: Bearer <key>` y a
+// separar dos veredictos que antes eran el mismo ERROR:
+//
+//	· 401/403 SIN key en el .env → warn, exit 0 (el endpoint pide credenciales;
+//	  no es un fallo de configuración). Era el rojo falso que arregla #53.
+//	· 401/403 CON la key del .env enviada → ERROR, exit 1 (la key no vale).
+//
+// Los tokens de abajo son de mentira: el stub es local, no se llama a ningún
+// proveedor real. Y el stub COMPRUEBA la cabecera: un stub que devuelve 200 sin
+// mirarla aprobaría a un script que no manda nada.
+const (
+	stubOllamaKey     = "sk-test-ollama-not-a-real-key"
+	stubOpenRouterKey = "sk-test-openrouter-not-a-real-key"
+	stubWrongKey      = "sk-test-wrong-not-a-real-key"
+)
+
+// TestPreflightLLM_authRequiredWithoutKeyWarns ancla la mitad "sin key" de #53:
+// endpoint vivo que exige credenciales + .env que no define OLLAMA_API_KEY →
+// warn con el recuento exacto y exit 0. Cubre 401 y 403 (los dos códigos con los
+// que un gateway dice "falta credencial"). Si alguien lo degrada a ERROR, el
+// assert de exit 0 y el de "1 aviso(s)" caen juntos.
+func TestPreflightLLM_authRequiredWithoutKeyWarns(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		status := status
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			srv, log := stubOllamaAuth(t, map[string][]string{
+				"qwen3.5:9b": {"completion", "vision", "tools"},
+			}, stubOllamaKey, status)
+
+			out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b"))
+
+			require.Equal(t, 0, code, "un endpoint que pide credenciales no tumba el deploy:\n%s", out)
+			require.Contains(t, out, "warn  "+srv.URL+"/api/chat responde HTTP "+strconv.Itoa(status)+
+				": el endpoint exige credenciales", "output:\n%s", out)
+			require.Contains(t, out, "no define OLLAMA_API_KEY", "output:\n%s", out)
+			require.Contains(t, out, "1 aviso(s)", "el aviso tiene que contarse una vez:\n%s", out)
+			require.NotContains(t, out, "ERROR", "sin key no hay credencial que rechazar:\n%s", out)
+			require.NotContains(t, out, "PREFLIGHT FALLIDO", "output:\n%s", out)
+			// El catálogo sí se validó: el aviso es del probe, no del modelo.
+			require.Contains(t, out, "ok    LLM_MODEL=qwen3.5:9b está servido por "+srv.URL, "output:\n%s", out)
+			require.Equal(t, []string{""}, log.AuthsFor("/api/chat"),
+				"sin key en el .env el probe no tiene nada que mandar:\n%s", out)
+		})
+	}
+}
+
+// TestPreflightLLM_probeSendsOllamaKey es el caso verde del camino ollama: la key
+// del .env viaja en la cabecera y el stub (que la exige) responde 200. Ancla dos
+// cosas a la vez: que la key se manda y que el veredicto la menciona.
+func TestPreflightLLM_probeSendsOllamaKey(t *testing.T) {
+	srv, log := stubOllamaAuth(t, map[string][]string{
+		"qwen3.5:9b": {"completion", "vision", "tools"},
+	}, stubOllamaKey, http.StatusUnauthorized)
+
+	out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b", "OLLAMA_API_KEY="+stubOllamaKey))
+
+	require.Equal(t, 0, code, "output:\n%s", out)
+	require.Contains(t, out, "ok    el endpoint del código responde: "+srv.URL+
+		"/api/chat (LLM_API_FORMAT=ollama, 1 token, auth con OLLAMA_API_KEY)", "output:\n%s", out)
+	require.Contains(t, out, "0 aviso(s)", "un .env con la key correcta no genera avisos:\n%s", out)
+	require.NotContains(t, out, "ERROR", "output:\n%s", out)
+
+	require.Equal(t, []string{"Bearer " + stubOllamaKey}, log.AuthsFor("/api/chat"),
+		"el probe tiene que mandar la key del .env en la cabecera:\n%s", out)
+	require.NotContains(t, out, stubOllamaKey, "la key no puede acabar impresa:\n%s", out)
+}
+
+// TestPreflightLLM_probeSendsOpenRouterKey repite el ancla por el camino OpenAI:
+// con LLM_API_FORMAT=openai la ruta es /chat/completions y la key sale de
+// OPENROUTER_API_KEY (la tabla de dominios/fallback de retry.py replicada).
+func TestPreflightLLM_probeSendsOpenRouterKey(t *testing.T) {
+	srv, log := stubOpenAICompatibleAuth(t, stubOpenRouterKey, http.StatusUnauthorized, "qwen3.5:9b")
+
+	out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b",
+		"LLM_API_FORMAT=openai", "OPENROUTER_API_KEY="+stubOpenRouterKey))
+
+	require.Equal(t, 0, code, "output:\n%s", out)
+	require.Contains(t, out, "ok    el endpoint del código responde: "+srv.URL+
+		"/chat/completions (LLM_API_FORMAT=openai, 1 token, auth con OPENROUTER_API_KEY)", "output:\n%s", out)
+	// 1 aviso por la visión no verificable (el stub no expone /api/show); anclado
+	// aparte en TestPreflightLLM_openAICompatibleCannotVerifyVision.
+	require.Contains(t, out, "1 aviso(s)", "output:\n%s", out)
+	require.NotContains(t, out, "ERROR", "output:\n%s", out)
+
+	require.Equal(t, []string{"Bearer " + stubOpenRouterKey}, log.AuthsFor("/chat/completions"),
+		"el probe tiene que mandar OPENROUTER_API_KEY:\n%s", out)
+	require.NotContains(t, out, stubOpenRouterKey, "la key no puede acabar impresa:\n%s", out)
+}
+
+// TestPreflightLLM_wrongKeyIsRed ancla la otra mitad de #53: si la key SÍ se
+// envió y el endpoint la rechaza, el .env está mal y el deploy no puede seguir.
+// Es el contraste exacto del primer test: mismo 401, con key → exit 1.
+func TestPreflightLLM_wrongKeyIsRed(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		status := status
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			srv, log := stubOllamaAuth(t, map[string][]string{
+				"qwen3.5:9b": {"completion", "vision", "tools"},
+			}, stubOllamaKey, status)
+
+			out, code := runPreflight(t, requiredEnv(srv.URL, "qwen3.5:9b", "OLLAMA_API_KEY="+stubWrongKey))
+
+			require.Equal(t, 1, code, "una key que no vale tiene que parar el deploy:\n%s", out)
+			require.Contains(t, out, "ERROR el endpoint "+srv.URL+"/api/chat rechaza la credencial de OLLAMA_API_KEY (HTTP "+
+				strconv.Itoa(status)+")", "output:\n%s", out)
+			require.Contains(t, out, "PREFLIGHT FALLIDO", "output:\n%s", out)
+			require.Equal(t, []string{"Bearer " + stubWrongKey}, log.AuthsFor("/api/chat"),
+				"el stub tiene que haber recibido la key equivocada:\n%s", out)
+		})
+	}
 }

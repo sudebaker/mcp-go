@@ -164,6 +164,16 @@ to remove that fallback: every call is then rejected with `SANDBOX_UNAVAILABLE`,
 | `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | Image tag the tool builds and runs; set it when a deployment pre-builds under another name |
 | `SANDBOX_REQUIRED` | `false` | `true` disables every non-sandboxed fallback, so code only ever runs in the container |
 
+### Sidecar execution (contract frozen, not yet deployed)
+
+The planned replacement for the in-container Docker client is an isolated sidecar service: it is
+the only component with access to the Docker daemon and exposes an internal HTTP API, so the
+orchestrator never mounts the socket. The v1 contract — endpoints, request/response shape,
+isolation model, limits and error codes — is frozen in
+[docs/SANDBOX_SIDECAR_API.md](docs/SANDBOX_SIDECAR_API.md), with a machine-readable schema in
+[docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml). Until the sidecar ships,
+the behaviour described above still applies.
+
 ## Toolset Filtering
 
 The server can expose different subsets of tools without code changes, using **toolsets** defined in `configs/toolsets.yaml`.

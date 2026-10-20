@@ -242,6 +242,137 @@ else
                 # la capacidad no es consultable. Se dice, no se calla.
                 warn "no puedo verificar la visión de $llm_model: $llm_url no expone /api/show"
             fi
+
+            # --- El endpoint que el código CONSTRUYE, no el catálogo ---
+            # tools/common/retry.py arma `{LLM_API_URL}/chat/completions` cuando el
+            # formato es openai y `{LLM_API_URL}/api/chat` cuando es ollama. Un catálogo
+            # que responde no prueba que esa ruta exista: en prod, con el tag servido y
+            # LLM_API_FORMAT=openai sobre una URL sin `/v1`, el preflight decía OK y los
+            # cinco tools devolvían 404. Esta es la única comprobación que ejercita la
+            # ruta real, con una completion de 1 token.
+            #
+            # Severidad: host mudo → aviso (puede estar apagado y eso no impide
+            # desplegar); host que responde 4xx/5xx a la ruta del código → error de
+            # configuración, porque desplegar así deja cinco tools rotos con /health verde.
+            # Excepción: 401/403 SIN credencial en el .env no es un fallo de
+            # configuración, es un endpoint que pide token (se avisa, no se tiñe de
+            # rojo); con credencial enviada, 401/403 sí es rojo (la key no vale).
+            llm_format="$(printf '%s' "${ENV[LLM_API_FORMAT]:-ollama}" | tr '[:upper:]' '[:lower:]')"
+            # retry.py:36-51 detecta los proveedores OpenAI-compatibles por dominio
+            # aunque LLM_API_FORMAT no esté puesto; se replica para no dar un rojo falso.
+            if printf '%s' "$llm_url" | grep -qE 'openrouter\.ai|api\.openai\.com|generativelanguage\.googleapis\.com|anthropic\.com|api\.cohere\.ai|api\.mistral\.ai|api\.groq\.com|api\.deepseek\.com|opencode\.ai'; then
+                llm_format="openai"
+            fi
+            body_openai="{\"model\":\"$llm_model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}"
+            # `think:false` es obligatorio en la rama ollama: un modelo thinking devuelve
+            # message.content vacío y este check se pondría en rojo a sí mismo sobre un
+            # .env correcto (medido con qwen3.5:9b: 936 chars en `thinking`, 0 en `content`).
+            body_ollama="{\"model\":\"$llm_model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"stream\":false,\"think\":false,\"options\":{\"num_predict\":1}}"
+            if [ "$llm_format" = "openai" ]; then
+                llm_probe="${llm_url%/}/chat/completions"
+                llm_probe_body="$body_openai"
+                llm_alt="${llm_url%/}/api/chat"
+                llm_alt_body="$body_ollama"
+            else
+                llm_probe="${llm_url%/}/api/chat"
+                llm_probe_body="$body_ollama"
+                llm_alt="${llm_url%/}/chat/completions"
+                llm_alt_body="$body_openai"
+            fi
+            # --- Auth: la misma cabecera que manda el código ---
+            # tools/common/retry.py (detect_api_format_and_key) resuelve la key por
+            # dominio y añade `Authorization: Bearer <key>`. Sin esa cabecera,
+            # cualquier endpoint que exige token (openrouter, api.openai.com,
+            # anthropic, groq, deepseek...) contestaba 401 y este check se ponía en
+            # rojo sobre un .env correcto.
+            # La key se lee del .env que se está validando (es lo que compose inyecta
+            # en el contenedor), no del entorno del operador: el veredicto no debe
+            # depender de la shell. Nunca se imprime y no viaja en argv: va por un
+            # fichero de config de curl con permisos 0600, borrado al salir.
+            case "$llm_url" in
+                *openrouter.ai*)                     llm_key_env=OPENROUTER_API_KEY ;;
+                *api.openai.com*)                    llm_key_env=OPENAI_API_KEY ;;
+                *generativelanguage.googleapis.com*) llm_key_env=GEMINI_API_KEY ;;
+                *anthropic.com*)                     llm_key_env=ANTHROPIC_API_KEY ;;
+                *api.cohere.ai*)                     llm_key_env=COHERE_API_KEY ;;
+                *api.mistral.ai*)                    llm_key_env=MISTRAL_API_KEY ;;
+                *api.groq.com*)                      llm_key_env=GROQ_API_KEY ;;
+                *api.deepseek.com*)                  llm_key_env=DEEPSEEK_API_KEY ;;
+                *opencode.ai*)                       llm_key_env=OPENCODE_API_KEY ;;
+                *)
+                    if [ "$llm_format" = "openai" ]; then
+                        llm_key_env=OPENROUTER_API_KEY
+                    else
+                        llm_key_env=OLLAMA_API_KEY
+                    fi
+                    ;;
+            esac
+            llm_key="${ENV[$llm_key_env]:-}"
+            llm_curl_cfg=""
+            if [ -n "$llm_key" ]; then
+                auth_note="auth con $llm_key_env"
+                cfg_dir="$(mktemp -d 2>/dev/null)" || cfg_dir=""
+                if [ -n "$cfg_dir" ]; then
+                    llm_curl_cfg="$cfg_dir/auth.cfg"
+                    ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$llm_key" >"$llm_curl_cfg" )
+                    trap 'rm -rf "$cfg_dir"' EXIT
+                fi
+            else
+                auth_note="sin auth ($llm_key_env no está en $ENV_FILE)"
+            fi
+            probe_http() {  # $1=url $2=cuerpo json $3=timeout
+                if [ -n "$llm_curl_cfg" ]; then
+                    curl -s -o /dev/null -w '%{http_code}' --max-time "$3" -K "$llm_curl_cfg" \
+                        -X POST "$1" -H 'Content-Type: application/json' -d "$2" 2>/dev/null
+                elif [ -n "$llm_key" ]; then
+                    curl -s -o /dev/null -w '%{http_code}' --max-time "$3" \
+                        -X POST "$1" -H 'Content-Type: application/json' \
+                        -H "Authorization: Bearer $llm_key" -d "$2" 2>/dev/null
+                else
+                    curl -s -o /dev/null -w '%{http_code}' --max-time "$3" \
+                        -X POST "$1" -H 'Content-Type: application/json' -d "$2" 2>/dev/null
+                fi
+            }
+            probe_code="$(probe_http "$llm_probe" "$llm_probe_body" 8)"
+            probe_rc=$?
+            # Con key enviada, 401/403 es rojo: la credencial del .env no vale.
+            # Sin key, 401/403 solo dice que el endpoint pide credenciales: no es
+            # un error de configuración y no puede tumbar el deploy.
+            key_rejected=0
+            auth_required=0
+            case "$probe_code" in
+                401|403)
+                    if [ -n "$llm_key" ]; then
+                        key_rejected=1
+                    else
+                        auth_required=1
+                    fi
+                    ;;
+            esac
+            case "$probe_code" in
+                2??)
+                    ok "el endpoint del código responde: $llm_probe (LLM_API_FORMAT=$llm_format, 1 token, $auth_note) — los 5 tools pueden llamar al modelo"
+                    ;;
+                *)
+                    if [ "$probe_rc" -ne 0 ] || [ -z "$probe_code" ] || [ "$probe_code" = "000" ]; then
+                        warn "no puedo alcanzar $llm_probe (host apagado o inalcanzable): no se comprueba el endpoint del código"
+                    elif [ "$auth_required" -eq 1 ]; then
+                        warn "$llm_probe responde HTTP $probe_code: el endpoint exige credenciales y $ENV_FILE no define $llm_key_env, así que la ruta no se puede validar. El endpoint está vivo; los 5 tools con LLM darán 401 hasta que haya key"
+                    elif [ "$key_rejected" -eq 1 ]; then
+                        err "el endpoint $llm_probe rechaza la credencial de $llm_key_env (HTTP $probe_code): la key del .env no vale para $llm_url y los 5 tools con LLM fallarán"
+                    else
+                        alt_code="$(probe_http "$llm_alt" "$llm_alt_body" 6)"
+                        case "$alt_code" in
+                            2??)
+                                err "el endpoint que construye el código (LLM_API_FORMAT=$llm_format → $llm_probe) responde HTTP $probe_code, pero $llm_alt sí responde: LLM_API_FORMAT y la URL del .env no encajan y los 5 tools con LLM fallarán con 404"
+                                ;;
+                            *)
+                                err "el endpoint que construye el código (LLM_API_FORMAT=$llm_format → $llm_probe) responde HTTP $probe_code para $llm_model: los 5 tools con LLM fallarán aunque el tag esté servido"
+                                ;;
+                        esac
+                    fi
+                    ;;
+            esac
         else
             served="$(printf '%s' "$tags" | grep -oE '"(name|id)":"[^"]+"' \
                 | sed -E 's/.*:"//; s/"$//' | sort -u | paste -sd' ' - | cut -c1-220)"

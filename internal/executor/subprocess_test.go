@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sudebaker/mcp-go/internal/config"
 )
@@ -156,5 +157,44 @@ func TestExecute_NotFound(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for nonexistent tool")
+	}
+}
+
+// Regression for t_b55e3c26: config_auditor answered errors whose details
+// were an array; Execute must decode the response and surface the tool's
+// real code and message instead of a "failed to parse subprocess response"
+// wrapper. Exercises the real Execute() unmarshal path.
+func TestExecute_SurfacesToolErrorWithArrayDetails(t *testing.T) {
+	payload := `{"success":false,"request_id":"req-1","error":{"code":"NO_FILES","message":"resource not found","details":[{"file":"res://XXXX","error":"resource not found"}]}}`
+
+	cfg := &config.Config{}
+	cfg.Execution.MaxConcurrency = 1
+	cfg.Execution.DefaultTimeout = 5 * time.Second
+	cfg.Execution.WorkingDir = t.TempDir()
+	cfg.Tools = []config.ToolConfig{{
+		Name:    "config_auditor",
+		Command: "/bin/sh",
+		Args:    []string{"-c", "echo '" + payload + "'"},
+	}}
+	exec := New(cfg)
+
+	result, err := exec.Execute(context.Background(), "config_auditor", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.Success {
+		t.Error("expected success to be false")
+	}
+	if result.Error == nil {
+		t.Fatal("expected error to be set")
+	}
+	if result.Error.Code != "NO_FILES" {
+		t.Errorf("expected code 'NO_FILES', got %q", result.Error.Code)
+	}
+	if result.Error.Message != "resource not found" {
+		t.Errorf("expected the tool's message, got %q", result.Error.Message)
+	}
+	if strings.Contains(result.Error.Message, "failed to parse") {
+		t.Errorf("tool message replaced by parse error: %q", result.Error.Message)
 	}
 }

@@ -156,6 +156,16 @@ Tools communicate via JSON over stdin/stdout:
 }
 ```
 
+**Optional `error.details` field — always a string.** Put a trace summary, a
+stderr excerpt or per-file reasons rendered inline (e.g.
+`"file.yaml: not found; other.json: parse error"`). Structured data belongs in
+`structured_content`, never in `details`: a non-JSON-string `details` (array,
+object, …) used to abort parsing of the whole response on the Go side, hiding
+the tool's real error behind a "failed to parse subprocess response" message.
+The Go parser (`internal/mcp.SubprocessError`) now tolerates legacy non-string
+`details` by normalizing them to their JSON encoding, but new tools must emit a
+string.
+
 ---
 
 ### Creating a New Tool

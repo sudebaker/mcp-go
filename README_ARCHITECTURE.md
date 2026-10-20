@@ -205,7 +205,7 @@ __RESULT__:{"success": true, ...}
 - `SubprocessRequest` - JSON sent to Python tools
 - `SubprocessResponse` - JSON received from Python tools
 - `ContentItem` - MCP content item (text, image, resource)
-- `SubprocessError` - Error structure with code and message
+- `SubprocessError` - Error structure with code, message and optional string details (legacy non-string details are normalized while parsing)
 
 ---
 

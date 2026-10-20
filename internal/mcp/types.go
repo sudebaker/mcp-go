@@ -1,5 +1,10 @@
 package mcp
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 // SubprocessRequest is the JSON structure sent to Python scripts via STDIN
 type SubprocessRequest struct {
 	RequestID string                 `json:"request_id"`
@@ -48,6 +53,46 @@ type SubprocessError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Details string `json:"details,omitempty"`
+}
+
+// UnmarshalJSON decodes a SubprocessError, tolerating any JSON shape for the
+// optional `details` field. The documented contract is a string, but tools
+// have emitted arrays or objects (e.g. per-file read errors); a non-string
+// details must never abort parsing of the whole subprocess response, because
+// code and message are what reach the client.
+func (e *SubprocessError) UnmarshalJSON(data []byte) error {
+	type shape struct {
+		Code    string          `json:"code"`
+		Message string          `json:"message"`
+		Details json.RawMessage `json:"details,omitempty"`
+	}
+	var s shape
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	e.Code = s.Code
+	e.Message = s.Message
+	e.Details = normalizeErrorDetails(s.Details)
+	return nil
+}
+
+// normalizeErrorDetails converts the wire form of details into the internal
+// string form: JSON strings are unwrapped, null/absent becomes empty, and any
+// other JSON value is stored as its compact JSON encoding.
+func normalizeErrorDetails(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err == nil {
+		return compact.String()
+	}
+	return string(raw)
 }
 
 // Common error codes

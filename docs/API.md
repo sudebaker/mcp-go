@@ -705,8 +705,8 @@ The full flow a client must follow:
    - without X-Session-ID → 401 even with a valid bearer token
    - audio/wav → 415 (magic-byte check); use transcribe's audio_base64 instead
 3. Call the tool passing the res:// uri as the file argument
-   (e.g. `file_uri_1`/`file_uri_2` in regulation_diff, `file_uri`/`image_path`
-   in analyze_image, or `__files__` entries with `url` in file-bundle tools).
+   (e.g. `__files__` entries with `url` in regulation_diff and file-bundle
+   tools, `image_path` in analyze_image).
 4. The tool fetches  GET /internal/resource/<token>  once and processes bytes.
 5. A second read of the same token (or a token older than 5 minutes) answers
    401 — re-upload the file and use the fresh uri. Every `res://token` is

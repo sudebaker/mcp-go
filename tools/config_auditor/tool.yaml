@@ -6,11 +6,16 @@ timeout: "60s"
 input_schema:
   type: object
   properties:
-    file_uris:
+    __files__:
       type: array
       items:
-        type: string
-        format: resource-uri
+        type: object
+        properties:
+          url:
+            type: string
+            format: resource-uri
+          name:
+            type: string
       minItems: 1
       description: "Archivos de configuracion a auditar"
     rules:
@@ -26,4 +31,4 @@ input_schema:
       default: "all"
       description: "Filtrar resultados por severidad"
   required:
-    - file_uris
+    - __files__

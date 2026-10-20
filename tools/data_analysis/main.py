@@ -269,14 +269,14 @@ def validate_request_input(
             output_format,
         )
 
-    # Validate file source (file_url, file_uris, or __files__ must be provided)
+    # Validate file source (file_url or __files__ must be provided)
     has_files_list = files_list and len(files_list) > 0
     has_file_url = file_url and isinstance(file_url, str) and "://" in file_url
 
     if not has_files_list and not has_file_url:
         return (
             False,
-            "One of file_url, file_uris, or __files__ must be provided",
+            "One of file_url or __files__ must be provided",
             output_format,
         )
 
@@ -964,7 +964,7 @@ def main() -> None:
                         "request_id": request_id,
                         "error": {
                             "code": "INVALID_INPUT",
-                            "message": f"No supported data file found in file_uris. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
+                            "message": f"No supported data file found in __files__. Supported: {', '.join(SUPPORTED_FILE_EXTENSIONS)}",
                         },
                     }
                 )
@@ -1015,7 +1015,7 @@ def main() -> None:
                             "request_id": request_id,
                             "error": {
                                 "code": "INVALID_INPUT",
-                                "message": "Neither 'content' (base64) nor 'url' provided in file_uris",
+                                "message": "Neither 'content' (base64) nor 'url' provided in __files__",
                             },
                         }
                     )

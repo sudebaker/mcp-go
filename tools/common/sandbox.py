@@ -9,7 +9,10 @@ Container is always removed after execution (auto_remove=True).
 import json
 import os
 import time
-from typing import Any, Callable, Dict, Optional
+import urllib.error
+import urllib.request
+import uuid
+from typing import Any, Callable, Dict, List, Optional, Union
 
 try:
     import docker
@@ -219,7 +222,7 @@ class DockerSandboxedExecutor:
     def execute(
         self,
         code: str,
-        input_data: Optional[Dict[str, Any]] = None,
+        input_data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         env_vars: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
         start_time = time.time()
@@ -672,7 +675,7 @@ if __name__ == "__main__":
     def execute_fallback(
         self,
         code: str,
-        input_data: Optional[Dict[str, Any]] = None,
+        input_data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_chunk: Optional[Callable[[dict], None]] = None,
     ) -> SandboxResult:
         if on_chunk:
@@ -819,12 +822,260 @@ if __name__ == "__main__":
             )
 
 
+# ---------------------------------------------------------------------------
+# Sandbox sidecar backend (fase 3 of docs/SANDBOX_SIDECAR_API.md, contrato v1)
+# ---------------------------------------------------------------------------
+
+# Execution goes through the sandbox sidecar HTTP API when SANDBOX_API_URL is
+# configured; empty keeps the legacy Docker path (backend "none") unchanged.
+# The sidecar is the ONLY component that talks to the Docker daemon, so this
+# client never touches a socket itself.
+SIDECAR_ENV_URL = "SANDBOX_API_URL"
+SIDECAR_ENV_TOKEN = "SANDBOX_API_TOKEN"
+
+# §8 (obligatorio): the client's timeout must exceed the container timeout by
+# a 15 s margin — the sidecar kills and cleans the container after its own
+# timer expires, and the response only lands once that cleanup is done.
+SIDECAR_HTTP_TIMEOUT_MARGIN_SECONDS = 15
+
+# Availability probe timeout: long enough for a warm daemon, short enough not
+# to stall the tool call when the sidecar is down.
+SIDECAR_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+def sandbox_backend() -> str:
+    """Return the execution backend: "sidecar" when SANDBOX_API_URL is set,
+    else "none" (legacy Docker path). The decision happens before executing
+    anything: with the sidecar configured there is never a docker or exec()
+    fallback behind it (contract §13).
+    """
+    if os.environ.get(SIDECAR_ENV_URL, "").strip():
+        return "sidecar"
+    return "none"
+
+
+def sidecar_reachable() -> tuple:
+    """Probe the sidecar with GET /v1/health (§4.1); returns (ok, reason).
+
+    The route is deliberately unauthenticated (container healthcheck, §3), so
+    the probe sends no secret. Never raises — an unreachable sidecar is
+    exactly what this function reports, and the caller logs the reason.
+    """
+    base_url = os.environ.get(SIDECAR_ENV_URL, "").strip().rstrip("/")
+    if not base_url:
+        return False, "SANDBOX_API_URL is not set"
+    try:
+        request = urllib.request.Request(f"{base_url}/v1/health", method="GET")
+        with urllib.request.urlopen(
+            request, timeout=SIDECAR_PROBE_TIMEOUT_SECONDS
+        ) as response:
+            status = json.loads(response.read().decode()).get("status")
+    except urllib.error.HTTPError as exc:
+        # 503 degraded: try to carry the sidecar's own status in the reason
+        hint = ""
+        try:
+            hint = str(json.loads(exc.read().decode()).get("status") or "")
+        except Exception:
+            pass
+        return False, (f"HTTP {exc.code} {hint}").rstrip()
+    except Exception as exc:  # URLError, timeout, malformed body...
+        return False, str(exc)
+    if status == "ok":
+        return True, ""
+    return False, f"sidecar reports status={status!r} (degraded)"
+
+
+def _elapsed_ms(start_time: float) -> int:
+    return int((time.time() - start_time) * 1000)
+
+
+def _memory_limit_mb(memory: Any) -> int:
+    """Sidecar field ``memory_limit_mb`` (§4.3, an int) from the Docker-style
+    SandboxConfig value ("512m"). Unrecognised formats keep the 512 default.
+    """
+    if isinstance(memory, (int, float)):
+        return int(memory)
+    text = str(memory).strip().lower()
+    if text.isdigit():
+        return int(text)
+    if text.endswith("m") and text[:-1].isdigit():
+        return int(text[:-1])
+    if text.endswith("g") and text[:-1].isdigit():
+        return int(text[:-1]) * 1024
+    return 512
+
+
+class SidecarSandboxedExecutor:
+    """HTTP client of ``POST /v1/execute`` (contrato v1, §4.2/§4.3).
+
+    Mirrors the API data_analysis already expects: ``execute(code,
+    input_data)`` returns a SandboxResult whose ``to_dict()`` carries the
+    §4.4 contract fields; the extra response fields (request_id, error_code,
+    output_truncated, ...) are additive and ignored here. Sidecar errors
+    (§6.1 → §6.2) are mapped to SandboxResult, never raised, and there is NO
+    client-side retry (§9).
+
+    ``input_data`` rides inline as vía A (``format: "records"``); res://
+    resources are named by whoever builds the request — the sidecar resolves
+    them (§5, regla 1), this client never opens the file behind a URI.
+    """
+
+    CHUNK_CALLBACK = None
+
+    def __init__(self, config: Optional[SandboxConfig] = None):
+        self.config = config or SandboxConfig()
+        self._base_url = os.environ.get(SIDECAR_ENV_URL, "").strip().rstrip("/")
+        self._token = os.environ.get(SIDECAR_ENV_TOKEN, "").strip()
+
+    def set_chunk_callback(self, callback: Callable[[dict], None]):
+        SidecarSandboxedExecutor.CHUNK_CALLBACK = callback
+
+    def emit_chunk(self, chunk_type: str, data: Any):
+        chunk = {"type": chunk_type, "data": data}
+        if SidecarSandboxedExecutor.CHUNK_CALLBACK:
+            SidecarSandboxedExecutor.CHUNK_CALLBACK(chunk)
+        return chunk
+
+    def _payload(self, code: str, input_data=None) -> dict:
+        """§4.3 request body: limits from SandboxConfig, input_data as records."""
+        payload: Dict[str, Any] = {"code": code}
+        if input_data is not None:
+            records = input_data if isinstance(input_data, list) else [input_data]
+            payload["input_data"] = {
+                "format": "records",
+                "name": "input.csv",
+                "records": records,
+            }
+        payload["timeout_seconds"] = int(self.config.timeout)
+        payload["memory_limit_mb"] = _memory_limit_mb(self.config.memory)
+        if self.config.cpu is not None:
+            payload["cpu_limit"] = float(self.config.cpu)
+        if self.config.pids is not None:
+            payload["pids_limit"] = int(self.config.pids)
+        return payload
+
+    def execute(
+        self,
+        code: str,
+        input_data: Optional[Union[Dict[str, Any], List[Any]]] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> SandboxResult:
+        start_time = time.time()
+        self.emit_chunk("status", {"message": "Executing code via sandbox sidecar"})
+
+        if not self._token:
+            # Fail closed BEFORE the call: /v1/execute is Bearer-guarded (§3),
+            # so a header-less request could only earn a 401. Without the
+            # secret there is no usable sidecar backend at all.
+            return SandboxResult(
+                success=False,
+                error="Sandbox service unavailable: SANDBOX_API_TOKEN is not set "
+                "for the sidecar call (contract §3)",
+                execution_time_ms=_elapsed_ms(start_time),
+            )
+
+        body = json.dumps(self._payload(code, input_data), default=str).encode()
+        request = urllib.request.Request(
+            f"{self._base_url}/v1/execute",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json; charset=utf-8",
+                # §9: the client does not retry, but a per-request key keeps
+                # any accidental transport-level double-send safe (same body
+                # ⇒ cached reply, different body ⇒ IDEMPOTENCY_CONFLICT).
+                "Idempotency-Key": uuid.uuid4().hex,
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=int(self.config.timeout) + SIDECAR_HTTP_TIMEOUT_MARGIN_SECONDS,
+            ) as response:
+                payload = json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            return self._map_http_error(exc, start_time)
+        except Exception as exc:  # URLError, socket timeout, refused connection...
+            self.emit_chunk("error", {"message": f"Sandbox service unavailable: {exc}"})
+            return SandboxResult(
+                success=False,
+                error=f"Sandbox service unavailable: {exc}",
+                execution_time_ms=_elapsed_ms(start_time),
+            )
+
+        chunks = payload.get("chunks") or []
+        for chunk in chunks:
+            self.emit_chunk(chunk.get("type", "unknown"), chunk.get("data", {}))
+
+        return SandboxResult(
+            success=bool(payload.get("success")),
+            output=payload.get("output") or "",
+            error=payload.get("error"),
+            chunks=chunks,
+            files=payload.get("files") or {},
+            # The container-side measurement (§4.4) wins over the client's own
+            # clock; fall back to elapsed time if the field is absent.
+            execution_time_ms=(
+                int(payload["execution_time_ms"])
+                if payload.get("execution_time_ms") is not None
+                else _elapsed_ms(start_time)
+            ),
+            exit_code=int(payload.get("exit_code", 0)),
+        )
+
+    def _map_http_error(
+        self, exc: "urllib.error.HTTPError", start_time: float
+    ) -> SandboxResult:
+        """Map a non-200 answer to SandboxResult (§6.1 → §6.2). No retries."""
+        try:
+            payload = json.loads(exc.read().decode())
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        error = payload.get("error")
+        detail = error.get("message") if isinstance(error, dict) else ""
+
+        # 400/413/409 are request-contract problems (integration bugs, §6.2):
+        # the sidecar's message names the offending field, so keep it verbatim.
+        if exc.code in (400, 413, 409):
+            self.emit_chunk(
+                "error",
+                {"message": f"Sidecar rejected the request: {detail or exc.code}"},
+            )
+            return SandboxResult(
+                success=False,
+                error=detail or f"Sidecar error HTTP {exc.code}",
+                execution_time_ms=_elapsed_ms(start_time),
+            )
+
+        # 401/429/500/502/503 and anything else: the execution service is not
+        # usable right now — consistent with what the probe reports (§6.2).
+        self.emit_chunk(
+            "error", {"message": f"Sidecar error HTTP {exc.code}: {detail}"}
+        )
+        return SandboxResult(
+            success=False,
+            error=f"Sandbox service unavailable: HTTP {exc.code} {detail}".rstrip(),
+            execution_time_ms=_elapsed_ms(start_time),
+        )
+
+
 def execute_in_sandbox(
     code: str,
-    input_data: Optional[Dict[str, Any]] = None,
+    input_data: Optional[Union[Dict[str, Any], List[Any]]] = None,
     config: Optional[SandboxConfig] = None,
     on_chunk: Optional[Callable[[dict], None]] = None,
 ) -> SandboxResult:
+    if sandbox_backend() == "sidecar":
+        # SANDBOX_API_URL set: the sidecar executes and there is NO docker or
+        # exec() fallback behind it (§13) — every failure maps to the result.
+        sidecar_executor = SidecarSandboxedExecutor(config)
+        if on_chunk:
+            sidecar_executor.set_chunk_callback(on_chunk)
+        return sidecar_executor.execute(code, input_data)
+
     executor = DockerSandboxedExecutor(config)
     if on_chunk:
         executor.set_chunk_callback(on_chunk)

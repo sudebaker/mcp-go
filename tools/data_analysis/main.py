@@ -24,11 +24,13 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.resources import ToolContext
+from common.resources import Resource, ToolContext
 from common.structured_logging import get_logger
 from common.safe_file_ops import SafeFileOperations
 from common.sandbox import (
     execute_in_sandbox,
+    sandbox_backend,
+    sidecar_reachable,
     SandboxConfig,
     default_sandbox_image,
 )
@@ -73,6 +75,7 @@ try:
 except ImportError:
     MINIO_AVAILABLE = False
     S3Error = Exception  # type: ignore
+    Minio = None  # type: ignore  # annotation `Optional[Minio]` must stay resolvable
 
 
 # Constants
@@ -160,7 +163,7 @@ def is_rustfs_url(url: str) -> bool:
     return hostname == rustfs_host_lower
 
 
-def download_from_s3(url: str, client: Minio) -> BytesIO:
+def download_from_s3(url: str, client: Any) -> BytesIO:
     """
     Download file directly from S3 using minio client with timeout protection.
 
@@ -467,7 +470,7 @@ def load_data(file_path: str, safe_ops: SafeFileOperations) -> "pd.DataFrame":
         raise ValueError(f"Failed to load file {file_path}: {str(e)}") from e
 
 
-def get_data_summary(df: pd.DataFrame) -> str:
+def get_data_summary(df: Any) -> str:
     """Generate a summary of the dataframe for the LLM."""
     summary = []
     summary.append(
@@ -516,14 +519,36 @@ def extract_code(llm_response: str) -> str:
     return llm_response.strip()
 
 
+def _read_resource_bytes(uri: str) -> bytes:
+    """
+    Read the bytes behind a res:// URI through the shared resource client.
+
+    /internal/resource has required Authorization: Bearer <SANDBOX_API_TOKEN>
+    since the sandbox sidecar phase 2 (fail-closed guard), so a bare urlopen
+    gets 401. tools/common/resources/resource.py is the client the other
+    tools use in-container: it attaches the header when the secret is set.
+    """
+    resource = Resource(uri=uri, name="", mime="", size=0, sha256="")
+    return resource.read_bytes()
+
+
 def docker_sandbox_available() -> bool:
     """
-    Return True only when the Docker SDK is installed AND a daemon answers.
+    Return True only when the configured execution backend can run code.
 
-    DOCKER_AVAILABLE only reports whether the `docker` package imported; the
-    container image ships the SDK but no /var/run/docker.sock, so a real ping
-    is the only reliable signal. Never raises.
+    With SANDBOX_API_URL set the backend is the sandbox sidecar (contract
+    fase 3) and a GET /v1/health probe decides. Without it the legacy Docker
+    path applies: DOCKER_AVAILABLE only reports whether the `docker` package
+    imported (the container image ships the SDK but no /var/run/docker.sock),
+    so a real ping is the only reliable signal. Never raises; never weakens
+    the SANDBOX_REQUIRED gate.
     """
+    if sandbox_backend() == "sidecar":
+        available, reason = sidecar_reachable()
+        if not available:
+            logger.warning(f"Sandbox sidecar unavailable: {reason}")
+        return available
+
     try:
         from common.sandbox import DOCKER_AVAILABLE, DockerSandboxedExecutor
     except Exception:  # pragma: no cover - broken install
@@ -542,7 +567,7 @@ def docker_sandbox_available() -> bool:
 
 def execute_code_in_sandbox(
     code: str,
-    df: pd.DataFrame,
+    df: Any,
     request_id: str,
 ) -> dict:
     """
@@ -628,7 +653,7 @@ def execute_code_in_sandbox(
 
 def execute_code_safely(
     code: str,
-    df: pd.DataFrame,
+    df: Any,
     request_id: str,
 ) -> dict:
     """
@@ -843,12 +868,11 @@ def main() -> None:
                         resource = ctx.file("file_url")
                         data_bytes = resource.read_bytes()
                     except (KeyError, TypeError):
-                        # Fallback: construct internal URL directly from token
-                        host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
-                        token = file_url_direct[len("res://"):]
-                        import urllib.request
-                        resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
-                        data_bytes = resp.read()
+                        # Fallback: the URI is a bare res:// token without
+                        # injected metadata; stream it through the shared
+                        # resource client (Bearer header attached), never a
+                        # plain urlopen — /internal/resource answers 401.
+                        data_bytes = _read_resource_bytes(file_url_direct)
                     if file_name_direct:
                         actual_filename = file_name_direct
                     else:
@@ -994,11 +1018,7 @@ def main() -> None:
                     emit_chunk(
                         "status", {"message": "Downloading file from URL"})
                     if file_url.startswith("res://"):
-                        import urllib.request
-                        host = os.environ.get("MCP_INTERNAL_HOST", "localhost:8080")
-                        token = file_url[len("res://"):]
-                        resp = urllib.request.urlopen(f"http://{host}/internal/resource/{token}")
-                        buffer = BytesIO(resp.read())
+                        buffer = BytesIO(_read_resource_bytes(file_url))
                     else:
                         buffer = download_file_from_url(file_url, actual_filename)
                     df = load_data_from_buffer(buffer, actual_filename)

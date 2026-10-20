@@ -315,8 +315,10 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 A `res://` token is resolved through `GET /internal/resource/{token}` once per
 call (single-use, 5-minute TTL — see [Resource resolution flow](#resource-resolution-flow)).
-If resolution fails the tool answers `success: false` with `RESOURCE_ERROR`
-instead of a silent empty analysis.
+In-container clients resolve it with `Authorization: Bearer <SANDBOX_API_TOKEN>`;
+the endpoint refuses every request without that header (fail-closed Bearer
+guard, sidecar phase 2). If resolution fails the tool answers `success: false`
+with `RESOURCE_ERROR` instead of a silent empty analysis.
 
 ---
 
@@ -708,9 +710,12 @@ The full flow a client must follow:
    (e.g. `__files__` entries with `url` in regulation_diff and file-bundle
    tools, `image_path` in analyze_image).
 4. The tool fetches  GET /internal/resource/<token>  once and processes bytes.
-5. A second read of the same token (or a token older than 5 minutes) answers
-   401 — re-upload the file and use the fresh uri. Every `res://token` is
-   read exactly once per tool call.
+   Every in-container client sends `Authorization: Bearer <SANDBOX_API_TOKEN>`;
+   a request without the header answers 401.
+5. A second read of the same token, a token older than 5 minutes, or a tool
+   container with no SANDBOX_API_TOKEN configured answers 401 — re-upload the
+   file and use the fresh uri. Every `res://token` is read exactly once per
+   tool call.
 ```
 
 > **Note (battery finding, 2026-10):** the two-header requirement from step 2,

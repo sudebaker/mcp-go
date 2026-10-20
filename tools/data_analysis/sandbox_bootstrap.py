@@ -5,7 +5,9 @@ Reads base64-encoded code from environment variable and executes it.
 
 Security Features:
 - Restricted builtins with blocked dangerous functions
-- Controlled module imports (pandas, numpy only)
+- Controlled module imports via the shared whitelist
+  (tools/common/safe_import.py — pandas, numpy, matplotlib, json,
+  datetime, math, re, collections — never os/sys/subprocess/socket)
 - File access only via safe_file_ops module
 - No arbitrary import capability
 """
@@ -28,31 +30,21 @@ import matplotlib.pyplot as plt
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
 
-# Allowed modules for controlled imports
-ALLOWED_MODULES = {
-    "pandas": "pd",
-    "numpy": "np",
-    "json": "json",
-    "datetime": "datetime",
-    "math": "math",
-    "re": "re",
-    "collections": "collections",
-}
+# Import gate. Fail-closed: without the shared whitelist the bootstrap must
+# refuse to run user code at all (exit via ModuleNotFoundError), never fall
+# back to exec() without the gate. Candidates: /app/tools inside the sandbox
+# image; ../tools when the bootstrap runs from a repo checkout (tests).
+for _candidate in (
+    "/app/tools",
+    os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    ),
+):
+    if os.path.isdir(os.path.join(_candidate, "common")):
+        sys.path.insert(0, _candidate)
+        break
 
-
-def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
-    """
-    Restricted import function that only allows whitelisted modules.
-
-    Security: Prevents arbitrary code execution via import of dangerous modules
-    like os, sys, subprocess, socket, etc.
-    """
-    if name not in ALLOWED_MODULES:
-        raise ImportError(
-            f"Import of module '{name}' is not allowed in sandbox. "
-            f"Allowed modules: {', '.join(ALLOWED_MODULES.keys())}"
-        )
-    return __import__(name, globals, locals, fromlist, level)
+from common.safe_import import sandbox_import
 
 
 def emit_chunk(chunk_type, data):
@@ -175,9 +167,13 @@ def main():
         "ascii": ascii,
         # Output
         "print": print,
+        # Controlled imports only — the whitelist gate from
+        # tools/common/safe_import.py (same module the in-process fallback
+        # uses). Dotted names checked by root; os/sys/subprocess/socket… are
+        # denied with ImportError.
+        "__import__": sandbox_import,
         # BLOCKED - Set to None or omitted
         # "open": None,              # Use safe_files instead
-        # "__import__": safe_import,  # Controlled imports only
         # "compile": None,           # Block dynamic compilation
         # "exec": None,              # Block exec
         # "eval": None,              # Block eval

@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.resources import Resource, ToolContext
 from common.structured_logging import get_logger
 from common.safe_file_ops import SafeFileOperations
+from common.safe_import import sandbox_import
 from common.sandbox import (
     execute_in_sandbox,
     sandbox_backend,
@@ -688,6 +689,10 @@ def execute_code_safely(
         "dict": dict,
         "enumerate": enumerate,
         "filter": filter,
+        # Same whitelist gate the sidecar bootstrap binds (__import__):
+        # user-code `import pandas as pd` must work in every harness or the
+        # LLM payload dies with "__import__ not found" (t_52311b49).
+        "__import__": sandbox_import,
         "float": float,
         "format": format,
         "int": int,

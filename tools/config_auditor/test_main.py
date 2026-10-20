@@ -64,11 +64,22 @@ daemon:
   port: 2375
 """
 
+# The exact body QA measured against the live server and got "Found 0 issues"
+# for: a real-looking API key, a literal password and debug mode in the same
+# file. The tool must not report it as clean.
+ESTHER_YAML = """\
+app:
+  api_key: sk-FAKE-0123456789abcdef
+  password: superpassword123
+  debug: true
+"""
+
 FILES = {
     "tok-bad": ("bad-config.yaml", "text/yaml", BAD_YAML),
     "tok-clean": ("clean-config.yaml", "text/yaml", CLEAN_YAML),
     "tok-env": (".env", "text/plain", ENV_FILE),
     "tok-docker": ("daemon.yaml", "text/yaml", DOCKER_YAML),
+    "tok-esther": ("esther-config.yaml", "text/yaml", ESTHER_YAML),
 }
 
 
@@ -249,6 +260,28 @@ class ConfigAuditorTest(unittest.TestCase):
         self.assertEqual([f["current_value"] for f in ports], ["2375"])
         self.assertEqual(ports[0]["severity"], "high")
         self.assertEqual(structured["findings_by_severity"]["high"], 1)
+
+    def test_production_false_negative_is_flagged(self):
+        """api_key sk-FAKE..., password superpassword123 and debug: true at once.
+
+        This is the shape QA measured against the live server and got
+        "Found 0 issues" for; the audit must derive findings from the content
+        and never hand back a clean score.
+        """
+        response = self.audit(
+            [{"url": "res://tok-esther", "name": "esther-config.yaml"}]
+        )
+        self.assertTrue(response["success"])
+        structured = response["structured_content"]
+        secrets = [f for f in structured["findings"] if f["rule"] == "secrets"]
+        self.assertEqual({f["field"] for f in secrets}, {"api_key", "password"})
+        self.assertEqual({f["severity"] for f in secrets}, {"critical"})
+        debug = [f for f in structured["findings"] if f["rule"] == "debug_mode"]
+        self.assertEqual(len(debug), 1)
+        self.assertEqual(structured["findings_by_severity"]["critical"], 2)
+        self.assertLess(structured["score"], 100)
+        self.assertNotIn("0 finding", response["content"][0]["text"])
+        self.assertNotIn("sk-FAKE-0123456789abcdef", json.dumps(response))
 
     def test_missing_files_argument_is_an_error(self):
         response = run_tool({}, self.token_host)

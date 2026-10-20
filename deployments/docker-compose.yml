@@ -417,7 +417,7 @@ services:
     # contenedor y no devuelve datos de usuario. El binario se auto-
     # comprueba (-healthcheck) porque la imagen no lleva curl.
     healthcheck:
-      test: ["/usr/local/bin/sandbox-sidecar", "-healthcheck"]
+      test: ["CMD", "/usr/local/bin/sandbox-sidecar", "-healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

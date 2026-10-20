@@ -122,7 +122,7 @@ func (e *Engine) Ping(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrDaemonUnreachable, err)
 	}
-	defer drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("docker ping returned %d", resp.StatusCode)
 	}
@@ -164,7 +164,9 @@ func (e *Engine) do(ctx context.Context, method, path, contentType string, body 
 }
 
 func decodeJSON(resp *http.Response, out any) error {
-	defer drainClose(resp.Body)
+	// NOTE: the caller owns resp.Body (inline `defer resp.Body.Close()` right
+	// after the Do — bodyclose wants the close visible in the same function;
+	// helpers don't count for it). This func only READS.
 	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusAccepted {
 		return nil
 	}
@@ -207,6 +209,7 @@ func (e *Engine) ImagePresence(ctx context.Context, image string) (bool, string,
 	if err != nil {
 		return false, "", err
 	}
+	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var body struct {
@@ -217,10 +220,8 @@ func (e *Engine) ImagePresence(ctx context.Context, image string) (bool, string,
 		}
 		return true, body.ID, nil
 	case http.StatusNotFound:
-		drainClose(resp.Body)
 		return false, "", nil
 	default:
-		drainClose(resp.Body)
 		return false, "", fmt.Errorf("image inspect returned %d", resp.StatusCode)
 	}
 }
@@ -263,6 +264,7 @@ func (e *Engine) post(ctx context.Context, path string, body io.Reader, contentT
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 	return decodeJSON(resp, out)
 }
 
@@ -315,7 +317,7 @@ func (e *Engine) putArchive(ctx context.Context, containerID, target string, arc
 	if err != nil {
 		return err
 	}
-	defer drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
 		return fmt.Errorf("archive upload to %s returned %d: %s", target, resp.StatusCode, strings.TrimSpace(string(body)))
@@ -433,7 +435,10 @@ func (e *Engine) Run(ctx context.Context, volName string, spec RunSpec) (RunResu
 	var stopOnce sync.Once
 	stopContainer := func() {
 		stopOnce.Do(func() {
-			_, _ = e.do(ctx, http.MethodPost, "/containers/"+out.ContainerID+"/kill", "", nil)
+			if resp, killErr := e.do(ctx, http.MethodPost, "/containers/"+out.ContainerID+"/kill", "", nil); killErr == nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+				_ = resp.Body.Close()
+			}
 			_ = e.RemoveContainer(ctx, out.ContainerID)
 		})
 	}
@@ -483,6 +488,7 @@ func (e *Engine) waitForExit(parent context.Context, id string, timeout time.Dur
 		if err != nil {
 			return msg, err
 		}
+		defer resp.Body.Close()
 		err = decodeJSON(resp, &msg)
 		return msg, err
 	}
@@ -500,7 +506,8 @@ func (e *Engine) waitForExit(parent context.Context, id string, timeout time.Dur
 	killCtx, kcancel := context.WithTimeout(parent, 5*time.Second)
 	resp, killErr := e.do(killCtx, http.MethodPost, "/containers/"+id+"/kill", "", nil)
 	if killErr == nil {
-		drainClose(resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		_ = resp.Body.Close()
 	}
 	kcancel()
 
@@ -523,7 +530,7 @@ func (e *Engine) ContainerLogs(ctx context.Context, id string, capBytes int64) (
 	if err != nil {
 		return "", false, err
 	}
-	defer drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
 		return "", false, fmt.Errorf("logs returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -577,7 +584,7 @@ func (e *Engine) CollectOutput(ctx context.Context, id, target string, capBytes 
 	if err != nil {
 		return nil, err
 	}
-	defer drainClose(resp.Body)
+	defer resp.Body.Close()
 	files := make(map[string][]byte)
 	if resp.StatusCode == http.StatusNotFound {
 		return files, nil // no output written
@@ -627,7 +634,7 @@ func (e *Engine) RemoveContainer(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotFound {
 		return nil
 	}
@@ -641,7 +648,7 @@ func (e *Engine) VolumeRemove(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
 		return nil
 	}
@@ -656,12 +663,4 @@ func mustJSON(v any) []byte {
 		panic(fmt.Sprintf("sidecar: fixed server payload failed to marshal: %v", err))
 	}
 	return b
-}
-
-func drainClose(body io.ReadCloser) {
-	if body == nil {
-		return
-	}
-	defer body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(body, 4<<10))
 }

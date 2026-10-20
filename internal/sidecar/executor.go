@@ -626,7 +626,7 @@ func (s *Server) fetchResource(ctx context.Context, ref InputRef) ([]byte, *apiE
 	if err != nil {
 		return nil, &apiError{Status: http.StatusBadGateway, Code: CodeResourceUnavailable, Message: "resource fetch failed: orchestrator did not answer"}
 	}
-	defer drainClose(resp.Body)
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, &apiError{Status: http.StatusBadGateway, Code: CodeResourceUnavailable, Message: fmt.Sprintf("resource fetch failed: status %d", resp.StatusCode)}
 	}

@@ -307,7 +307,7 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file_uri | string | Yes | `res://` upload token (also accepted: `image_path`, HTTP/HTTPS URL, or a local path such as `/data/uploads/image.jpg`) |
+| image_path | string | Yes | Image to analyze: `res://` upload token, HTTP/HTTPS URL, or a local path such as `/data/uploads/image.jpg` |
 | task | string | Yes | `ocr`, `describe`, `extract_entities`, `answer` |
 | question | string | Conditional | Required for `answer` task |
 | provider | string | No | `ollama` (default), `vision`, `openrouter`, `openai`, `anthropic`, `deepseek`, or a full URL |
@@ -379,16 +379,15 @@ Compares two versions of a document or regulation.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| file_uri_1 | string | Yes | `res://` upload token of the OLD version |
-| file_uri_2 | string | Yes | `res://` upload token of the NEW version |
+| __files__ | array | Yes | Exactly 2 entries: `[0]` = old version, `[1]` = new version. Each is `{url: "res://<token>" or http(s) URL (SSRF-validated), name: "file.ext"}`; a plain uri string is also tolerated |
 | focus | string | No | Optional focus area |
-| output_format | string | No | `markdown` or `structured` |
+| output_format | string | No | `markdown` (default) or `structured` |
 
-Also accepts `__files__` (older clients): exactly 2 entries, `[0]=old`, `[1]=new`,
-either dicts `{url: "res://...", name: "..."}` or plain uri strings. Each `res://`
-token is read at most once per call; a token reused or older than 5 minutes makes
-the tool fail with a "Resource token invalid (single-use, 5-minute TTL) ..."
-error asking for a re-upload
+Server-side `res://` tokens are single-use with a 5-minute TTL: each `res://`
+uri is read at most once per call (a repeated attachment — the same uri in
+both slots — resolves once internally). A token reused across calls or already
+expired makes the tool fail with a "Resource token invalid (single-use,
+5-minute TTL) ..." error asking for a re-upload
 (see [Resource resolution flow](#resource-resolution-flow)).
 
 ---

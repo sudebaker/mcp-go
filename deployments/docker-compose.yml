@@ -189,21 +189,91 @@ services:
       - "network.security=internal"
       - "network.description=Base de datos vectorial (KB)"
 
+  # ─── whisper ───
+  # El servicio `whisper` vive SOLO en mcp-internal (internal: true): no tiene
+  # salida a internet. Si el volumen `whisper-models` está vacío, faster-whisper
+  # no puede bajar el modelo y el loader de huggingface_hub pasa a modo offline:
+  # HTTP 500 con
+  #   LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder
+  #   ... and outgoing traffic has been disabled
+  # (medido por QA en el contenedor de epicteto el 2026-10-20). No era un bug del
+  # server: era el aislamiento de red + caché vacía.
+  #
+  # Diseño: un servicio de UN SOLO USO (`whisper-model-fetch`), en mcp-external,
+  # baja el modelo al volumen compartido; `whisper` espera a que termine con
+  # éxito y arranca en offline explícito (`HF_HUB_OFFLINE=1`) leyendo de ese
+  # volumen. Así whisper sigue sin poder salir a internet y el modelo solo se
+  # descarga una vez (las siguientes subidas solo validan, ~2 s).
+  whisper-model-fetch:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: whisper-model-fetch
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface
+      # Descarga permitida SOLO aquí.
+      HF_HUB_OFFLINE: "0"
+      WHISPER_MODEL_ID: ${WHISPER_MODEL_ID:-Systran/faster-whisper-small}
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    networks:
+      - mcp-external
+    entrypoint: ["/root/faster-whisper-server/.venv/bin/python"]
+    command:
+      - "-c"
+      - |
+        import os
+        from huggingface_hub import snapshot_download
+        repo = os.environ["WHISPER_MODEL_ID"]
+        print(f"whisper: bajando {repo} a {os.environ['HF_HOME']}", flush=True)
+        print(f"whisper: modelo disponible en {snapshot_download(repo_id=repo)}", flush=True)
+    # Un solo uso. Si falla (HF caído), `up -d` falla y whisper no arranca: es el
+    # comportamiento que queremos, un whisper sin modelo responde 500 en silencio.
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          # 2G: descarga ~484 MB en streaming; con menos margen un OOM aquí deja
+          # whisper sin modelo. Medido: pico de RSS bajo, pero no se aprieta.
+          memory: 2G
+    labels:
+      - "network.security=external"
+      - "network.description=Descarga única del modelo de whisper (no sirve tráfico)"
+
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: whisper
     environment:
-      WHISPER_MODEL: Systran/faster-whisper-small
-      WHISPER_DEVICE: cpu
-      WHISPER_COMPUTE_TYPE: int8
+      # La config del server es pydantic con env_nested_delimiter="__": el modelo y
+      # la device se fijan con DOBLE barra baja. `WHISPER_MODEL=...` (una sola) se
+      # ignoraba en silencio y el server corría con los defaults de la imagen.
+      WHISPER__MODEL: ${WHISPER_MODEL_ID:-Systran/faster-whisper-small}
+      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__COMPUTE_TYPE: int8
       HF_HOME: /root/.cache/huggingface
       HUGGINGFACE_HUB_CACHE: /root/.cache/huggingface
+      # Offline a propósito: el modelo ya está en el volumen. Si falta, el error
+      # sale inmediato y claro en vez de tras un timeout de red.
+      HF_HUB_OFFLINE: "1"
     volumes:
       - whisper-models:/root/.cache/huggingface
     networks:
       - mcp-internal
+    depends_on:
+      whisper-model-fetch:
+        condition: service_completed_successfully
     command: ["/root/faster-whisper-server/.venv/bin/uvicorn", "--factory", "faster_whisper_server.main:create_app", "--host", "${WHISPER_BIND_HOST:-0.0.0.0}", "--port", "8000"]
     restart: unless-stopped
+    healthcheck:
+      # Liveness, NO prueba de modelo: /health responde 200 aunque el modelo no se
+      # pueda cargar (la carga es perezosa, en la primera transcripción). El gate
+      # real del modelo es una transcripción, ver RUNBOOK §7.
+      # Sin curl en la imagen: se usa el python del venv.
+      test: ["CMD", "/root/faster-whisper-server/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:

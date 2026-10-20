@@ -147,3 +147,79 @@ No se tocan volúmenes (`postgres`, `rustfs`): no hay pérdida de datos en el
 rollback. Lo único que sobrevive al rollback es la migración
 `003_admin_audit.sql` — es aditiva e idempotente, y una versión anterior del
 binario la ignora.
+
+## 7. Modelo de whisper (primer arranque y gate real)
+
+`whisper` **no puede salir a internet**: vive solo en `mcp-internal` (`internal:
+true`). Antes de este cambio, con el volumen `whisper-models` vacío, faster-whisper
+no tenía de dónde cargar el modelo y `huggingface_hub` entraba en modo offline:
+
+```
+LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the
+specified revision on the local disk and outgoing traffic has been disabled
+```
+
+Eso es lo que devolvía el tool `transcribe` como HTTP 500 (medido en el
+contenedor de epicteto, 2026-10-20). El error no venía del server: venía del
+aislamiento de red con la caché vacía.
+
+Qué hace ahora el compose:
+
+| | |
+|---|---|
+| modelo | `WHISPER_MODEL_ID` (`deployments/.env`, default `Systran/faster-whisper-small`) |
+| de dónde | HuggingFace (`huggingface.co`), repo CTranslate2 de faster-whisper |
+| quién lo baja | `whisper-model-fetch` — servicio de un solo uso, en `mcp-external`, escribe en el volumen `whisper-models` (`/root/.cache/huggingface`) |
+| quién lo usa | `whisper`, en `mcp-internal`, con `HF_HUB_OFFLINE=1`; arranca después de que el fetch termine con éxito (`depends_on: service_completed_successfully`) |
+
+Consecuencias operativas:
+
+- `docker compose up -d` ejecuta el fetch antes de arrancar `whisper`. Si
+  HuggingFace no responde, el fetch sale ≠ 0 y **`whisper` no arranca**: falla
+  ruidoso en vez de servir 500 en silencio. Es intencionado.
+- Segunda pasada del fetch con la caché ya poblada: ~1 s (solo valida). Primera,
+  con `faster-whisper-small` (~484 MB), ~20 s.
+- No hace falta token de HuggingFace: el modelo es público. Si algún día se usa
+  uno con acceso restringido, el token va en `.env` como `HF_TOKEN` (nunca en el
+  repo ni en el compose).
+
+### Verificación del primer arranque
+
+```bash
+cd deployments
+docker compose up -d whisper                      # arrastra whisper-model-fetch
+docker compose ps whisper-model-fetch             # STATUS: Exited (0)
+docker compose logs --tail 3 whisper-model-fetch  # "... modelo disponible en /root/.cache/huggingface/models--Systran--faster-whisper-small/snapshots/<sha>"
+docker compose ps whisper                         # STATUS: Up ... (healthy)
+```
+
+El `healthcheck` de `whisper` es de **liveness, no de modelo**: `/health` responde
+200 aunque el modelo no se pueda cargar (la carga es perezosa, en la primera
+transcripción). No lo uses como gate del tool. Tampoco sirve `/v1/models`: en esta
+imagen (`fedirz/faster-whisper-server:latest-cpu`, speaches 1.0.3) devuelve **500**
+con y sin modelo.
+
+Gate real = una transcripción por el endpoint que usa el tool
+(`POST /v1/audio/transcriptions`, ver `tools/transcribe/main.py`). Se puede lanzar
+desde el propio orquestador, que tiene `curl` y ve a `whisper` por `mcp-internal`:
+
+```bash
+# wav de 2 s en el host
+ffmpeg -y -f lavfi -i "sine=frequency=440:duration=2" -ar 16000 -ac 1 /tmp/gate.wav
+docker cp /tmp/gate.wav mcp-orchestrator:/tmp/gate.wav
+docker exec mcp-orchestrator curl -s -w '\nHTTP %{http_code}\n' \
+  -F file=@/tmp/gate.wav -F model=${WHISPER_MODEL_ID:-Systran/faster-whisper-small} \
+  http://whisper:8000/v1/audio/transcriptions
+```
+
+Esperado: `HTTP 200` y un JSON `{"text": "..."}` (con un tono puro el texto es
+vacío o basura; lo que se está verificando es que **no** hay 500). Antes del
+cambio esta misma llamada devolvía 500 con el `LocalEntryNotFoundError` de arriba.
+
+### Rollback
+
+`git revert <sha>` del commit del compose + `docker compose up -d whisper`. El
+volumen `whisper-models` **no** se toca: revertir el compose lo deja huérfano pero
+inocuo (y sigue teniendo el modelo, así que un redeploy posterior no vuelve a
+descargar).
+

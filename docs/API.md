@@ -254,6 +254,27 @@ Executes a specific tool with provided arguments.
 
 ## Available Tools
 
+### File arguments (`__files__`)
+
+Tools that take documents (`batch_summarize`, `document_classifier`,
+`regulation_diff`, `config_auditor`, ...) receive them as `__files__`, an array
+of objects:
+
+```json
+{"__files__": [{"url": "file:///data/uploads/contrato.pdf", "name": "contrato.pdf"}]}
+```
+
+Each `url` may be:
+
+| Form | Use |
+|------|-----|
+| `file:///data/...` | File already present inside the container under `/data` (a previous tool output, a mounted file, or one an operator placed there). Resolved locally, no network call. Paths outside `/data`, and symlinks that resolve outside it, are rejected. |
+| `res://<token>` | Opaque handle returned by `POST /upload` and `resources/list`. Short-lived; fetched from the internal `/internal/resource/{token}` endpoint. |
+| `http(s)://...` | Public download link or a **complete** S3 presigned URL. Private, loopback, link-local and cloud-metadata addresses are blocked by the SSRF guard, so a presigned URL pointing at a LAN address must be fetched through `res://` (or `file://` if the file is inside `/data`) instead. |
+
+A presigned URL only works while its `X-Amz-Signature` query parameter is
+intact: copy the whole URL, never a shortened form.
+
 ### echo
 
 Simple text echo for testing.
@@ -521,11 +542,17 @@ Interacts with RustFS/S3 storage for file operations.
 | max_keys | integer | No | Max items to return (default: 100) |
 | expiry | integer | No | URL expiry in seconds for download (default: 3600) |
 
+The presigned URL is returned in `structured_content.presigned_url` and, in
+full, in the human-readable `text` of the response — never shortened. S3
+authenticates the URL through its `X-Amz-*` query parameters, so any
+truncation drops `X-Amz-Signature` and storage answers `403`.
+
 ---
 
 ### POST /upload
 
-Uploads a file to the server for temporary storage. Files are stored in `/data/uploads/` with configurable TTL.
+Uploads a file into the caller's namespace in RustFS and returns an opaque
+`res://` handle that the file-argument tools accept directly.
 
 **Request:**
 ```
@@ -536,8 +563,6 @@ X-Session-ID: <session id>             (required) - decides the namespace; it mu
 
 FormData:
   - file: (required) binary file
-  - ttl: (optional) seconds until expiration (default: 3600, max: 86400)
-  - collection: (optional) subdirectory for organization
 ```
 
 The upload lands in the namespace of the MCP session named by `X-Session-ID`. The server resolves
@@ -550,13 +575,16 @@ of its own, `user_id: legacy-upload`).
 ```json
 {
   "success": true,
-  "path": "/data/uploads/vision/abc123def456.jpg",
-  "filename": "screenshot.jpg",
+  "uri": "res://3f9c1d...",
+  "sha256": "9b7c1e0d4f2a...",
   "size": 81087,
   "content_type": "image/jpeg",
-  "expires_at": "2026-05-17T12:00:00Z"
+  "name": "screenshot.jpg"
 }
 ```
+
+The `res://` token is short-lived (5 minutes): hand it to the tool that consumes
+the file right away, and upload again rather than retrying with a stale token.
 
 **Response (413 - File too large):**
 ```json

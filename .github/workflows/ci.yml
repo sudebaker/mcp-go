@@ -151,17 +151,22 @@ jobs:
       # Verde en pip install no prueba que las dependencias IMPORTEN en 3.14
       # (ruedas cp314, libmagic1 para python-magic, torch CPU). Sin este paso
       # la imagen puede romperse en el primer tool que use pandas/cv2/weasyprint.
+      # PIL/pillow se comprueba aquí también: los tools document_fingerprint,
+      # metadata_extractor, stego_detector y vision_ocr importan PIL al arrancar.
       # --entrypoint python: el entrypoint es /app/mcp-server, un `run` normal
       # arrancaría el servidor en vez de ejecutar el intérprete.
       - name: Arranque del intérprete — imports críticos
         run: |
           docker run --rm --entrypoint python mcp-go:ci -c "
           import sys, pandas, numpy, cv2, torch, weasyprint, magic
+          from PIL import Image
+          import PIL
           print('python', sys.version.split()[0], '| pandas', pandas.__version__,
                 '| numpy', numpy.__version__, '| cv2', cv2.__version__,
                 '| torch', torch.__version__, '| weasyprint', weasyprint.__version__,
-                '| magic ok')
+                '| pillow', PIL.__version__, '| magic ok')
           "
+          test "$(docker run --rm --entrypoint python mcp-go:ci -c 'import PIL; print(PIL.__version__.split(".")[0])')" = "13"
       # Puerta: ningún CRITICAL. Es la convención de la casa.
       - name: Trivy — CRITICAL (bloqueante)
         uses: aquasecurity/trivy-action@v0.36.0

@@ -48,6 +48,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip before anything is resolved: this base image ships pip 26.2.1,
+# whose vendored certifi copy is 2026.06.17 (GHSA-6q48-6c7w-9gw2, CRITICAL —
+# Trivy scans pip's vendored certifi and blocks the PR on it; the app's own
+# certifi from requirements is already fixed and irrelevant here). 26.2.2
+# vendors certifi 2026.10.19. Floor only: always take the newest pip so the
+# vendored cert set stays fresh.
+RUN pip install --no-cache-dir --upgrade 'pip>=26.2.2'
+
 # Stage 3: Install Python dependencies
 FROM python-base AS python-deps
 
@@ -82,6 +90,7 @@ docker>=7.0.0
 
 # Vision/OCR
 opencv-python-headless>=4.11,<5.0
+# Keep this floor fastembed-compatible (see the pillow bump RUN below).
 pillow>=10.0.0
 pytesseract>=0.3.10
 
@@ -121,6 +130,19 @@ EOF
 # (torch 2.9.0+ is the first with cp314; torchaudio stops at 2.11.0, so torch stays at 2.11.0).
 RUN pip install --no-cache-dir torch==2.11.0+cpu torchvision==0.26.0+cpu torchaudio==2.11.0+cpu --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
+
+# CVE-2026-112403 (CRITICAL, fixed in Pillow 13.0.0): this explicit bump replaces
+# the pillow 12.3.0 that the torch line pulls (download.pytorch.org/whl/cpu lags
+# PyPI and tops out at 12.3.0). It must NOT be a `pillow>=13.0.0` pin in
+# requirements.txt above: fastembed — up to its newest release 0.9.0 — declares
+# `pillow<13.0,>=12.0.0` on py>=3.14, so a hard pin there leaves the resolver
+# without a valid fastembed and the build dies winding some unrelated package.
+# The cap is stale upstream; the embedding models here are text-only and never
+# import pillow. Pillow itself ships no runtime deps, so this upgrade is a
+# straight in-place replace with no backtracking. Guards against regression:
+# Trivy CRITICAL gate + major==13 check in the CI interpreter-import step. When
+# a fastembed release allows pillow>=13, this line can be dropped.
+RUN pip install --no-cache-dir 'pillow>=13.0.0,<14.0.0'
 
 # Pre-download and cache embedding models for offline use
 # fastembed stores models in ~/.cache/fastembed/ (ONNX weights)

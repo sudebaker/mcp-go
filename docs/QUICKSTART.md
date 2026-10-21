@@ -136,9 +136,9 @@ curl -s -X POST http://127.0.0.1:8080/upload \
 ```
 
 El token `res://` se resuelve en el servidor (`GET /internal/resource/{token}`,
-con `Authorization: Bearer $SANDBOX_API_TOKEN`). En el código actual es de **un
-solo uso y caduca a los 5 minutos**: reutilizarlo en otra llamada falla y hay
-que volver a subir el fichero. `audio/wav` se rechaza con 415 (comprobación de
+con `Authorization: Bearer $SANDBOX_API_TOKEN`). El token es **multi-uso** y
+caduca a los **60 minutos** (3600 s): se puede leer en varias llamadas mientras
+siga vivo; pasado el TTL hay que volver a subir el fichero. `audio/wav` se rechaza con 415 (comprobación de
 magic bytes): para audio usa `audio_base64` de `transcribe`.
 
 Rutas dentro de los contenedores:

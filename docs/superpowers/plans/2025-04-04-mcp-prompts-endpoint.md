@@ -44,7 +44,7 @@ tests/
 - [ ] **Step 1: Read config.go to understand current structure**
 
 ```bash
-wc -l /home/hp/Proyectos/mcp-go/internal/config/config.go
+wc -l <ruta-del-repo>/internal/config/config.go
 # Should be ~243 lines
 ```
 
@@ -100,7 +100,7 @@ The struct should now have fields: Server, Execution, Tools, Prompts (in that or
 - [ ] **Step 4: Verify edits compile**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go build ./cmd/server
+cd <ruta-del-repo> && go build ./cmd/server
 ```
 
 Expected: No compilation errors.
@@ -108,7 +108,7 @@ Expected: No compilation errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add internal/config/config.go && git commit -m "config: add PromptConfig types for YAML prompts"
+cd <ruta-del-repo> && git add internal/config/config.go && git commit -m "config: add PromptConfig types for YAML prompts"
 ```
 
 ---
@@ -280,7 +280,7 @@ func interpolateTemplate(template string, args map[string]string) string {
 - [ ] **Step 5: Verify the file is syntactically correct**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go build ./internal/prompts
+cd <ruta-del-repo> && go build ./internal/prompts
 ```
 
 Expected: No compilation errors.
@@ -288,7 +288,7 @@ Expected: No compilation errors.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add internal/prompts/prompts.go && git commit -m "feat: add prompts module with interpolation logic"
+cd <ruta-del-repo> && git add internal/prompts/prompts.go && git commit -m "feat: add prompts module with interpolation logic"
 ```
 
 ---
@@ -309,7 +309,7 @@ At line 16 (after other internal imports), add:
 The imports section should have three groups:
 1. stdlib (context, encoding/json, etc.)
 2. external (github.com packages)
-3. internal (amphora packages including new prompts)
+3. internal (this module's packages, including the new prompts endpoint)
 
 - [ ] **Step 2: Enable prompt capability in MCPServer creation**
 
@@ -343,7 +343,7 @@ After the tool registration loop (after line 92), add:
 - [ ] **Step 4: Verify compilation**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go build -o bin/mcp-server ./cmd/server
+cd <ruta-del-repo> && go build -o bin/mcp-server ./cmd/server
 ```
 
 Expected: Binary created at `bin/mcp-server`.
@@ -351,7 +351,7 @@ Expected: Binary created at `bin/mcp-server`.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add cmd/server/main.go && git commit -m "feat: enable and register MCP prompts capability"
+cd <ruta-del-repo> && git add cmd/server/main.go && git commit -m "feat: enable and register MCP prompts capability"
 ```
 
 ---
@@ -383,7 +383,7 @@ The comment at line 407-408 already describes the root endpoint. No changes need
 - [ ] **Step 3: Verify no compilation errors**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go build ./internal/transport
+cd <ruta-del-repo> && go build ./internal/transport
 ```
 
 Expected: No errors.
@@ -391,7 +391,7 @@ Expected: No errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add internal/transport/sse.go && git commit -m "docs: add prompts/list and prompts/get to endpoint documentation"
+cd <ruta-del-repo> && git add internal/transport/sse.go && git commit -m "docs: add prompts/list and prompts/get to endpoint documentation"
 ```
 
 ---
@@ -404,7 +404,7 @@ cd /home/hp/Proyectos/mcp-go && git add internal/transport/sse.go && git commit 
 - [ ] **Step 1: Read current config.yaml to understand structure**
 
 ```bash
-head -50 /home/hp/Proyectos/mcp-go/configs/config.yaml
+head -50 <ruta-del-repo>/configs/config.yaml
 ```
 
 Expected: See server and execution configuration sections.
@@ -487,7 +487,7 @@ prompts:
 - [ ] **Step 3: Verify YAML syntax is valid**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go run -run TestLoadConfig ./internal/config cmd/server -config configs/config.yaml 2>&1 | head -20
+cd <ruta-del-repo> && go run -run TestLoadConfig ./internal/config cmd/server -config configs/config.yaml 2>&1 | head -20
 ```
 
 Or manually check with:
@@ -500,7 +500,7 @@ Expected: Valid YAML with proper indentation.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add configs/config.yaml && git commit -m "docs: add prompt configuration examples"
+cd <ruta-del-repo> && git add configs/config.yaml && git commit -m "docs: add prompt configuration examples"
 ```
 
 ---
@@ -759,19 +759,19 @@ func TestRequiredArgumentValidation(t *testing.T) {
 - [ ] **Step 6: Verify tests compile**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go test -compile prompts_test.go 2>&1 | grep -E "^(PASS|FAIL|ok)"
+cd <ruta-del-repo> && go test -compile prompts_test.go 2>&1 | grep -E "^(PASS|FAIL|ok)"
 ```
 
 Or run the tests:
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go test ./tests -v -run Prompt 2>&1 | head -50
+cd <ruta-del-repo> && go test ./tests -v -run Prompt 2>&1 | head -50
 ```
 
 - [ ] **Step 7: Commit tests**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git add tests/prompts_test.go && git commit -m "test: add integration tests for prompts endpoint"
+cd <ruta-del-repo> && git add tests/prompts_test.go && git commit -m "test: add integration tests for prompts endpoint"
 ```
 
 ---
@@ -784,7 +784,7 @@ cd /home/hp/Proyectos/mcp-go && git add tests/prompts_test.go && git commit -m "
 - [ ] **Step 1: Build the server**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go build -o bin/mcp-server ./cmd/server
+cd <ruta-del-repo> && go build -o bin/mcp-server ./cmd/server
 ```
 
 Expected: Binary created successfully.
@@ -792,7 +792,7 @@ Expected: Binary created successfully.
 - [ ] **Step 2: Run all tests**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go test ./... -v 2>&1 | tail -30
+cd <ruta-del-repo> && go test ./... -v 2>&1 | tail -30
 ```
 
 Expected: All tests pass (or show which tests are skipped due to missing dependencies).
@@ -800,7 +800,7 @@ Expected: All tests pass (or show which tests are skipped due to missing depende
 - [ ] **Step 3: Format and vet code**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && go fmt ./... && go vet ./...
+cd <ruta-del-repo> && go fmt ./... && go vet ./...
 ```
 
 Expected: No output (no formatting or vet issues).
@@ -808,7 +808,7 @@ Expected: No output (no formatting or vet issues).
 - [ ] **Step 4: Final commit and review**
 
 ```bash
-cd /home/hp/Proyectos/mcp-go && git log --oneline -10
+cd <ruta-del-repo> && git log --oneline -10
 ```
 
 Expected: See all 7 commits for prompts implementation.

@@ -30,14 +30,23 @@ go build -gcflags=all=-d=warf=1 -o bin/mcp-server-debug ./cmd/server
 ### Run Locally (without Docker)
 
 ```bash
-# Set environment variables
-export LLM_API_URL=http://localhost:11434
+# configs/config.yaml resolves these at load time:
+export MCP_AUTH_MODE=off          # local only: no bearer required, no keyring needed
+export TOOLS_DIR="$PWD/tools"     # the config default is /app/tools (image path)
+export LLM_API_URL=http://localhost:11434   # optional for boot
 export LLM_MODEL=llama3
-export DATABASE_URL=postgresql://mcp:mcp@localhost:5432/knowledge
+export DATABASE_URL=postgresql://mcp:<password>@localhost:5432/knowledge  # optional
 
-# Run the server
+# execution.working_dir in configs/config.yaml is /data and must be writable,
+# or the server aborts with "working directory not writable":
+sudo mkdir -p /data && sudo chown "$USER" /data   # or copy the config and change working_dir
+
 ./bin/mcp-server -config configs/config.yaml
 ```
+
+With `MCP_AUTH_MODE=off` the keyring entries are not resolved, so
+`MCP_AUTH_KEY`/`MCP_UPLOAD_API_KEY` are not needed. Any other mode requires both
+variables set to non-placeholder tokens, or startup aborts.
 
 ### Run Tests
 
@@ -235,7 +244,7 @@ string.
 
 4. **Restart server:**
    ```bash
-   docker-compose restart mcp-server
+   docker compose restart mcp-server
    ```
 
 ---
@@ -269,7 +278,7 @@ curl -X POST http://localhost:8080/mcp \
 
 ```bash
 cd deployments
-docker-compose up -d
+docker compose up -d
 ```
 
 ### View Logs
@@ -289,11 +298,11 @@ docker logs mcp-orchestrator | grep "Request completed" | jq '.path'
 
 ```bash
 # Restart MCP server
-docker-compose restart mcp-server
+docker compose restart mcp-server
 
 # Rebuild and restart
-docker-compose build mcp-server
-docker-compose up -d mcp-server
+docker compose build mcp-server
+docker compose up -d mcp-server
 
 # Access container
 docker exec -it mcp-orchestrator bash
@@ -398,4 +407,4 @@ Follow guidelines in `AGENTS.md`:
 
 - [API Reference](API.md) - Complete API documentation
 - [Logging](LOGGING.md) - HTTP request logging
-- [Usage Guide](../USAGE.md) - User-facing documentation
+- [Usage Guide(USAGE.md) - User-facing documentation

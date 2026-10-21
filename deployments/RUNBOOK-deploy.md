@@ -40,9 +40,10 @@ despliegue, esta tabla cambia (dep opcional → `degraded` + 200) y hay que
 actualizarla: es frontera devops.
 
 Un 503 por `ollama`/`searxng` **era** la norma hasta `7f91291` por otro motivo:
-el `.env` apuntaba a `mac-mini.home` y a `localhost:8081`, que no resuelven
-desde el contenedor (el compose fuerza dns `8.8.8.8`/`1.1.1.1`). Ya está
-corregido en el `.env` del host (IP de `mac-mini.home` y `http://searxng:8080`).
+el `.env` apuntaba a un nombre de host de la LAN y a un `localhost:<puerto>` del
+host, que no resuelven desde el contenedor (el compose fuerza dns
+`8.8.8.8`/`1.1.1.1`). Ya está corregido en el `.env` del host (IP del host del
+modelo y `http://searxng:8080`).
 
 `dependencies` da el estado de cada check con los mismos valores
 (`healthy`/`degraded`/`unhealthy`): *qué* dependencia se cayó se lee ahí, no en
@@ -102,8 +103,16 @@ deployments/scripts/preflight-env.sh          # verde antes de seguir
 ## 3. Migraciones (paso explícito, nunca al arrancar)
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deployments/migrations/003_admin_audit.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' \
+  < deployments/migrations/003_admin_audit.sql
 ```
+
+`DATABASE_URL` no está en `.env` (la construye el compose), así que un
+`psql "$DATABASE_URL"` desde el host sale con la variable vacía. El contenedor
+`postgres` sí tiene `POSTGRES_USER`/`POSTGRES_DB` en su entorno. Además, el
+servidor crea `admin_audit_log` al arrancar (`AdminHandler.SetupMigrations`), de
+modo que este paso solo es necesario para el índice de `kb_documents`, que
+requiere que la tabla exista ya (la crea el primer `kb_ingest`).
 
 Las migraciones del repo son idempotentes (`IF NOT EXISTS`), así que repetirlas
 no duplica nada.
@@ -202,7 +211,7 @@ specified revision on the local disk and outgoing traffic has been disabled
 ```
 
 Eso es lo que devolvía el tool `transcribe` como HTTP 500 (medido en el
-contenedor de epicteto, 2026-10-20). El error no venía del server: venía del
+contenedor del servidor, 2026-10-20). El error no venía del server: venía del
 aislamiento de red con la caché vacía.
 
 **Directriz del jefe: air-gapped estricto.** Por eso el modelo **no** se baja en
@@ -320,8 +329,8 @@ imagen ya presente y el gate de transcripción de arriba.
 
 ### Volumen huérfano
 
-El diseño anterior montaba el volumen `deployments_whisper-models` (vacío en
-epicteto: nunca se llegó a ejecutar el fetch). Con el modelo en la imagen ese
+El diseño anterior montaba el volumen `deployments_whisper-models` (vacío en el
+host: nunca se llegó a ejecutar el fetch). Con el modelo en la imagen ese
 volumen **no se usa** y el compose ya no lo declara. Queda huérfano e inocuo; se
 puede borrar aparte, con OK del dueño y sólo cuando no haya contenedores que lo
 monten:

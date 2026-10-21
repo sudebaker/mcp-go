@@ -100,7 +100,7 @@ class TestContentSanitizer(unittest.TestCase):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/hp/Proyectos/mcp-go && python -m pytest tests/tools/common/test_content_sanitizer.py -v`
+Run: `cd <ruta-del-repo> && python -m pytest tests/tools/common/test_content_sanitizer.py -v`
 Expected: FAIL with "ModuleNotFoundError: No module named 'content_sanitizer'"
 
 - [ ] **Step 3: Write minimal implementation**
@@ -162,7 +162,7 @@ def sanitize_external_content(text: str) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/hp/Proyectos/mcp-go && python -m pytest tests/tools/common/test_content_sanitizer.py -v`
+Run: `cd <ruta-del-repo> && python -m pytest tests/tools/common/test_content_sanitizer.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -216,7 +216,7 @@ Change to:
 
 - [ ] **Step 3: Run existing tests to ensure no regression**
 
-Run: `cd /home/hp/Proyectos/mcp-go && python -m pytest tests/ -v -k "web" --tb=short 2>/dev/null || echo "No web-specific tests found"`
+Run: `cd <ruta-del-repo> && python -m pytest tests/ -v -k "web" --tb=short 2>/dev/null || echo "No web-specific tests found"`
 Expected: No failures related to web_scraper
 
 - [ ] **Step 4: Commit**
@@ -266,7 +266,7 @@ Change to:
 
 - [ ] **Step 3: Run existing tests to ensure no regression**
 
-Run: `cd /home/hp/Proyectos/mcp-go && python -m pytest tests/ -v -k "browser" --tb=short 2>/dev/null || echo "No browser-specific tests found"`
+Run: `cd <ruta-del-repo> && python -m pytest tests/ -v -k "browser" --tb=short 2>/dev/null || echo "No browser-specific tests found"`
 Expected: No failures related to browser_scraper
 
 - [ ] **Step 4: Commit**
@@ -285,12 +285,12 @@ git commit -m "security: apply content sanitization to browser_scraper output"
 
 - [ ] **Step 1: Run security tests**
 
-Run: `cd /home/hp/Proyectos/mcp-go && python -m pytest tests/test_security_mitigations.py -v`
+Run: `cd <ruta-del-repo> && python -m pytest tests/test_security_mitigations.py -v`
 Expected: PASS
 
 - [ ] **Step 2: Run all tests**
 
-Run: `cd /home/hp/Proyectos/mcp-go && go fmt ./... && go vet ./... && python -m pytest tests/ -v --tb=short 2>&1 | head -100`
+Run: `cd <ruta-del-repo> && go fmt ./... && go vet ./... && python -m pytest tests/ -v --tb=short 2>&1 | head -100`
 Expected: All tests pass
 
 - [ ] **Step 3: Commit**

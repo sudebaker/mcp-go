@@ -18,8 +18,8 @@ func testKeyring(t *testing.T, env map[string]string, entries []Entry) *Keyring 
 
 func TestKeyringAuth_MissingHeaderIs401(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "test-token-abcdef"},
+		[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 
 	nextCalled := false
@@ -50,8 +50,8 @@ func TestKeyringAuth_MissingHeaderIs401(t *testing.T) {
 
 func TestKeyringAuth_RejectsBadTokens(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "test-token-abcdef"},
+		[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 	h := KeyringAuth(k, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler behind auth must not run")
@@ -62,8 +62,8 @@ func TestKeyringAuth_RejectsBadTokens(t *testing.T) {
 		"wrong scheme":      "Basic dXNlcjpwYXNz",
 		"empty bearer":      "Bearer ",
 		"token too short":   "Bearer short",
-		"token with spaces": "Bearer amphora token abcdef",
-		"no scheme":         "amphora-token-abcdef",
+		"token with spaces": "Bearer admin token abcdef",
+		"no scheme":         "test-token-abcdef",
 	} {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
@@ -80,18 +80,18 @@ func TestKeyringAuth_RejectsBadTokens(t *testing.T) {
 // A client must never be able to claim an identity with a plain header.
 func TestKeyringAuth_CannotSpoofIdentityWithHeaders(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "test-token-abcdef"},
+		[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 	h := KeyringAuth(k, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler behind auth must not run")
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("X-User-Id", "amphora")
-	req.Header.Set("X-User-ID", "amphora")
-	req.Header.Set("X-Authenticated-User", "amphora")
-	req.Header.Set("Mcp-Session-Id", "amphora")
+	req.Header.Set("X-User-Id", "admin")
+	req.Header.Set("X-User-ID", "admin")
+	req.Header.Set("X-Authenticated-User", "admin")
+	req.Header.Set("Mcp-Session-Id", "admin")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -102,8 +102,8 @@ func TestKeyringAuth_CannotSpoofIdentityWithHeaders(t *testing.T) {
 
 func TestKeyringAuth_ValidTokenInjectsUserID(t *testing.T) {
 	k := testKeyring(t,
-		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "amphora-token-abcdef"},
-		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+		map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "test-token-abcdef"},
+		[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 	)
 
 	var gotUser, gotRequestID string
@@ -114,15 +114,15 @@ func TestKeyringAuth_ValidTokenInjectsUserID(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer amphora-token-abcdef")
+	req.Header.Set("Authorization", "Bearer test-token-abcdef")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if gotUser != "amphora" {
-		t.Errorf("expected user_id amphora in context, got %q", gotUser)
+	if gotUser != "admin" {
+		t.Errorf("expected user_id admin in context, got %q", gotUser)
 	}
 	if gotRequestID == "" {
 		t.Error("expected a request id in context")
@@ -141,7 +141,7 @@ func TestKeyringAuth_EmptyRequiredKeyringIs503(t *testing.T) {
 		nextCalled = true
 	}))
 
-	for name, header := range map[string]string{"no header": "", "valid-looking": "Bearer amphora-token-abcdef"} {
+	for name, header := range map[string]string{"no header": "", "valid-looking": "Bearer test-token-abcdef"} {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 			if header != "" {

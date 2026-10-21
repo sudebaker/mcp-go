@@ -14,7 +14,7 @@ func chainTestKeyring(t *testing.T, mode string, token string) *auth.Keyring {
 	k, err := auth.BuildKeyring(func(key string) (string, bool) {
 		v, ok := env[key]
 		return v, ok
-	}, []auth.Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}})
+	}, []auth.Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}})
 	if err != nil {
 		t.Fatalf("failed to build keyring: %v", err)
 	}
@@ -36,7 +36,7 @@ func chainTestServer(t *testing.T, k *auth.Keyring, origins []string) *MCPServer
 // CORS must wrap auth: an origin outside the allow-list is rejected before the
 // bearer token is even looked at.
 func TestMCPEndpointMiddleware_CORSRejectsOriginBeforeAuth(t *testing.T) {
-	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "amphora-token-abcdef"), []string{"https://allowed.example"})
+	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "test-token-abcdef"), []string{"https://allowed.example"})
 	h := s.mcpEndpointMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler must not run for a disallowed origin")
 	}))
@@ -52,7 +52,7 @@ func TestMCPEndpointMiddleware_CORSRejectsOriginBeforeAuth(t *testing.T) {
 }
 
 func TestMCPEndpointMiddleware_AllowedOriginStillNeedsToken(t *testing.T) {
-	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "amphora-token-abcdef"), []string{"https://allowed.example"})
+	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "test-token-abcdef"), []string{"https://allowed.example"})
 	h := s.mcpEndpointMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler must not run without a token")
 	}))
@@ -71,7 +71,7 @@ func TestMCPEndpointMiddleware_AllowedOriginStillNeedsToken(t *testing.T) {
 }
 
 func TestMCPEndpointMiddleware_AuthenticatedRequestReachesHandler(t *testing.T) {
-	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "amphora-token-abcdef"), []string{"https://allowed.example"})
+	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "test-token-abcdef"), []string{"https://allowed.example"})
 
 	var gotUser string
 	h := s.mcpEndpointMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,21 +81,21 @@ func TestMCPEndpointMiddleware_AuthenticatedRequestReachesHandler(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Origin", "https://allowed.example")
-	req.Header.Set("Authorization", "Bearer amphora-token-abcdef")
+	req.Header.Set("Authorization", "Bearer test-token-abcdef")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if gotUser != "amphora" {
-		t.Errorf("expected user_id amphora behind the chain, got %q", gotUser)
+	if gotUser != "admin" {
+		t.Errorf("expected user_id admin behind the chain, got %q", gotUser)
 	}
 }
 
 // Preflight is answered by CORS before auth runs, so browsers can negotiate.
 func TestMCPEndpointMiddleware_PreflightNeedsNoToken(t *testing.T) {
-	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "amphora-token-abcdef"), []string{"https://allowed.example"})
+	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "test-token-abcdef"), []string{"https://allowed.example"})
 	h := s.mcpEndpointMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("preflight must not reach the MCP handler")
 	}))
@@ -119,7 +119,7 @@ func TestMCPEndpointMiddleware_EmptyRequiredKeyringIs503(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer amphora-token-abcdef")
+	req.Header.Set("Authorization", "Bearer test-token-abcdef")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -149,7 +149,7 @@ func TestMCPEndpointMiddleware_ModeOffPassesThrough(t *testing.T) {
 // is one of its entries, so the upload endpoint no longer has an on/off rule of
 // its own.
 func TestUploadEndpoint_UsesTheSameKeyring(t *testing.T) {
-	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "amphora-token-abcdef"), nil)
+	s := chainTestServer(t, chainTestKeyring(t, auth.ModeRequired, "test-token-abcdef"), nil)
 
 	reached := false
 	h := s.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +167,7 @@ func TestUploadEndpoint_UsesTheSameKeyring(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/upload", nil)
-	req.Header.Set("Authorization", "Bearer amphora-token-abcdef")
+	req.Header.Set("Authorization", "Bearer test-token-abcdef")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !reached {

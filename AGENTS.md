@@ -27,7 +27,8 @@ A stack is always merged bottom-up; retarget the upper PRs to `main` with
 `gh pr edit --base` needs the `read:org` scope and fails with our token.
 
 **This repo is deployed; the server tree is production.** The running orchestrator is
-the checkout on epicteto (`/home/amphora/dockers/mcp-go`). Never edit it, never
+the production checkout on the deployment host (for example `/opt/mcp-go`). Never edit
+it, never
 `git pull` it, never restart the service without being asked. Changes reach production
 only after the PR is merged, by whoever owns the deployment.
 
@@ -209,13 +210,13 @@ hooks.AddOnUnregisterSession(func(ctx context.Context, sess server.ClientSession
 - **ReDoS**: Regex patterns pre-compiled and cached at startup
 - **Prompt injection**: Content sanitization strips injection patterns
 
-See [SECURITY.md](SECURITY.md) for details.
+See [SECURITY.md](docs/SECURITY.md) for details.
 
 ## Related Docs
 
 | Doc | Purpose |
 |-----|---------|
-| [API.md](API.md) | MCP endpoints and tool reference |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Building and adding tools |
-| [SECURITY.md](SECURITY.md) | Security mitigations |
-| [PRODUCTION.md](PRODUCTION.md) | Deployment checklist |
+| [API.md](docs/API.md) | MCP endpoints and tool reference |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Building and adding tools |
+| [SECURITY.md](docs/SECURITY.md) | Security mitigations |
+| [PRODUCTION.md](docs/PRODUCTION.md) | Deployment checklist |

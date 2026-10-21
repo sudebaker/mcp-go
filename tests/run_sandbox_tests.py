@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the sandbox tests."""
+import os
 import subprocess
 import sys
 
@@ -19,7 +20,8 @@ if result.returncode != 0:
 
 result = subprocess.run(
     [sys.executable, "-m", "pytest", "tests/test_sandbox.py", "-v"],
-    capture_output=True, text=True, cwd="/home/amphora/src/mcp-go"
+    capture_output=True, text=True,
+    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 )
 print(result.stdout)
 if result.stderr:

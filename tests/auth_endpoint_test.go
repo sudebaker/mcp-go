@@ -174,7 +174,7 @@ func postInitialize(t *testing.T, baseURL, token, assertedUser string) *http.Res
 
 func TestMCPEndpoint_RejectsRequestsWithoutToken(t *testing.T) {
 	_, baseURL := startAuthServer(t, buildKeyring(t, map[string]string{
-		"amphora": "amphora-token-abcdef",
+		"admin": "test-token-abcdef",
 	}))
 
 	// /health must stay open: the container healthcheck calls it unauthenticated.
@@ -209,8 +209,8 @@ func TestMCPEndpoint_RejectsRequestsWithoutToken(t *testing.T) {
 // asserted against the real session store.
 func TestMCPEndpoint_BindsSessionToTokenIdentity(t *testing.T) {
 	sessionStore, baseURL := startAuthServer(t, buildKeyring(t, map[string]string{
-		"amphora": "amphora-token-abcdef",
-		"bob":     "bob-token-1234567890",
+		"admin": "test-token-abcdef",
+		"bob":   "bob-token-1234567890",
 	}))
 
 	tests := []struct {
@@ -219,9 +219,9 @@ func TestMCPEndpoint_BindsSessionToTokenIdentity(t *testing.T) {
 		assertedUser string
 		wantUser     string
 	}{
-		{name: "token identity is used", token: "amphora-token-abcdef", wantUser: "amphora"},
-		{name: "client-asserted identity is ignored", token: "amphora-token-abcdef", assertedUser: "mallory", wantUser: "amphora"},
-		{name: "second user stays isolated", token: "bob-token-1234567890", assertedUser: "amphora", wantUser: "bob"},
+		{name: "token identity is used", token: "test-token-abcdef", wantUser: "admin"},
+		{name: "client-asserted identity is ignored", token: "test-token-abcdef", assertedUser: "mallory", wantUser: "admin"},
+		{name: "second user stays isolated", token: "bob-token-1234567890", assertedUser: "admin", wantUser: "bob"},
 	}
 
 	sessions := make([]string, 0, len(tests))

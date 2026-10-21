@@ -301,7 +301,7 @@ func TestPrepareJobCleanupSurvivesClientCancel(t *testing.T) {
 
 // ---- waitForExit contract (t_9f4bd493) --------------------------------------
 //
-// The FASE 2 smoke failure (analyze_data, epicteto 18:19-18:23Z): the engine
+// The FASE 2 smoke failure (analyze_data, production host, 18:19-18:23Z): the engine
 // polled /containers/{id}/wait with GET, Docker 29.4.0 answered 404 "page not
 // found", and the old mapping dressed ANY wait error as a sidecar deadline —
 // killing the container after ~1 s and answering 124 + "Execution timed out

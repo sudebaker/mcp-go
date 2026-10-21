@@ -1,7 +1,9 @@
 # Contrato de la API del sidecar de ejecución aislada — v1
 
-**Estado**: congelado (fase 1). Cualquier firma, campo o límite de este documento queda
-fijado aquí antes de que la fase 2 (devops) construya el servicio.
+**Estado**: congelado (fase 1) e **implementado**: el servicio `sandbox-sidecar`
+está en `deployments/docker-compose.yml`, y el cliente HTTP vive en
+`tools/common/sandbox.py` (se activa con `SANDBOX_API_URL`). Cualquier firma,
+campo o límite de este documento queda fijado aquí.
 **Fecha**: 2026-10-20 · **Autor**: backend · **Consumidores**: devops (fase 2, servicio),
 backend (fase 3, cliente HTTP en `tools/common/sandbox.py`).
 
@@ -505,8 +507,9 @@ Ninguna de estas variables lleva valor por defecto con secreto. El token vive en
 
 ## 11. Fuera de alcance de este contrato
 
-- Implementación del sidecar, su Dockerfile y su entrada en compose (fase 2, devops).
-- Cliente HTTP en `tools/common/sandbox.py` y retirada de `docker.from_env()` (fase 3, backend).
+- Detalles de implementación internos del sidecar más allá de lo fijado en §3–§8 (el
+  servicio, su Dockerfile y su entrada en compose ya existen: `cmd/sandbox-sidecar`,
+  `deployments/Dockerfile.sandbox-sidecar`, `deployments/docker-compose.yml`).
 - TLS/mTLS entre orquestador y sidecar; autenticación de usuarios finales (la auth de usuarios
   sigue siendo la del MCP, `docs/AUTH.md`).
 - Ejecución en Kubernetes o runners remotos: el contrato no lo impide, no lo cubre.

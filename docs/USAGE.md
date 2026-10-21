@@ -18,7 +18,7 @@ cd deployments
 docker compose up -d
 
 # alternativa
-# docker-compose up -d
+# docker compose up -d
 ```
 
 Verificacion minima:
@@ -113,7 +113,8 @@ Herramientas:
 Rutas principales dentro del contenedor `mcp-orchestrator`:
 
 - `/data/`: lectura y escritura (workspace operativo)
-- `/data/uploads/`: archivos subidos por usuarios
+- `/data/uploads/`: directorio heredado; `POST /upload` NO escribe aquí: guarda en
+  RustFS (bucket `users`) y devuelve un token `res://` multi-uso (TTL 60 min)
 - `/app/configs`, `/app/tools`, `/app/templates`: montajes de codigo/config
 
 Scripts utiles:

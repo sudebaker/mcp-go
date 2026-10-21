@@ -58,7 +58,7 @@ func postMCPModern(t *testing.T, h http.Handler, token, body string) *httptest.R
 // Against mcp-go 0.43.2 the request is refused; after the 1.2.0 bump the same
 // test asserts the identity still comes from the token.
 func TestModernStatelessToolCallNeverRunsWithoutIdentity(t *testing.T) {
-	const token = "amphora-token-abcdef"
+	const token = "test-token-abcdef"
 
 	var gotUser string
 	var ran bool
@@ -86,8 +86,8 @@ func TestModernStatelessToolCallNeverRunsWithoutIdentity(t *testing.T) {
 		if !ran {
 			t.Fatalf("200 without the tool running is an unexpected shape: %s", rec.Body.String())
 		}
-		if gotUser != "amphora" {
-			t.Fatalf("stateless call executed with user_id %q, want amphora (review #78)", gotUser)
+		if gotUser != "admin" {
+			t.Fatalf("stateless call executed with user_id %q, want admin (review #78)", gotUser)
 		}
 	} else {
 		t.Logf("transport refused the stateless request with %d (no identity leak): %s", rec.Code, strings.TrimSpace(rec.Body.String()))
@@ -112,7 +112,7 @@ func TestModernStatelessToolCallNeverRunsWithoutIdentity(t *testing.T) {
 // (2026-07-28) depends on: those requests never initialize, so no session
 // binding exists, but the request context still carries the identity.
 func TestToolCallCarriesTokenIdentityIntoHandlerContext(t *testing.T) {
-	const token = "amphora-token-abcdef"
+	const token = "test-token-abcdef"
 
 	var gotUser string
 	mcpServer := server.NewMCPServer("probe-server", "1.0.0", server.WithToolCapabilities(true))
@@ -147,8 +147,8 @@ func TestToolCallCarriesTokenIdentityIntoHandlerContext(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tools/call: expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if gotUser != "amphora" {
-		t.Errorf("tool handler context carried user_id %q, want %q", gotUser, "amphora")
+	if gotUser != "admin" {
+		t.Errorf("tool handler context carried user_id %q, want %q", gotUser, "admin")
 	}
 
 	// Without a token nothing reaches the tool at all.

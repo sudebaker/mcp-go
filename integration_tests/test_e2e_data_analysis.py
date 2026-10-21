@@ -17,7 +17,8 @@ import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools", "common"))
 
-TEST_DATA_DIR = "/home/amphora/Proyectos/mcp-go/test_data"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEST_DATA_DIR = os.path.join(REPO_ROOT, "test_data")
 EMPLOYEES_CSV = os.path.join(TEST_DATA_DIR, "empleados.csv")
 
 
@@ -49,7 +50,9 @@ def build_sandbox_image():
     """Build the sandbox Docker image."""
     print("🔨 Building sandbox Docker image...")
 
-    dockerfile = "/home/amphora/Proyectos/mcp-go/tools/data_analysis/sandbox.Dockerfile"
+    dockerfile = os.path.join(
+        REPO_ROOT, "tools", "data_analysis", "sandbox.Dockerfile"
+    )
 
     result = subprocess.run(
         [
@@ -111,7 +114,7 @@ print(result)
     start_time = time.time()
 
     result = executor.execute_with_volume(
-        code, "/home/amphora/Proyectos/mcp-go/test_data"
+        code, TEST_DATA_DIR
     )
 
     execution_time = (time.time() - start_time) * 1000

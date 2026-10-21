@@ -23,7 +23,7 @@ execution:
 
 auth:
   keys:
-    - user_id: amphora
+    - user_id: admin
       key_env: MCP_AUTH_KEY
     - user_id: legacy-upload
       key_env: MCP_UPLOAD_API_KEY
@@ -42,7 +42,7 @@ tools: []
 	if len(cfg.Auth.Keys) != 2 {
 		t.Fatalf("expected 2 auth keys, got %d", len(cfg.Auth.Keys))
 	}
-	if cfg.Auth.Keys[0].UserID != "amphora" || cfg.Auth.Keys[0].KeyEnv != "MCP_AUTH_KEY" {
+	if cfg.Auth.Keys[0].UserID != "admin" || cfg.Auth.Keys[0].KeyEnv != "MCP_AUTH_KEY" {
 		t.Errorf("unexpected first entry: %+v", cfg.Auth.Keys[0])
 	}
 	if cfg.Auth.Keys[1].UserID != "legacy-upload" || cfg.Auth.Keys[1].KeyEnv != "MCP_UPLOAD_API_KEY" {

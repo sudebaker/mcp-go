@@ -613,8 +613,8 @@ python -m pytest tests/test_security_mitigations.py -v
 
 ## Related Documentation
 
-- [API Reference](docs/API.md) - Complete endpoint documentation
-- [Development Guide](docs/DEVELOPMENT.md) - Developer setup and workflow
-- [Security Hardening](SECURITY_HARDENING.md) - Security mitigations
-- [Logging](docs/LOGGING.md) - Logging configuration
+- [API Reference(API.md) - Complete endpoint documentation
+- [Development Guide(DEVELOPMENT.md) - Developer setup and workflow
+- [Security Hardening(SECURITY.md) - Security mitigations
+- [Logging(LOGGING.md) - Logging configuration
 - [Usage Guide](USAGE.md) - Tool-specific usage examples

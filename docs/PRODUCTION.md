@@ -1,7 +1,7 @@
 # Production Guide - MCP-Go Orchestrator
 
 **Status**: ✅ PRODUCTION-READY
-**Updated**: Mayo 2026
+**Updated**: Octubre 2026
 
 ---
 
@@ -67,43 +67,49 @@ go build -o bin/mcp-server ./cmd/server
 go test ./...
 go test -race ./...
 
-# Verify Docker services
-docker-compose -f deployments/docker-compose.yml ps
+# Check the stack definition (Compose v2; `docker-compose` v1 is EOL)
+docker compose -f deployments/docker-compose.yml config --quiet
 ```
 
 ### Environment Variables
 
+The authoritative list, with every optional variable, is
+[`deployments/.env.example`](../deployments/.env.example). The values the stack
+refuses to boot without (`${VAR:?}` in the compose) are:
+
 ```bash
-# Required
-LLM_API_URL=http://localhost:11434
-LLM_MODEL=llama3
-
-# PostgreSQL — DATABASE_URL is NOT set here: docker-compose.yml builds it from
-# these three (internal host `postgres:5432`), so the password has a single
-# source of truth. Keep POSTGRES_PASSWORD URL-safe ([A-Za-z0-9._-]).
+# Required: compose aborts naming any of these if missing or empty
+BASE_URL=http://192.0.2.10:8080          # or https://mcp.example.com
 POSTGRES_USER=mcp
-POSTGRES_PASSWORD=change_me
+POSTGRES_PASSWORD=change_me              # URL-safe: [A-Za-z0-9._-]
 POSTGRES_DB=knowledge
-
-# RustFS/S3 (required for storage tools)
-RUSTFS_ENDPOINT=http://rustfs:9000
-RUSTFS_PUBLIC_URL=http://your-public-url:9000
+RUSTFS_PUBLIC_URL=http://192.0.2.10:9000
 RUSTFS_ACCESS_KEY_ID=change_me
 RUSTFS_SECRET_ACCESS_KEY=change_me
-
-# MCP endpoint auth (see deployments/.env.example)
+CRAWL4AI_TOKEN=change_me
 MCP_AUTH_MODE=required
-MCP_AUTH_KEY=change_me
+MCP_AUTH_KEY=change_me                   # distinct from MCP_UPLOAD_API_KEY
+MCP_UPLOAD_API_KEY=change_me
+ADMIN_API_KEY=change_me
+SANDBOX_API_TOKEN=change_me
 
-# Security (defaults work for most deployments)
+# Optional for boot, required for the five LLM tools to work
+LLM_API_URL=http://<host>:11434
+LLM_MODEL=<model-served-by-that-host>
+
+# Optional (defaults shown in .env.example)
+RUSTFS_ENDPOINT=rustfs:9000              # host:port, no scheme
 SSRF_ALLOWLIST=rustfs
-S3_OPERATION_TIMEOUT_SECONDS=30
-RUSTFS_PRESIGNED_TTL_SECONDS=3600
-
-# NOTE: the variables above are declared `${VAR:?}` in docker-compose.yml — the
-# stack refuses to start, naming the missing variable, instead of booting with an
-# empty secret or a public default. Generate values with `openssl rand -hex 32`.
+DOWNLOAD_URL_EXPIRY_HOURS=24
 ```
+
+`DATABASE_URL` is **not** set here: the compose builds it from `POSTGRES_*`
+(internal host `postgres:5432`) so the password has a single source of truth.
+
+The `change_me` values are placeholders, not usable defaults: the server rejects
+them at startup (keyring placeholder deny-list) and
+`deployments/scripts/preflight-env.sh` fails before the `up`. Generate values
+with `openssl rand -hex 32`.
 
 ### Container User (non-root)
 
@@ -149,11 +155,13 @@ image tag — the volume itself is untouched by the chown, so no data is lost.
 
 ```bash
 cd deployments
-docker-compose up -d
+./scripts/preflight-env.sh    # fails on missing vars / placeholders / duplicate tokens
+docker compose build whisper  # model is baked at build time
+docker compose up -d
 
 # Verify
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/metrics
 ```
 
 ---
@@ -228,8 +236,9 @@ See [SECURITY.md](SECURITY.md) for full security documentation.
 
 - [ ] SSRF_ALLOWLIST configured (minimum: `rustfs`)
 - [ ] RUSTFS_ENDPOINT matches actual hostname
-- [ ] S3_OPERATION_TIMEOUT_SECONDS appropriate for network
-- [ ] RUSTFS_PRESIGNED_TTL_SECONDS based on security requirements
+- [ ] S3_OPERATION_TIMEOUT_SECONDS / RUSTFS_PRESIGNED_TTL_SECONDS: read by the
+      tools but **not forwarded** by the compose; add them to
+      `mcp-server.environment` before relying on them
 - [ ] Run security tests: `python -m pytest tests/test_security_mitigations.py -v`
 
 ---
@@ -272,7 +281,7 @@ Verify Ollama is running and LLM_API_URL/LLM_MODEL are correct in config.
 docker stats --no-stream mcp-orchestrator
 
 # Restart if needed
-docker-compose restart mcp-server
+docker compose restart mcp-server
 ```
 
 ---
@@ -330,7 +339,7 @@ Admin endpoints (`/admin/*`) are protected by `ADMIN_API_KEY`. Keep them behind 
 | [SECURITY.md](SECURITY.md) | Security mitigations |
 | [LOGGING.md](LOGGING.md) | HTTP request logging |
 | [TESTING.md](TESTING.md) | Test suite |
-| [AGENTS.md](AGENTS.md) | AI agent instructions |
+| [AGENTS.md](../AGENTS.md) | AI agent instructions |
 
 ---
 

@@ -17,29 +17,53 @@ A Go-based MCP (Model Context Protocol) server that orchestrates external tools 
 
 ## Requirements
 
-- Go 1.26+ (see `go.mod`)
-- Docker and Docker Compose — the server image ships the Python 3.14 runtime the tools run on
-- Optional: Ollama on the same Docker network
+- Go 1.26+ (see `go.mod`) — only to build from source; the Docker image compiles it
+- Docker Engine with the Compose v2 plugin (`docker compose`, not `docker-compose`)
+- Disk: the `whisper` image is ~1.9 GB and is built locally; `crawl4ai` is ~4 GB of RAM limit
+- Optional: an Ollama (or OpenAI-compatible) endpoint reachable from the `mcp-external` network
 
 ## Quick Start
 
 ```bash
-cd deployments
-docker compose up -d
+git clone https://github.com/sudebaker/mcp-go.git
+cd mcp-go/deployments
 
-docker compose ps
+cp .env.example .env
+# edit .env: BASE_URL, RUSTFS_PUBLIC_URL and every `change_me` secret
+#   (openssl rand -hex 32; MCP_UPLOAD_API_KEY must differ from MCP_AUTH_KEY)
+
+./scripts/preflight-env.sh      # names every missing/placeholder value, starts nothing
+docker compose build whisper    # only step that needs internet: model goes into the image
+docker compose up -d
+curl -s http://127.0.0.1:8080/health
 ```
+
+`docker compose up -d` **fails immediately** if `.env` is missing or a required
+variable is empty: the compose file declares them `${VAR:?}`. Copying
+`.env.example` alone is not enough — the `change_me` secrets are rejected at
+server startup by design, so the container would restart-loop. The full
+variable contract is commented in [`deployments/.env.example`](deployments/.env.example).
+
+`whisper` is built from `deployments/Dockerfile.whisper` and downloads its model
+during the build (no network at runtime). `sandbox-sidecar` needs
+`/var/run/docker.sock`, and `analyze_data` only executes code after you build
+`mcp-python-sandbox:latest` and set `SANDBOX_API_URL` (see [Docker Sandbox](#docker-sandbox)).
 
 Services defined in `deployments/docker-compose.yml`:
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| `mcp-server` | `http://localhost:8080` | MCP server |
-| `postgres` | `localhost:5432` | KB storage (pgvector) |
-| `rustfs` | `http://localhost:9000` | S3-compatible storage |
-| `searxng` | `http://localhost:8080` (internal) | Private web search |
-| `crawl4ai` | `http://localhost:8000` | Web scraping (LLM-optimized markdown) |
-| `whisper` | `http://localhost:8000` | Audio transcription |
+| Service | Reachable at | Purpose |
+|---------|--------------|---------|
+| `mcp-server` | `http://127.0.0.1:8080` (published) | MCP server |
+| `postgres` | `postgres:5432` (internal only) | KB storage (pgvector) |
+| `rustfs` | `http://127.0.0.1:9000` (published) | S3-compatible storage |
+| `searxng` | `searxng:8080` (internal only) | Private web search |
+| `crawl4ai` | `http://127.0.0.1:11235` (published) | Web scraping (LLM-optimized markdown) |
+| `whisper` | `whisper:8000` (internal only) | Audio transcription |
+| `sandbox-sidecar` | `sandbox-sidecar:8080` (internal only) | Isolated code execution; only service with `docker.sock` |
+| `memgraph` / `opensearch` | profile `ocu-investigacion` | Graph + full-text search for the forensic toolset |
+
+`*_PUBLISH_HOST` in `.env` controls which host interface a published port binds
+to; the default is `127.0.0.1`.
 
 ### Resource Limits
 
@@ -47,14 +71,20 @@ Each service in `docker-compose.yml` has CPU and memory limits to prevent any si
 
 | Service | CPU Limit | Memory Limit | CPU Reservation | Memory Reservation |
 |---------|-----------|--------------|-----------------|--------------------|
-| `mcp-server` | 2 CPUs | 2 GB | 0.5 CPUs | 1 GB |
+| `mcp-server` | 2 CPUs | 3 GB | 0.5 CPUs | 1 GB |
 | `postgres` | 1 CPU | 1 GB | 0.5 CPUs | 512 MB |
 | `whisper` | 2 CPUs | 2 GB | 0.5 CPUs | 512 MB |
 | `crawl4ai` | 2 CPUs | 4 GB | 0.5 CPUs | 1 GB |
 | `searxng` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
 | `rustfs` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
+| `sandbox-sidecar` | 1 CPU | 512 MB | 0.25 CPUs | 128 MB |
 
-Limits cap the maximum resources a container can use; reservations guarantee a minimum to the Docker scheduler (effective in Swarm mode). These values balance headroom for the Go MCP server and CPU-intensive Whisper with tighter bounds on lighter services like SearXNG and RustFS.
+The declared limits add up to ~11.5 GB for the base stack. They are ceilings,
+not reservations, so a smaller host can run it — but `crawl4ai` (4 GB) and
+`whisper` (2 GB) are the heavy ones. The `ocu-investigacion` services declare no
+memory limit; OpenSearch runs with a 1 GB heap (`OPENSEARCH_JAVA_OPTS`).
+`mcp-server` gets 3 GB because the Go process idles at ~1.1 GB and each Python
+tool can add ~600 MB in the same cgroup.
 
 ## MCP Endpoints
 
@@ -71,15 +101,17 @@ Supported MCP methods: `initialize`, `ping`, `tools/list`, `tools/call`.
 
 Defined in `configs/config.yaml`:
 
-> **Note:** The default configuration has tool descriptions in **Spanish**. To switch to **English** descriptions, rename the included alternate config:
+> **Note:** The default configuration has tool descriptions in **Spanish**. To switch to **English** descriptions:
 > ```bash
-> mv configs/config-en.yaml configs/config.yaml
+> cp configs/config-en.yaml configs/config.yaml   # keep the original in git
 > docker compose restart mcp-server
 > ```
+> `config-en.yaml` ships with `allowed_origins` commented out: set it to your UI
+> origin or the `/admin/*` surface will be refused (404) even with `ADMIN_API_KEY`.
 
 | Category | Tools |
 |----------|-------|
-| Core | `echo` |
+| Core | `echo`, `datetime` |
 | Analysis & Generation | `analyze_data`, `analyze_image`, `generate_report` |
 | Knowledge Base | `kb_ingest`, `kb_search` |
 | Document Processing | `batch_summarize`, `regulation_diff`, `config_auditor`, `document_classifier` |
@@ -99,6 +131,15 @@ The `analyze_image` tool supports optional `provider` and `model` parameters to 
 | `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` | `OPENAI_API_KEY` |
 | Custom URL | Used directly as-is | `LLM_MODEL` or `llava` | Varies |
 
+Only `OPENROUTER_API_KEY` and `OLLAMA_API_KEY` are forwarded into the container
+by `deployments/docker-compose.yml`. The other provider keys (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, ...) are read by `configs/config.yaml` but **not** injected
+by the compose: add them to `mcp-server.environment` before using those
+providers.
+
+Local paths must live under `/data/input` or `/data/uploads`; anything else is
+rejected by the resource resolver.
+
 ### Configuration
 
 Set the `LLM_VISION_API_URL` environment variable in your `.env` file to point to a remote inference endpoint:
@@ -111,13 +152,13 @@ LLM_VISION_API_URL=http://<your-vision-host>:11434/v1
 
 ```json
 // Route to remote vision endpoint (private, no third-party)
-analyze_image(image_path="/data/tmp/photo.jpg", task="describe", provider="vision")
+analyze_image(image_path="/data/input/photo.jpg", task="describe", provider="vision")
 
 // Specify model explicitly
-analyze_image(image_path="/data/tmp/photo.jpg", task="ocr", provider="vision", model="gemma4:34b")
+analyze_image(image_path="/data/input/photo.jpg", task="ocr", provider="vision", model="gemma4:34b")
 
 // Use OpenRouter (cloud-based)
-analyze_image(image_path="/data/tmp/photo.jpg", task="answer", provider="openrouter", model="google/gemini-2.0-flash-001")
+analyze_image(image_path="/data/input/photo.jpg", task="answer", provider="openrouter", model="google/gemini-2.0-flash-001")
 ```
 
 ## Testing
@@ -135,51 +176,57 @@ go test ./...
 
 ## Docker Sandbox
 
-`data_analysis` runs LLM-generated Pandas code inside a hardened container: non-root user
-`nobody`, read-only root filesystem, no network, and CPU/memory/PID limits. The image tag is
-`mcp-python-sandbox:latest` — the only name the tool builds and runs.
+`data_analysis` runs LLM-generated Pandas code inside a hardened container: non-root user,
+read-only root filesystem, no network, and CPU/memory/PID limits.
 
-The build context is the **repository root**, not `tools/data_analysis/`: the Dockerfile copies
-`tools/common/*.py` and `tools/data_analysis/sandbox_bootstrap.py` from there.
+There are two execution backends, and the shipped compose uses the second one:
+
+1. **Docker from the orchestrator (legacy).** The tool can build and run
+   `mcp-python-sandbox:latest` through `docker.from_env()`, but `mcp-server` does not
+   mount `/var/run/docker.sock` — that would be root-equivalent — so this path is not
+   available in the compose stack.
+2. **`sandbox-sidecar` (shipped).** The only service with `docker.sock`; it exposes
+   `POST /v1/execute` on the internal network and the tool calls it when
+   `SANDBOX_API_URL` is set.
+
+Build the image once on the host; the build context is the **repository root**, not
+`tools/data_analysis/`:
 
 ```bash
-# Build from the repository root
 docker build -f tools/data_analysis/sandbox.Dockerfile -t mcp-python-sandbox:latest .
 ```
 
-If the image is missing, the tool builds it on first use (`build_on_missing`, enabled by default)
-with that same Dockerfile and context, so a deployment that mounts `docker.sock` does not need a
-pre-build: it needs read access to the repository tree (the build context) and access to the
-daemon.
+Then enable the backend in `.env` and recreate both containers:
 
-The compose stack does not mount `/var/run/docker.sock` into `mcp-server` (that would be
-root-equivalent), so inside the container no Docker daemon is reachable and the sandbox degrades
-by design: `data_analysis` runs the generated code with the restricted in-process executor and
-logs `Executing user code in restricted mode (no Docker sandbox)`. Set `SANDBOX_REQUIRED=true`
-to remove that fallback: every call is then rejected with `SANDBOX_UNAVAILABLE`, both with
-`use_sandbox=true` and with `use_sandbox=false`.
+```bash
+SANDBOX_API_URL=http://sandbox-sidecar:8080
+SANDBOX_API_TOKEN=<openssl rand -hex 32>    # same value for orchestrator and sidecar
+docker compose up -d sandbox-sidecar mcp-server
+```
+
+The sidecar does **not** build the image on demand: `SANDBOX_BUILD_ON_MISSING` defaults to
+`false` and the compose never sets it, so a missing image answers `IMAGE_UNAVAILABLE`
+(building never happens inside a request, contract §3).
+
+Without any backend, `SANDBOX_REQUIRED` decides the behaviour:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | Image tag the tool builds and runs; set it when a deployment pre-builds under another name |
-| `SANDBOX_REQUIRED` | `false` | `true` disables every non-sandboxed fallback, so code only ever runs in the container |
+| `SANDBOX_IMAGE` | `mcp-python-sandbox:latest` | Image the sidecar and the tools run |
+| `SANDBOX_REQUIRED` | `true` (compose) | `true` rejects every call with `SANDBOX_UNAVAILABLE`, with `use_sandbox` true or false. `false` enables the restricted in-process `exec()` fallback, which is evadable: local development only |
 
-### Sidecar execution (client wired, contract frozen, not yet deployed)
+### Sidecar execution (contract v1, shipped in the compose)
 
-Executing the tool's code can go through an isolated sidecar service: it is the only component
-with access to the Docker daemon and exposes an internal HTTP API, so the orchestrator never
-mounts the socket. The v1 contract — endpoints, request/response shape, isolation model, limits
-and error codes — is frozen in
-[docs/SANDBOX_SIDECAR_API.md](docs/SANDBOX_SIDECAR_API.md), with a machine-readable schema in
-[docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml).
+The sidecar is the only component with access to the Docker daemon, so the orchestrator
+never mounts the socket. The v1 contract — endpoints, request/response shape, isolation
+model, limits and error codes — is frozen in
+[docs/SANDBOX_SIDECAR_API.md](docs/SANDBOX_SIDECAR_API.md), with a machine-readable schema
+in [docs/sandbox-sidecar.openapi.yaml](docs/sandbox-sidecar.openapi.yaml).
 
-The orchestrator-side client is already wired (fase 3): when `SANDBOX_API_URL` is set, the
-execution path (`tools/common/sandbox.py`, via data_analysis) calls `POST /v1/execute` with
-`Authorization: Bearer <SANDBOX_API_TOKEN>` instead of `docker.from_env()`, and every sidecar
-error is mapped per §6.2 of the contract. With `SANDBOX_API_URL` empty the behaviour is exactly
-the pre-sidecar one: the call still answers `SANDBOX_UNAVAILABLE` when no isolated execution is
-available. The sidecar service itself ships with the deployment; until it deploys, the
-behaviour described above still applies.
+When `SANDBOX_API_URL` is set, `tools/common/sandbox.py` calls `POST /v1/execute` with
+`Authorization: Bearer <SANDBOX_API_TOKEN>` instead of `docker.from_env()`, and every
+sidecar error is mapped per §6.2 of the contract. With `SANDBOX_API_URL` empty the tool
+answers `SANDBOX_UNAVAILABLE` when no isolated execution is available.
 
 ## Toolset Filtering
 
@@ -189,9 +236,11 @@ The server can expose different subsets of tools without code changes, using **t
 
 | Toolset | Tools | Use Case |
 |---------|-------|----------|
-| `default` | 14 general-purpose tools (echo, weather, kb, web, etc.) | End users, general assistance |
-| `development` | 10 dev tools + core (opencode_context, codebase_scan, etc.) | Developers, coding agents |
-| `ocu-investigacion` | 17 tools (6 forenses + kb, web scraping, OCR, transcription, reports, storage) | Criminal investigation |
+| `default` | 19 general-purpose tools (echo, datetime, weather, kb, web, OCR, media, storage) | End users, general assistance |
+| `development` | 14 dev tools + core (opencode_context, codebase_scan, etc.) | Developers, coding agents |
+| `ocu-investigacion` | 25 tools (11 shared + 14 forensic) | Criminal investigation |
+
+Counts are the length of each list in `configs/toolsets.yaml`.
 
 ### Usage
 
@@ -210,11 +259,11 @@ MCP_TOOLSET=default,development
 # .env — forensic investigation toolset
 MCP_TOOLSET=ocu-investigacion
 
-# .env — all tools + forensics
+# .env — all three toolsets
 MCP_TOOLSET=default,development,ocu-investigacion
 
-# .env — omit to expose all tools (default behavior)
-# (no MCP_TOOLSET set)
+# .env — if MCP_TOOLSET is unset or empty the code applies `default`,
+# it does NOT expose every tool. List all three to get everything.
 ```
 
 > **Note:** The `ocu-investigacion` toolset requires additional services (Memgraph and OpenSearch). When running with Docker Compose, activate the matching profile:
@@ -222,18 +271,11 @@ MCP_TOOLSET=default,development,ocu-investigacion
 > docker compose --profile ocu-investigacion up -d
 > ```
 
-Or with Docker directly:
-
-```bash
-# General toolset
-docker run -e MCP_TOOLSET=default -p 8080:8080 sudebaker/mcp-go
-
-# Development toolset
-docker run -e MCP_TOOLSET=development -p 8080:8080 sudebaker/mcp-go
-
-# All tools (backward compatible)
-docker run -p 8080:8080 sudebaker/mcp-go
-```
+Running outside Compose requires the same environment variables the compose
+injects (`BASE_URL`, `MCP_AUTH_KEY`, `MCP_UPLOAD_API_KEY`, `ADMIN_API_KEY`,
+`POSTGRES_*`, `RUSTFS_*`, `CRAWL4AI_TOKEN`, `SANDBOX_API_TOKEN`) plus a writable
+`/data`. The image entrypoint is `/app/mcp-server`; see
+`deployments/docker-compose.yml` for the full list.
 
 ### How It Works
 
@@ -267,12 +309,13 @@ MCP_TOOLSET=my-team docker compose up -d mcp-server
 
 | Document | Description |
 |----------|-------------|
-| `QUICKSTART.md` | Quick start and verification guide |
-| `USAGE.md` | Functional usage per tool |
-| `DOCUMENTATION_INDEX.md` | Documentation map |
-| `docs/DEVELOPMENT.md` | Technical architecture and development guide |
-| `docs/API.md` | API reference |
-| `AGENTS.md` | Build/test commands and conventions |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | Install, verify and first request |
+| [`docs/USAGE.md`](docs/USAGE.md) | Functional usage per tool |
+| [`deployments/.env.example`](deployments/.env.example) | Every environment variable, commented |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Technical architecture and development guide |
+| [`docs/PRODUCTION.md`](docs/PRODUCTION.md) | Production checklist and operations |
+| [`docs/API.md`](docs/API.md) | API reference |
+| [`AGENTS.md`](AGENTS.md) | Build/test commands and conventions |
 
 ## Project Structure
 
@@ -343,10 +386,16 @@ Add a new entry to `configs/toolsets.yaml`:
 
 Then run with `MCP_TOOLSET=my_stack`. Multiple toolsets can be combined: `MCP_TOOLSET=my_stack,default`.
 
-For the **OCu (criminal investigation) toolset**, see the full deployment guide including the required database stack (Memgraph, OpenSearch):
+For the **OCu (criminal investigation) toolset**, the required database stack
+(Memgraph, OpenSearch) ships in the same compose behind the profile:
 
-- [OCu Investigación — Toolset y Stack de Bases de Datos](docs/OCU_INVESTIGACION.md)
-- Stack de bases de datos: `deployments/infra/ocu-investigacion/docker-compose.yml`
+```bash
+docker compose --profile ocu-investigacion up -d
+MCP_TOOLSET=ocu-investigacion   # in .env
+```
+
+See [`deployments/docker-compose.yml`](deployments/docker-compose.yml) and
+[`docs/SANDBOX_SIDECAR_API.md`](docs/SANDBOX_SIDECAR_API.md) for the sidecar contract.
 
 ### Disabling a Tool
 

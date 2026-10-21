@@ -148,6 +148,52 @@ func TestHandleInternalResourceWithBearer(t *testing.T) {
 	}
 }
 
+// TestHandleInternalResourceMultiUseAndExpiry pins the phase-1 token contract
+// at the HTTP boundary (docs/API.md, Resource resolution flow): the same
+// res:// token answers 200 on repeated GETs while it lives, and 401 once the
+// TTL has passed. Re-running the flow (upload once, ask several times about
+// the same file) must not re-upload.
+func TestHandleInternalResourceMultiUseAndExpiry(t *testing.T) {
+	store := session.New()
+	store.Set("sess1", "user-abc")
+	storage := newFakeStorage()
+	mgr := resources.NewResourceManager(storage, store)
+	res, err := mgr.PutForUser(t.Context(), "sess1", "file.txt", strings.NewReader("hello"), 5, "text/plain")
+	if err != nil {
+		t.Fatalf("PutForUser failed: %v", err)
+	}
+
+	token := "test-only-sandbox-token-0123456789abcdef"
+	hash := sha256.Sum256([]byte(token))
+	s := &MCPServer{resourceManager: mgr, internalResourceKeyHash: hash}
+	requestURI := "/internal/resource/" + strings.TrimPrefix(res.URI, "res://")
+
+	for i := 1; i <= 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, requestURI, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		s.internalResourceHandler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET #%d of the same token: expected 200, got %d: %s", i, rec.Code, rec.Body.String())
+		}
+		body, _ := io.ReadAll(rec.Result().Body)
+		if string(body) != "hello" {
+			t.Fatalf("GET #%d of the same token: expected hello, got %q", i, body)
+		}
+	}
+
+	// Past the TTL the GET answers 401 ("Invalid or expired token").
+	expiredToken := mgr.Tokens().Issue("users", "user-abc/expired.txt", "user-abc", "sess1", -time.Second)
+	expiredReq := httptest.NewRequest(http.MethodGet, "/internal/resource/"+expiredToken, nil)
+	expiredReq.Header.Set("Authorization", "Bearer "+token)
+	expiredRec := httptest.NewRecorder()
+	s.internalResourceHandler().ServeHTTP(expiredRec, expiredReq)
+	if expiredRec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET of an expired token: expected 401, got %d: %s", expiredRec.Code, expiredRec.Body.String())
+	}
+}
+
 func TestInternalResourceKeyHashRejectsBadTokens(t *testing.T) {
 	var zero [32]byte
 	for name, token := range map[string]string{

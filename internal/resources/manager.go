@@ -17,8 +17,13 @@ import (
 
 const (
 	defaultBucket = "users"
-	tokenTTL      = 300 * time.Second
-	maxLocalFile  = 50 * 1024 * 1024
+	// tokenTTL is the single source of truth for the res:// token lifetime
+	// documented in docs/API.md (POST /upload, Resource resolution flow):
+	// tokens are multi-use and live 3600s from issue. The value must never
+	// drift from the docs — TestTokenTTLMatchesDocumentedContract fails if it
+	// does, so a TTL change is a change to both in the same PR.
+	tokenTTL     = 3600 * time.Second
+	maxLocalFile = 50 * 1024 * 1024
 )
 
 var (

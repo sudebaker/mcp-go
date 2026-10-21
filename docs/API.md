@@ -313,8 +313,9 @@ Analyzes images using OCR and vision models. Supports local paths (e.g., `/data/
 | provider | string | No | `ollama` (default), `vision`, `openrouter`, `openai`, `anthropic`, `deepseek`, or a full URL |
 | model | string | No | Vision model name (defaults from context/env, e.g. `llava`) |
 
-A `res://` token is resolved through `GET /internal/resource/{token}` once per
-call (single-use, 5-minute TTL — see [Resource resolution flow](#resource-resolution-flow)).
+A `res://` token is resolved through `GET /internal/resource/{token}` on each
+call that carries it; the token is **multi-use** and stays valid until it
+expires (**1-hour TTL** — see [Resource resolution flow](#resource-resolution-flow)).
 In-container clients resolve it with `Authorization: Bearer <SANDBOX_API_TOKEN>`;
 the endpoint refuses every request without that header (fail-closed Bearer
 guard, sidecar phase 2). If resolution fails the tool answers `success: false`
@@ -385,11 +386,10 @@ Compares two versions of a document or regulation.
 | focus | string | No | Optional focus area |
 | output_format | string | No | `markdown` (default) or `structured` |
 
-Server-side `res://` tokens are single-use with a 5-minute TTL: each `res://`
-uri is read at most once per call (a repeated attachment — the same uri in
-both slots — resolves once internally). A token reused across calls or already
-expired makes the tool fail with a "Resource token invalid (single-use,
-5-minute TTL) ..." error asking for a re-upload
+Server-side `res://` tokens are multi-use with a 1-hour TTL: the same uri may
+be passed on every call until the token expires (a repeated attachment — the
+same uri in both slots — still resolves once internally). An expired or unknown
+token makes the tool fail with an error asking for a re-upload
 (see [Resource resolution flow](#resource-resolution-flow)).
 
 ---
@@ -455,9 +455,9 @@ Example (abridged, from a real `POST /upload` → `res://` audit):
 }
 ```
 
-A `res://` token is single-use: the resource stream deletes it on the first
-read, so each audit needs a fresh upload (the same is true for every tool that
-resolves `res://`).
+A `res://` token is multi-use: it stays valid until it expires (**1-hour TTL**),
+so repeated audits over the same upload work without re-uploading (the same is
+true for every tool that resolves `res://`).
 
 ---
 
@@ -625,8 +625,11 @@ of its own, `user_id: legacy-upload`).
 }
 ```
 
-The `uri` is **not** a storage path and not an HTTP URL: it is a one-shot download
-token. See [Resource resolution flow](#resource-resolution-flow).
+The `uri` is **not** a storage path and not an HTTP URL: it is an opaque download
+token for the uploaded file — multi-use, valid for **1 hour** (3600 s) after
+issuance. The token lifetime and the uploaded file's `ttl` form field are
+separate things today (the form field governs the stored file). See
+[Resource resolution flow](#resource-resolution-flow).
 
 **Response (413 - File too large):**
 ```json
@@ -689,10 +692,13 @@ the `X-Session-ID` header (the `Mcp-Session-Id` of a previous `initialize` over
 ### Resource resolution flow
 
 `res://` uris are **upload tokens**, issued only by `POST /upload`. They are
-single-use (one download) and expire after **5 minutes**
-(`internal/resources/token.go`, `internal/resources/manager.go:20`). Tools
-resolve them server-side through `GET /internal/resource/{token}`, an endpoint
-open on the Docker network and never exposed externally.
+multi-use (repeated reads over the same upload) and expire **1 hour** (3600 s)
+after issuance (`internal/resources/token.go`, `internal/resources/manager.go`
+`tokenTTL`, anchored by tests). The GET is **not** bound to the owner yet: it
+only requires the shared `SANDBOX_API_TOKEN` Bearer secret and a valid, live
+token — caller binding (only the upload's owner can read) is phase 2. Tools
+resolve tokens server-side through `GET /internal/resource/{token}`, an
+endpoint open on the Docker network and never exposed externally.
 
 The full flow a client must follow:
 
@@ -708,21 +714,22 @@ The full flow a client must follow:
    - audio/wav → 415 (magic-byte check); use transcribe's audio_base64 instead
 3. Call the tool passing the res:// uri as the file argument
    (e.g. `__files__` entries with `url` in regulation_diff and file-bundle
-   tools, `image_path` in analyze_image).
-4. The tool fetches  GET /internal/resource/<token>  once and processes bytes.
-   Every in-container client sends `Authorization: Bearer <SANDBOX_API_TOKEN>`;
-   a request without the header answers 401.
-5. A second read of the same token, a token older than 5 minutes, or a tool
-   container with no SANDBOX_API_TOKEN configured answers 401 — re-upload the
-   file and use the fresh uri. Every `res://token` is read exactly once per
-   tool call.
+   tools, `image_path` in analyze_image) — once per upload, then reuse the
+   same uri for follow-up questions on the same file.
+4. Each call, the tool fetches  GET /internal/resource/<token>  and processes
+   bytes. Every in-container client sends `Authorization: Bearer <SANDBOX_API_TOKEN>`;
+   a request without the header answers 401. Repeated GETs over the same live
+   token each answer 200 with the file bytes.
+5. A token older than 1 hour, or an unknown token, answers 401 — re-upload the
+   file and use the fresh uri from the new response.
 ```
 
 > **Note (battery finding, 2026-10):** the two-header requirement from step 2,
-> plus the single-use/5-minute token behaviour from steps 4-5, is why
-> `batch_summarize`, `document_classifier` and `regulation_diff` had been kept
-> "non-verifiable" in the production battery for weeks: a successful upload
-> alone proves nothing, and reusing the uri silently fails with plain
+> plus the strict token lifecycle of the time (single-use, 5-minute TTL;
+> multi-use with a 1-hour TTL since), is why `batch_summarize`,
+> `document_classifier` and `regulation_diff` had been kept "non-verifiable"
+> in the production battery for weeks: a successful upload alone proves
+> nothing, and an invalid or expired token fails with plain
 > `HTTP Error 401: Unauthorized` unless the tool surfaces the reason.
 
 ---

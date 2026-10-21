@@ -21,7 +21,6 @@ type tokenEntry struct {
 	UserID    string
 	SessionID string
 	expiresAt time.Time
-	used      bool
 }
 
 func NewTokenStore() *TokenStore {
@@ -40,7 +39,6 @@ func (t *TokenStore) Issue(bucket, key, userID, sessionID string, ttl time.Durat
 		UserID:    userID,
 		SessionID: sessionID,
 		expiresAt: time.Now().Add(ttl),
-		used:      false,
 	}
 	t.mu.Unlock()
 	return token
@@ -57,11 +55,9 @@ func (t *TokenStore) Validate(token string) (*tokenEntry, error) {
 		delete(t.tokens, token)
 		return nil, errors.New("token expired")
 	}
-	if e.used {
-		delete(t.tokens, token)
-		return nil, errors.New("token already used")
-	}
-	e.used = true
+	// Multi-use: a live token validates every time it is presented. Its life
+	// is bounded only by the TTL at issue time (owner binding on reads is
+	// phase 2 — docs/API.md, Resource resolution flow).
 	return e, nil
 }
 

@@ -16,9 +16,23 @@ func TestTokenStore_IssueValidate(t *testing.T) {
 	if e.Bucket != "users" || e.Key != "abc/file.txt" {
 		t.Fatalf("unexpected entry: %+v", e)
 	}
-	_, err = s.Validate(token)
-	if err == nil || !strings.Contains(err.Error(), "already used") {
-		t.Fatalf("expected already used error, got %v", err)
+	// Multi-use: the same token validates on every presented read until it
+	// expires (docs/API.md, Resource resolution flow).
+	e2, err := s.Validate(token)
+	if err != nil {
+		t.Fatalf("second validation of a live token must succeed, got %v", err)
+	}
+	if e2.Bucket != e.Bucket || e2.Key != e.Key || e2.UserID != e.UserID || e2.SessionID != e.SessionID {
+		t.Fatalf("second validation returned a different entry: %+v vs %+v", e, e2)
+	}
+}
+
+// TestTokenTTLMatchesDocumentedContract anchors tokenTTL to the value
+// docs/API.md publishes for res:// tokens (1 hour). Changing the TTL is a
+// documentation change: update docs/API.md and this anchor in the same PR.
+func TestTokenTTLMatchesDocumentedContract(t *testing.T) {
+	if tokenTTL != 3600*time.Second {
+		t.Fatalf("tokenTTL = %v, but docs/API.md publishes 1 hour (3600s): update the doc and this anchor together", tokenTTL)
 	}
 }
 

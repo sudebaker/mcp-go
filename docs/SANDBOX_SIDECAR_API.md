@@ -287,6 +287,12 @@ Reglas de la vía B, fijadas:
    sidecar, no se escribe en logs.
 6. La salida (`files`) vuelve en base64 al orquestador, que es quien decide si persiste algo en
    RustFS. El sidecar no retiene nada: borra el directorio del job al responder (éxito o error).
+7. El token de `res://` es **multi-uso** y vive **3600 s** desde su emisión
+   (`internal/resources/manager.go`, `tokenTTL`): repetir el `GET` de la regla 2 (mismo job u
+   otro) no lo invalida; solo una caducidad o un token desconocido responde `401`. El binding
+   por propietario del `GET` — que solo el dueño del upload pueda leerlo — **no está
+   implementado** (llega en fase 2): hoy el `GET` exige el `Bearer` del secret compartido y un
+   token válido.
 
 Nota de implementación (fase 2, sidecar): el estado del job no vive en un directorio de disco del
 sidecar — un path interno del contenedor no puede montarse en otro contenedor, porque el daemon

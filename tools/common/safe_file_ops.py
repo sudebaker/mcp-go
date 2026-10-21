@@ -31,6 +31,15 @@ from common.validators import (
 
 logger = logging.getLogger(__name__)
 
+# The only writable output mount inside the sandbox container. The sidecar
+# engine (internal/sidecar/engine.go) runs the job container with
+# OUTPUT_DIR=/tmp/output and a rw volume there; the in-tool Docker executor
+# (tools/common/sandbox.py) mounts its tempdir at the same path. /data is
+# mounted read-only, so the pre-sidecar path /data/output is a lie the prompt
+# must never tell the model again (t_14685e1f): reference this constant, not
+# a literal path.
+SANDBOX_OUTPUT_DIR = "/tmp/output"
+
 
 class SafeFileOperations:
     """
@@ -43,7 +52,7 @@ class SafeFileOperations:
     def __init__(
         self,
         readonly_dir: str = "/data/input",
-        writable_dir: str = "/data/output",
+        writable_dir: str = SANDBOX_OUTPUT_DIR,
         max_file_size_mb: int = 100,
     ):
         self.readonly_dir = readonly_dir
@@ -165,6 +174,59 @@ class SafeFileOperations:
         validated_path.write_bytes(content)
         logger.info(f"Wrote binary file: {validated_path}")
 
+    def save_figure(
+        self, figure: Any, filename: str, dpi: int = 150, **kwargs
+    ) -> str:
+        """
+        Save a matplotlib figure into the writable sandbox directory.
+
+        The figure object is passed in (a Figure, or the pyplot module itself,
+        whose gcf() is used), so generated code never needs io/BytesIO (not on
+        the sandbox import whitelist) and never builds output paths itself:
+        the path is resolved and enforced by this class. Returns the resolved
+        absolute path written.
+
+        Raises:
+            PathValidationError: path traversal or invalid writable dir.
+            ValueError: the saved figure exceeds max_file_size_mb (file removed).
+        """
+        # Accept the pyplot module as well as a Figure instance: LLM payloads
+        # pass either `plt` or `plt.gcf()` and both are valid here.
+        if hasattr(figure, "gcf") and callable(figure.gcf):
+            figure = figure.gcf()
+        if not hasattr(figure, "savefig") or not callable(figure.savefig):
+            raise TypeError(
+                "save_figure expects a matplotlib Figure (or the pyplot module), "
+                f"got {type(figure).__name__}"
+            )
+
+        if not Path(filename).suffix:
+            filename = f"{filename}.png"
+
+        try:
+            self.writable_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug(f"Writable dir not creatable: {e}")
+
+        validated_path = self._resolve_write_path(filename)
+
+        figure.savefig(str(validated_path), dpi=dpi, **kwargs)
+
+        # The size limit already checked overwrite targets at validation time;
+        # for freshly rendered bytes enforce it after the write (and clean up).
+        size_mb = validated_path.stat().st_size / (1024 * 1024)
+        if size_mb > self.max_file_size_mb:
+            try:
+                validated_path.unlink()
+            except OSError:
+                pass
+            raise ValueError(
+                f"Figure too large: {size_mb:.2f}MB (max: {self.max_file_size_mb}MB)"
+            )
+
+        logger.info(f"Saved figure: {validated_path}")
+        return str(validated_path)
+
     def list_input_files(self, pattern: str = "*", subdir: str = "") -> list[Path]:
         """
         List files in the readonly directory.
@@ -276,7 +338,7 @@ class SafeFileOperations:
 
 def create_safe_file_ops(
     readonly_dir: str = "/data/input",
-    writable_dir: str = "/data/output",
+    writable_dir: str = SANDBOX_OUTPUT_DIR,
     max_file_size_mb: int = 100,
 ) -> SafeFileOperations:
     """Factory function to create SafeFileOperations instance."""

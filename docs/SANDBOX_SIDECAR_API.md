@@ -406,7 +406,7 @@ El `code` se ejecuta con el mismo arnés que hoy, porque el prompt del LLM depen
 | `plt` | módulo `matplotlib.pyplot` | **hoy es `None`** (`tools/common/sandbox.py:487`), y `output_format=png` depende de él |
 | `emit_chunk(type, data)` | función | escribe `__CHUNK__:{json}` en stdout (`tools/common/sandbox.py:28,424-427`) |
 | `emit_result(success, output, structured, files)` | función | escribe `__RESULT__:{json}` (`tools/common/sandbox.py:29,429-438`) |
-| `safe_files` | objeto con `read_csv`, `to_csv`, `read_excel`, `to_excel`, `open_read`, `open_write`, … | **hoy no existe** en el arnés de contenedor, pero el prompt lo exige (`tools/data_analysis/main.py:1069`); son los mismos helpers que el fallback ya expone como nombres sueltos (`tools/common/sandbox.py:764-789`) |
+| `safe_files` | objeto con `read_csv`, `to_csv`, `read_excel`, `to_excel`, `open_read`, `open_write`, `save_figure`, … | **hoy no existe** en el arnés de contenedor, pero el prompt lo exige (`tools/data_analysis/main.py`); son los mismos helpers que el fallback ya expone como nombres sueltos (`tools/common/sandbox.py:764-789`). `save_figure(fig, 'name.png')` (t_14685e1f) guarda una figura matplotlib validada dentro de `/tmp/output` (traversal + tamaño); el prompt ordena este método con reglas presentes para **todo** `output_format`, no solo png |
 | `__import__` | portón `sandbox_import` | **no es el builtin** (corrección t_52311b49, ver §15): solo admite módulos cuyo raíz esté en `SANDBOX_ALLOWED_MODULES` — `pandas`, `numpy`, `matplotlib`, `json`, `datetime`, `math`, `re`, `collections` — y niega `os`/`sys`/`subprocess`/`socket`/… y `level != 0` (`tools/common/safe_import.py`, fail-closed: sin el portón el bootstrap no ejecuta el código del LLM) |
 | `print` | builtin | el `output` se captura como stdout |
 | Directorio de entrada | `/data` (ro) | `safe_files` no puede escribir aquí |
@@ -424,7 +424,10 @@ demostrado en §15.
 
 Las variables `INPUT_DIR`/`OUTPUT_DIR` del orquestador (`tools/data_analysis/main.py:565-566`)
 dejan de tener sentido para el contenedor: el contrato fija `/data` y `/tmp/output` dentro del
-sandbox, y el cliente ya no las propaga.
+sandbox, y el cliente ya no las propaga. La ruta de salida vive en una única constante
+(`SANDBOX_OUTPUT_DIR`, `tools/common/safe_file_ops.py`) usada por el arnés y por el prompt:
+`tools/common/sandbox.py` (in-tool Docker) sobreescribe con ella el `ENV OUTPUT_DIR=/data/output`
+aún horneado en `tools/data_analysis/sandbox.Dockerfile` (t_14685e1f).
 
 ---
 

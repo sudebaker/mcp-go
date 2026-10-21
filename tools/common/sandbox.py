@@ -27,6 +27,13 @@ except ImportError:
 
     APIError = BuildError = DockerException = ImageNotFound = _DockerUnavailable
 
+# Single source of truth for the sandbox output mount. Import mirrors the
+# bare-module style used by execute_fallback (tools/common on sys.path there).
+try:
+    from common.safe_file_ops import SANDBOX_OUTPUT_DIR
+except ImportError:  # bare layout: tools/common itself on sys.path
+    from safe_file_ops import SANDBOX_OUTPUT_DIR
+
 
 CHUNK_PREFIX = "__CHUNK__:"
 RESULT_PREFIX = "__RESULT__:"
@@ -66,7 +73,7 @@ class SandboxConfig:
         network_disabled: bool = True,
         build_on_missing: bool = True,
         readonly_dir: str = "/data/input",
-        writable_dir: str = "/data/output",
+        writable_dir: str = SANDBOX_OUTPUT_DIR,
         max_file_size_mb: int = 100,
     ):
         self.image = image or default_sandbox_image()
@@ -346,6 +353,10 @@ class DockerSandboxedExecutor:
             env = env_vars.copy() if env_vars else {}
             env["MCP_SANDBOX_CODE"] = encoded_code
             env["MPLCONFIGDIR"] = "/tmp/matplotlib"
+            # Override the image's stale pre-sidecar ENV (OUTPUT_DIR=/data/output):
+            # the rw mount is /tmp/output (single source SANDBOX_OUTPUT_DIR),
+            # /data is mounted read-only.
+            env["OUTPUT_DIR"] = SANDBOX_OUTPUT_DIR
 
             self.emit_chunk("status", {"message": "Starting container"})
 
@@ -713,7 +724,9 @@ if __name__ == "__main__":
 
                 file_ops = SafeFileOperations(
                     readonly_dir=getattr(self.config, "readonly_dir", "/data/input"),
-                    writable_dir=getattr(self.config, "writable_dir", "/data/output"),
+                    writable_dir=getattr(
+                        self.config, "writable_dir", SANDBOX_OUTPUT_DIR
+                    ),
                     max_file_size_mb=getattr(self.config, "max_file_size_mb", 100),
                 )
             except ImportError:
@@ -788,7 +801,7 @@ if __name__ == "__main__":
                         else "/data/input",
                         "OUTPUT_DIR": self.config.writable_dir
                         if hasattr(self.config, "writable_dir")
-                        else "/data/output",
+                        else SANDBOX_OUTPUT_DIR,
                     }
                 )
 

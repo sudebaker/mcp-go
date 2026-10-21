@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.resources import Resource, ToolContext
 from common.structured_logging import get_logger
-from common.safe_file_ops import SafeFileOperations
+from common.safe_file_ops import SafeFileOperations, SANDBOX_OUTPUT_DIR
 from common.safe_import import sandbox_import
 from common.sandbox import (
     execute_in_sandbox,
@@ -589,7 +589,7 @@ def execute_code_in_sandbox(
 
     # Get directories from environment
     readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
-    writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
+    writable_dir = os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR)
     max_size_mb = int(os.environ.get(
         "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
@@ -715,11 +715,34 @@ def execute_code_safely(
         "zip": zip,
     }
 
+    # Align degraded mode with the container harness (t_14685e1f): the prompt
+    # save rules are always present, so chart payloads must not die here on a
+    # missing plt/safe_files binding. Best effort — matplotlib may be absent.
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        plt = None
+    try:
+        safe_files = SafeFileOperations(
+            readonly_dir=os.environ.get("INPUT_DIR", "/data/input"),
+            writable_dir=os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR),
+            max_file_size_mb=int(
+                os.environ.get("MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB))
+            ),
+        )
+    except Exception:
+        safe_files = None
+
     restricted_globals = {
         "__builtins__": SAFE_BUILTINS,
         "pd": pd,
         "np": np,
         "df": df,
+        "plt": plt,
+        "safe_files": safe_files,
     }
 
     stdout_capture = StringIO()
@@ -777,6 +800,59 @@ def format_result(result: Any, output_format: str, stdout: str = "") -> str:
         return json.dumps(result, indent=2, default=str)
 
     return str(result)
+
+
+def build_analysis_prompt(data_summary: str, question: str, output_format: str) -> str:
+    """
+    Build the LLM prompt for analyze_data.
+
+    The saving rules are ALWAYS present, never conditioned on output_format:
+    the model must know how to persist artifacts — charts included — however
+    the caller phrases the request ("plot monthly revenue" with no png enum
+    must still produce the file). Paths never appear as literals here: they
+    come from SANDBOX_OUTPUT_DIR and safe_files.save_figure (anti-drift,
+    t_14685e1f — /data/output was the pre-sidecar harness mount and is
+    read-only inside the container).
+    """
+    prompt_parts = [
+        "You are a data analyst. Given the following pandas DataFrame summary, write Python code to answer the question.\n\n",
+        "DATA SUMMARY:\n",
+        data_summary[:10000],  # Limit data summary to prevent huge prompts
+        "\n\nQUESTION: ",
+        question,
+        "\n\nIMPORTANT RULES:\n",
+        "1. Write ONLY Python code, no explanations\n",
+        "2. Use the variable 'df' for the DataFrame (it's already loaded)\n",
+        "3. Use print() with markdown formatting — the sandbox captures stdout only\n",
+        "4. Use pandas (pd) and numpy (np) — they're already imported. Use df.to_markdown(index=False) for tables (no need to import tabulate directly)\n",
+        "5. Keep the code simple and efficient\n",
+        "6. Use print(df.to_markdown()) to display DataFrames beautifully\n",
+        "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
+        "8. ALWAYS use print() for every result. Never just assign to 'result' without printing it\n",
+        f"9. Deliverable files must be written with 'safe_files' — they are collected from the sandbox output dir ({SANDBOX_OUTPUT_DIR}). Anything saved by other means (raw plt.savefig(), open(), hardcoded paths) is lost. Use a plain relative filename\n",
+        "10. Charts/figures: plt (matplotlib, Agg backend — no display) is already imported. Build the figure with plt, save it with safe_files.save_figure(plt.gcf(), 'chart.png') and ALWAYS finish with plt.close(). Never call plt.savefig() yourself and never call plt.show()\n",
+    ]
+
+    if output_format == "image":
+        prompt_parts.extend(
+            [
+                "11. VISUALIZATION REQUIRED: the answer MUST include a chart/plot saved with safe_files.save_figure(...) as described above\n",
+                "12. Set result='Chart saved successfully' after saving the figure\n",
+            ]
+        )
+        next_rule = 13
+    else:
+        next_rule = 11
+
+    prompt_parts.extend(
+        [
+            f"{next_rule}. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
+            f"{next_rule + 1}. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re. For markdown tables use df.to_markdown(index=False) directly\n\n",
+            "Python code (use print() with markdown for ALL output):\n```python\n",
+        ]
+    )
+
+    return "".join(prompt_parts)
 
 
 def main() -> None:
@@ -849,7 +925,7 @@ def main() -> None:
 
         # Initialize safe file operations
         readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
-        writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
+        writable_dir = os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR)
         max_size_mb = int(os.environ.get(
             "MAX_FILE_SIZE_MB", str(MAX_FILE_SIZE_MB)))
 
@@ -1077,51 +1153,10 @@ def main() -> None:
 
         emit_chunk("status", {"message": "Generating analysis code with LLM"})
 
-        # Build prompt with length validation
-        prompt_parts = [
-            "You are a data analyst. Given the following pandas DataFrame summary, write Python code to answer the question.\n\n",
-            "DATA SUMMARY:\n",
-            data_summary[:10000],  # Limit data summary to prevent huge prompts
-            "\n\nQUESTION: ",
-            question,
-            "\n\nIMPORTANT RULES:\n",
-            "1. Write ONLY Python code, no explanations\n",
-            "2. Use the variable 'df' for the DataFrame (it's already loaded)\n",
-            "3. Use print() with markdown formatting — the sandbox captures stdout only\n",
-            "4. Use pandas (pd) and numpy (np) — they're already imported. Use df.to_markdown(index=False) for tables (no need to import tabulate directly)\n",
-            "5. Keep the code simple and efficient\n",
-            "6. Use print(df.to_markdown()) to display DataFrames beautifully\n",
-            "7. For file I/O, use 'safe_files' object (safe_files.read_csv(), safe_files.to_csv())\n",
-            "8. ALWAYS use print() for every result. Never just assign to 'result' without printing it\n",
-        ]
-
-        # Add visualization-specific instructions for image output format
-        if output_format == "image":
-            prompt_parts.extend(
-                [
-                    "9. VISUALIZATION REQUIRED: Create a chart/plot using matplotlib\n",
-                    "10. Import matplotlib: import matplotlib.pyplot as plt; import matplotlib; matplotlib.use('Agg')\n",
-                    "11. Save the plot: plt.savefig('/data/output/chart.png', dpi=150, bbox_inches='tight'); plt.close()\n",
-                    "12. Set result='Chart saved successfully' after saving\n",
-                    "13. DO NOT use plt.show() - only plt.savefig()\n",
-                ]
-            )
-        else:
-            prompt_parts.extend(
-                [
-                    "9. For visualizations, save to writable directory with .png extension\n",
-                ]
-            )
-
-        prompt_parts.extend(
-            [
-                "14. DO NOT use open(), os, sys, subprocess, or any file system operations directly\n",
-                "15. DO NOT import any modules except matplotlib for visualizations - use only pre-imported: pd, np, json, datetime, math, re. For markdown tables use df.to_markdown(index=False) directly\n\n",
-                "Python code (use print() with markdown for ALL output):\n```python\n",
-            ]
-        )
-
-        prompt = "".join(prompt_parts)
+        # Build prompt with length validation. The save rules live inside
+        # build_analysis_prompt and are present for every output_format —
+        # charts must survive a natural-language request with no png enum.
+        prompt = build_analysis_prompt(data_summary, question, output_format)
 
         # Validate prompt length
         if len(prompt) > MAX_PROMPT_LENGTH:

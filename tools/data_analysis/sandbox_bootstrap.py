@@ -84,10 +84,13 @@ def main():
     # Create safe file operations instance
     try:
         sys.path.insert(0, "/app/tools")
-        from common.safe_file_ops import SafeFileOperations
+        from common.safe_file_ops import SafeFileOperations, SANDBOX_OUTPUT_DIR
 
         readonly_dir = os.environ.get("INPUT_DIR", "/data/input")
-        writable_dir = os.environ.get("OUTPUT_DIR", "/data/output")
+        # The sidecar engine sets OUTPUT_DIR=/tmp/output; when unset (e.g. the
+        # in-tool Docker harness), the default must be the real rw mount, the
+        # pre-sidecar /data/output path is read-only inside the container.
+        writable_dir = os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR)
         max_size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", "100"))
 
         safe_files = SafeFileOperations(

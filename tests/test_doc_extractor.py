@@ -295,13 +295,15 @@ class TestIntegration(unittest.TestCase):
 class TestResourceTokenResolution(unittest.TestCase):
     """Regression coverage for t_4f9e838e bug 1.
 
-    Server-side res:// upload tokens are single-use with a 5-minute TTL
-    (internal/resources/token.go): a second GET /internal/resource/{token}
-    answers 401. The client must surface the actionable re-upload remedy,
-    not the raw urllib error, and keep reporting other HTTP codes.
+    Server-side res:// upload tokens are multi-use with a 3600-second TTL
+    (internal/resources/token.go; tokenTTL in internal/resources/manager.go):
+    a live uri resolves on repeat GETs, and 401 answers once it has expired
+    (older than 1 hour) or is unknown. The client must surface the
+    actionable re-upload remedy, not the raw urllib error, and keep
+    reporting other HTTP codes.
     """
 
-    def test_401_surfaces_single_use_remedy(self):
+    def test_401_surfaces_expiry_remedy(self):
         import urllib.error
         from common.doc_extractor import download_file
 
@@ -314,7 +316,7 @@ class TestResourceTokenResolution(unittest.TestCase):
                 download_file("res://tok-401")
 
         message = str(ctx.exception)
-        self.assertIn("single-use, 5-minute TTL", message)
+        self.assertIn("Resource token invalid (multi-use, 3600-second TTL)", message)
         self.assertIn("Re-upload", message)
         self.assertIn("X-Session-ID", message)
         self.assertNotIn("HTTP Error 401", message)

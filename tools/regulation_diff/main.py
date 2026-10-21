@@ -34,12 +34,12 @@ from common.llm_cache import call_llm_with_cache
 
 logger = get_logger(__name__, "regulation_diff")
 
-# Server-side resource tokens (res://) are single-use with a 5-minute TTL
-# (internal/resources/token.go). Within one tool execution each token must be
-# fetched exactly once; re-fetching the same token would hit the server's
-# one-shot validation and answer 401 ("token already used"). When both
-# __files__ slots carry the same uri (a repeated attachment), reuse the cached
-# bytes instead of a second HTTP read.
+# Server-side resource tokens (res://) are multi-use with a 3600-second TTL
+# (internal/resources/token.go): while a token is live, re-fetching the same
+# token answers 200 again. The per-uri cache is therefore an efficiency guard,
+# not a correctness workaround: when both __files__ slots carry the same uri
+# (a repeated attachment), reuse the cached bytes instead of a second HTTP
+# read.
 _FETCHED_BYTES: dict[str, bytes] = {}
 
 

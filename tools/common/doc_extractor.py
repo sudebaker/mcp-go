@@ -174,16 +174,18 @@ def download_file(url: str) -> io.BytesIO:
             return io.BytesIO(resp.read())
         except urllib.error.HTTPError as e:
             if e.code == 401:
-                # Server-side upload tokens are single-use with a 5-minute TTL
-                # (internal/resources/token.go). A 401 here almost always means
-                # this res:// uri was already read once or was uploaded more
-                # than 5 minutes ago. Surface the remedy, not the raw HTTP code.
+                # Resource tokens (res://) are multi-use with a 3600-second
+                # TTL (internal/resources/manager.go). A 401 here almost
+                # always means the token expired (uploaded more than 3600 s /
+                # 1 hour ago) or is unknown — never that it was "already
+                # consumed": a live token resolves on every read.
                 raise Exception(
-                    "Resource token invalid (single-use, 5-minute TTL): the "
-                    "res:// uri was already consumed or expired, or the tool "
-                    "container has no SANDBOX_API_TOKEN for the Bearer guard. "
-                    "Re-upload the file with POST /upload (2 headers: "
-                    "Authorization Bearer + X-Session-ID) and pass the fresh uri."
+                    "Resource token invalid (multi-use, 3600-second TTL): the "
+                    "res:// uri expired (older than 1 hour) or is unknown, or "
+                    "the tool container has no SANDBOX_API_TOKEN for the "
+                    "Bearer guard. Re-upload the file with POST /upload "
+                    "(2 headers: Authorization Bearer + X-Session-ID) and "
+                    "pass the fresh uri."
                 ) from e
             raise Exception(f"Failed to resolve resource: HTTP {e.code}") from e
         except Exception as e:

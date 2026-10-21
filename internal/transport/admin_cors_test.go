@@ -61,7 +61,7 @@ func serveAdmin(t *testing.T, s *MCPServer, method, path string, headers map[str
 func TestAdminRoutes_RefusedWhenKeySetWithoutOrigins(t *testing.T) {
 	s := adminTestServer(t, "admin-key-abc12345", nil, true)
 
-	for _, origin := range []string{"https://evil.example", "http://epicteto.home:3080", ""} {
+	for _, origin := range []string{"https://evil.example", "https://your-ui.example.com", ""} {
 		headers := map[string]string{}
 		if origin != "" {
 			headers["Origin"] = origin
@@ -80,7 +80,7 @@ func TestAdminRoutes_RefusedWhenKeySetWithoutOrigins(t *testing.T) {
 // restricted: disallowed browsers are refused before the key is checked,
 // allowed origins (and Origin-less CLI clients) reach the bearer check.
 func TestAdminRoutes_CORSRestrictedWhenOriginsSet(t *testing.T) {
-	const allowedOrigin = "http://epicteto.home:3080"
+	const allowedOrigin = "https://your-ui.example.com"
 	s := adminTestServer(t, "admin-key-abc12345", []string{allowedOrigin}, true)
 
 	// Disallowed origin: 403 from CORS, before auth and before any handler.
@@ -123,7 +123,7 @@ func TestAdminRoutes_CORSRestrictedWhenOriginsSet(t *testing.T) {
 // Without ADMIN_API_KEY the admin surface stays disabled, exactly as before the
 // fail-closed rule.
 func TestAdminRoutes_DisabledWithoutAdminKey(t *testing.T) {
-	s := adminTestServer(t, "", []string{"http://epicteto.home:3080"}, true)
+	s := adminTestServer(t, "", []string{"https://your-ui.example.com"}, true)
 
 	rec := serveAdmin(t, s, http.MethodGet, "/admin/kb/users", nil)
 	if rec.Code != http.StatusNotFound {

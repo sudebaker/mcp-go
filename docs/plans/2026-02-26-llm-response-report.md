@@ -215,7 +215,7 @@ Add at the end (before the closing brace if any):
 ### Task 5: Build and verify
 
 ```bash
-cd /home/hp/Proyectos/mcp-go
+cd <ruta-del-repo>
 go build -o bin/mcp-server ./cmd/server && go vet ./...
 ```
 

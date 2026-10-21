@@ -28,7 +28,7 @@ Tokens are **never** stored in a config file. `configs/config.yaml` declares who
 ```yaml
 auth:
   keys:
-    - user_id: amphora
+    - user_id: admin
       key_env: MCP_AUTH_KEY
 ```
 
@@ -222,7 +222,7 @@ choose the account its tools run against:
 }
 ```
 
-With `Authorization: Bearer <token for user_id=amphora>`:
+With `Authorization: Bearer <token>` (the token is bound to `user_id=admin`):
 
 ```
 POST /mcp
@@ -594,7 +594,9 @@ Interacts with RustFS/S3 storage for file operations.
 
 ### POST /upload
 
-Uploads a file to the server for temporary storage. Files are stored in `/data/uploads/` with configurable TTL.
+Uploads a file to the server. The bytes go to RustFS (bucket `users`, under a
+per-user prefix derived from the authenticated identity), not to `/data/uploads`,
+and the response carries a `res://` token that tools resolve server-side.
 
 **Request:**
 ```
@@ -697,8 +699,9 @@ after issuance (`internal/resources/token.go`, `internal/resources/manager.go`
 `tokenTTL`, anchored by tests). The GET is **not** bound to the owner yet: it
 only requires the shared `SANDBOX_API_TOKEN` Bearer secret and a valid, live
 token — caller binding (only the upload's owner can read) is phase 2. Tools
-resolve tokens server-side through `GET /internal/resource/{token}`, an
-endpoint open on the Docker network and never exposed externally.
+resolve tokens server-side through `GET /internal/resource/{token}`, an endpoint
+reachable only on the internal Docker network (never published) and guarded by
+`Authorization: Bearer <SANDBOX_API_TOKEN>`; a request without it gets 401.
 
 The full flow a client must follow:
 
@@ -806,8 +809,8 @@ nodes with no edges. A markdown fence around the answer is stripped. Measured ag
 ### Database Configuration
 | Variable | Default | Description |
 |----------|---------|-------------|
-| DATABASE_URL | postgresql://mcp:mcp@localhost:5432/knowledge | PostgreSQL connection |
-| REDIS_URL | redis://localhost:6379/0 | Redis connection |
+| DATABASE_URL | built by the compose from `POSTGRES_*` | PostgreSQL connection (a value in `.env` is overridden) |
+| REDIS_URL | redis://localhost:6379/0 | Redis connection for the LLM cache; **not forwarded** by the compose and there is no redis service, so it stays unset in containers |
 
 ### RustFS/S3 Configuration
 | Variable | Default | Description |
@@ -829,6 +832,9 @@ nodes with no edges. A markdown fence around the answer is stripped. Measured ag
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
 
 **Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
+In the compose stack the RustFS credentials are **required** (`${VAR:?}`): the
+`rustfsadmin` defaults only apply when the server runs outside it, and leaving
+them means every client on the network can reach the bucket.
 
 ---
 

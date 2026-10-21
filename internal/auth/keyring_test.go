@@ -73,11 +73,11 @@ func TestResolveMode_TrimsSurroundingWhitespace(t *testing.T) {
 }
 
 func TestBuildKeyring_IndexesSHA256OfToken(t *testing.T) {
-	token := "amphora-token-abcdef"
+	token := "test-token-abcdef"
 	k, err := BuildKeyring(envFrom(map[string]string{
 		"MCP_AUTH_MODE": ModeRequired,
 		"MCP_AUTH_KEY":  token,
-	}), []Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}})
+	}), []Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,8 +95,8 @@ func TestBuildKeyring_IndexesSHA256OfToken(t *testing.T) {
 	}
 
 	userID, ok := k.Lookup(token)
-	if !ok || userID != "amphora" {
-		t.Errorf("expected (amphora, true), got (%q, %v)", userID, ok)
+	if !ok || userID != "admin" {
+		t.Errorf("expected (admin, true), got (%q, %v)", userID, ok)
 	}
 	if _, ok := k.Lookup("not-the-token-1234"); ok {
 		t.Error("unknown token must not resolve")
@@ -112,10 +112,10 @@ func TestBuildKeyring_IndexesSHA256OfToken(t *testing.T) {
 func TestBuildKeyring_MultipleUsers(t *testing.T) {
 	k, err := BuildKeyring(envFrom(map[string]string{
 		"MCP_AUTH_MODE":      ModeRequired,
-		"MCP_AUTH_KEY":       "amphora-token-abcdef",
+		"MCP_AUTH_KEY":       "test-token-abcdef",
 		"MCP_UPLOAD_API_KEY": "legacy-upload-token-99",
 	}), []Entry{
-		{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"},
+		{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"},
 		{UserID: "legacy-upload", KeyEnv: "MCP_UPLOAD_API_KEY"},
 	})
 	if err != nil {
@@ -134,12 +134,12 @@ func TestBuildKeyring_MultipleUsers(t *testing.T) {
 func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 	okEnv := map[string]string{
 		"MCP_AUTH_MODE":      ModeRequired,
-		"MCP_AUTH_KEY":       "amphora-token-abcdef",
+		"MCP_AUTH_KEY":       "test-token-abcdef",
 		"MCP_AUTH_KEY_BOB":   "bob-token-1234567890",
 		"MCP_AUTH_KEY_SHORT": "short",
 		"MCP_AUTH_KEY_EMPTY": "",
 	}
-	valid := Entry{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}
+	valid := Entry{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}
 	second := Entry{UserID: "bob", KeyEnv: "MCP_AUTH_KEY_BOB"}
 
 	tests := []struct {
@@ -169,12 +169,12 @@ func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 		},
 		{
 			name:       "empty key_env name",
-			entries:    []Entry{{UserID: "amphora", KeyEnv: " "}},
+			entries:    []Entry{{UserID: "admin", KeyEnv: " "}},
 			wantSubstr: "key_env",
 		},
 		{
 			name:       "duplicate user_id",
-			entries:    []Entry{valid, {UserID: "amphora", KeyEnv: "MCP_AUTH_KEY_BOB"}},
+			entries:    []Entry{valid, {UserID: "admin", KeyEnv: "MCP_AUTH_KEY_BOB"}},
 			wantSubstr: "duplicate user_id",
 		},
 		{
@@ -212,7 +212,7 @@ func TestBuildKeyring_FailFastOnBadEntry(t *testing.T) {
 
 func TestBuildKeyring_OffModeNeedsNoEnv(t *testing.T) {
 	k, err := BuildKeyring(envFrom(map[string]string{"MCP_AUTH_MODE": ModeOff}), []Entry{
-		{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY_UNSET"},
+		{UserID: "admin", KeyEnv: "MCP_AUTH_KEY_UNSET"},
 	})
 	if err != nil {
 		t.Fatalf("off mode must not require the key environment variables: %v", err)
@@ -239,7 +239,7 @@ func TestBuildKeyring_RejectsPlaceholderTokens(t *testing.T) {
 		t.Run(raw, func(t *testing.T) {
 			k, err := BuildKeyring(
 				envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": raw}),
-				[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+				[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 			)
 			if err == nil {
 				t.Fatalf("expected placeholder %q to be rejected, got a keyring with %d entries", raw, k.Size())
@@ -253,7 +253,7 @@ func TestBuildKeyring_RejectsPlaceholderTokens(t *testing.T) {
 	// A generated token is not caught by the placeholder guard.
 	if _, err := BuildKeyring(
 		envFrom(map[string]string{"MCP_AUTH_MODE": ModeRequired, "MCP_AUTH_KEY": "9f2c7d1e45b8a06c3e5d7f9012ab34cd"}),
-		[]Entry{{UserID: "amphora", KeyEnv: "MCP_AUTH_KEY"}},
+		[]Entry{{UserID: "admin", KeyEnv: "MCP_AUTH_KEY"}},
 	); err != nil {
 		t.Errorf("a generated token must be accepted, got: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestIsPlaceholderSecret(t *testing.T) {
 			t.Errorf("%q should be recognised as a placeholder", value)
 		}
 	}
-	for _, value := range []string{"", "a", "change_me_not", "amphora-token-abcdef", "9f2c7d1e45b8a06c"} {
+	for _, value := range []string{"", "a", "change_me_not", "test-token-abcdef", "9f2c7d1e45b8a06c"} {
 		if IsPlaceholderSecret(value) {
 			t.Errorf("%q must not be treated as a placeholder", value)
 		}

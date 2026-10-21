@@ -34,7 +34,7 @@ auth:
   keys:
     # With a single entry the variable is MCP_AUTH_KEY (what
     # deployments/.env.example ships and docker-compose.yml passes through).
-    - user_id: amphora
+    - user_id: admin
       key_env: MCP_AUTH_KEY
     # MCP_UPLOAD_API_KEY is declared as a keyring entry so the /upload endpoint
     # shares the single auth switch instead of having an on/off rule of its own.

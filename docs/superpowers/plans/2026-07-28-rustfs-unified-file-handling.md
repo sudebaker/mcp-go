@@ -1512,7 +1512,7 @@ def test_tool_context_files():
 
 Run:
 ```bash
-cd /home/amphora/Proyectos/mcp-go
+cd <ruta-del-repo>
 python -m pytest tests/tools/common/resources/ -v
 ```
 

@@ -12,7 +12,7 @@ How the MCP Orchestrator authenticates callers, what it refuses to do, and how t
   ```yaml
   auth:
     keys:
-      - user_id: amphora
+      - user_id: admin
         key_env: MCP_AUTH_KEY
       - user_id: legacy-upload
         key_env: MCP_UPLOAD_API_KEY
@@ -167,8 +167,9 @@ MCP endpoints keep their intentional permissive default, which LibreChat depends
 | `ADMIN_API_KEY` set, `allowed_origins` explicit | enabled with origin-restricted CORS: a disallowed `Origin` gets `403` before the key is even checked; an allowed `Origin` reaches the bearer check; requests without `Origin` (curl) are not subject to CORS |
 
 Tests: `internal/transport/admin_cors_test.go` covers the three states above. `configs/config.yaml`
-ships with `allowed_origins` set for the epicteto deployment (`http://epicteto.home:3080`,
-LibreChat).
+ships with `allowed_origins` pointing at a placeholder web-client origin
+(`https://your-ui.example.com`); replace it with the origin of the UI that will
+call the server.
 
 ## Tests
 

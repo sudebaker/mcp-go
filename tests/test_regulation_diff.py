@@ -139,7 +139,7 @@ class TestDiffCalculation(unittest.TestCase):
         self.assertGreater(deletions, 0)
 
 
-# --- Regression coverage for t_4f9e838e (bug 1: single-use res:// tokens) ----
+# --- Regression coverage for t_4f9e838e bug 1 (res:// token resolution) ----
 import importlib.util
 from io import BytesIO
 from pathlib import Path
@@ -163,10 +163,12 @@ def _load_tool_module():
 class TestResourceResolutionRegression(unittest.TestCase):
     """Regression coverage for t_4f9e838e bug 1 (regulation_diff side).
 
-    Server-side res:// tokens are one-shot (internal/resources/token.go): the
-    tool must fetch each uri exactly once per run — the same uri in both
-    __files__ slots resolves once internally — and a reused cross-call token
-    must fail with the actionable re-upload message, not a raw 401.
+    Server-side res:// tokens are multi-use with a 3600-second TTL
+    (internal/resources/token.go; tokenTTL in internal/resources/manager.go).
+    The tool must still fetch each uri exactly once per run — the same uri
+    in both __files__ slots resolves once internally — and an expired
+    (older than 1 hour) or unknown token must fail with the actionable
+    re-upload message, not a raw 401.
     """
 
     def setUp(self):
@@ -227,7 +229,7 @@ class TestResourceResolutionRegression(unittest.TestCase):
         self.assertEqual(sc["additions"], 1)
         self.assertEqual(sc["deletions"], 1)
 
-    def test_cross_call_reused_token_fails_with_reupload_remedy(self):
+    def test_cross_call_expired_token_fails_with_reupload_remedy(self):
         import urllib.error
 
         err = urllib.error.HTTPError(
@@ -243,7 +245,7 @@ class TestResourceResolutionRegression(unittest.TestCase):
         self.assertFalse(resp["success"], resp)
         self.assertEqual(resp["error"]["code"], "EXECUTION_FAILED")
         message = resp["error"]["message"]
-        self.assertIn("single-use, 5-minute TTL", message)
+        self.assertIn("Resource token invalid (multi-use, 3600-second TTL)", message)
         self.assertIn("Re-upload", message)
         self.assertNotIn("HTTP Error 401", message)
 

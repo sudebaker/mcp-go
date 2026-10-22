@@ -328,15 +328,16 @@ print(json.dumps(response))
 
 **Key Functions:**
 - `get_rustfs_client() -> Optional[Minio]` - Create MinIO client from env vars
-- `upload_to_rustfs(file_path, bucket) -> dict` - Upload with presigned URL
-- `download_from_rustfs(bucket, object, dest_path)` - Download to local path
-- `list_objects(bucket, prefix) -> list` - List objects with prefix filter
+- `operation_upload(bucket, key, content_b64) -> dict` - Upload; presigned URL only as a conditional extra
+- `operation_download(bucket, key) -> dict` - Returns the object content inline (text ≤ 1 MB for text-like objects, base64 otherwise — cap 100 MB); presigned URL as a conditional extra
+- `operation_list(bucket, prefix, max_keys)` / `operation_search(bucket, term, max_keys)` - List objects with prefix filter
+- `operation_delete(bucket, key)`, `operation_stat(bucket, key)` - Remove / describe a single object
 
 **Operations:** upload, download, list, search, delete, stat
 
 **Environment Variables:**
 - `RUSTFS_ENDPOINT` - Internal endpoint (e.g., `http://rustfs:9000`)
-- `RUSTFS_PUBLIC_URL` - Optional public host prefix for presigned URLs returned as an extra; with RustFS isolated on `mcp-internal` the port is not published and the URL is unreachable — download via the `rustfs_storage` tool (bucket + key)
+- `RUSTFS_PUBLIC_URL` - Optional public host prefix for presigned URLs returned as an extra; with RustFS isolated on `mcp-internal` the port is not published and the URL is unreachable — download via the `rustfs_storage` tool (bucket + key), which returns the file content itself (text or base64)
 - `RUSTFS_ACCESS_KEY_ID`, `RUSTFS_SECRET_ACCESS_KEY` - Credentials
 - `RUSTFS_PRESIGNED_TTL_SECONDS` - Presigned URL expiry (default: 3600)
 
@@ -462,7 +463,7 @@ Prevents prompt injection from external content:
 |----------|---------|-------------|
 | `BASE_URL` | required | Public URL for download links |
 | `RUSTFS_ENDPOINT` | `http://rustfs:9000` | Internal RustFS endpoint |
-| `RUSTFS_PUBLIC_URL` | optional | Conditional presigned-URL host prefix; downloads resolve via `rustfs_storage` (bucket/key) |
+| `RUSTFS_PUBLIC_URL` | optional | Conditional presigned-URL host prefix; downloads resolve via `rustfs_storage` (bucket/key), which returns the content itself |
 | `LLM_API_URL` | `http://ollama:11434` | LLM backend |
 | `LLM_MODEL` | `llama3` | Default LLM model |
 | `DATABASE_URL` | - | PostgreSQL connection URL |

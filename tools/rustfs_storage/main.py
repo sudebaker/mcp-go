@@ -2,6 +2,9 @@
 """
 RustFS/S3 Storage Tool for MCP Orchestrator.
 Provides upload, download, list, search, delete, and stat operations for S3-compatible storage.
+`download` delivers the object CONTENT itself (text for small text objects,
+base64 for everything else) — the presigned URL is only a conditional extra,
+because the 9000 port is not published outside the orchestrator network.
 """
 
 import json
@@ -36,6 +39,17 @@ ALLOWED_OPERATIONS = ["upload", "download", "list", "search", "delete", "stat"]
 DEFAULT_BUCKET = "users"
 # Presigned URL TTL (Time To Live) in seconds, configurable via RUSTFS_PRESIGNED_TTL_SECONDS env var
 PRESIGNED_URL_TTL_SECONDS = int(os.environ.get("RUSTFS_PRESIGNED_TTL_SECONDS", "3600"))
+
+# Download delivers the object content through the MCP response itself
+# (t_832e270e): RustFS sits isolated on the internal network, the 9000 port is
+# not published, so the presigned URL is only a conditional extra. Small text
+# objects come back decoded as text, everything else base64-encoded. The
+# overall inline cap mirrors MAX_UPLOAD_SIZE_MB already enforced on upload.
+MAX_TEXT_INLINE_BYTES = 1024 * 1024
+TEXT_SUFFIXES = (
+    ".txt", ".json", ".csv", ".tsv", ".md", ".yaml", ".yml", ".xml",
+    ".html", ".htm", ".log", ".canvas", ".ini", ".toml", ".py", ".js",
+)
 
 
 def read_request() -> dict[str, Any]:
@@ -139,6 +153,39 @@ def rewrite_to_public_url(presigned_url: str) -> str:
     rewritten = rewritten.replace(f"https://{endpoint_clean}", public_url)
 
     return rewritten
+
+
+def _looks_like_text(key: str, content_type: str) -> bool:
+    """Decide whether an object should be decoded and returned as text.
+
+    The content type wins (``text/*``, JSON, XML, YAML, CSV...); when it is
+    undecisive, the key's suffix is checked. When neither matches, the object
+    is treated as binary and returned base64-encoded.
+    """
+    ct = (content_type or "").split(";")[0].strip().lower()
+    if ct.startswith("text/"):
+        return True
+    if ct in (
+        "application/json",
+        "application/xml",
+        "application/csv",
+        "application/x-yaml",
+        "application/yaml",
+        "application/javascript",
+        "application/toml",
+    ):
+        return True
+    return key.lower().endswith(TEXT_SUFFIXES)
+
+
+def _fetch_object(client: Minio, bucket: str, key: str) -> bytes:
+    """Read the full object through the internal S3 client, freeing the connection."""
+    response = client.get_object(bucket, key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
 
 
 def validate_bucket_name(bucket: str) -> tuple[bool, Optional[str]]:
@@ -266,10 +313,8 @@ def operation_download(
     client: Minio, bucket: str, key: str, expiry: int = None
 ) -> dict:
     try:
-        # RUSTFS_PUBLIC_URL is deliberately not required (t_97f1a1de): the
-        # tool must work without it. Whatever URL comes back (internal or
-        # rewritten) only resolves where its host is reachable from the
-        # caller, and the response text marks it as such.
+        # The content travels in the MCP response itself (t_832e270e): with the
+        # 9000 port unpublished, a presigned URL is only an unreachable extra.
         is_valid, err = validate_object_key(key)
         if not is_valid:
             return {"success": False, "error": err}
@@ -279,7 +324,19 @@ def operation_download(
             return {"success": False, "error": err}
 
         stat = client.stat_object(bucket, key)
-        
+        size = stat.size
+        max_inline_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        if size > max_inline_bytes:
+            return {
+                "success": False,
+                "error": (
+                    f"Object too large to inline: {size} bytes "
+                    f"(max {MAX_UPLOAD_SIZE_MB}MB). It was not created through "
+                    "this tool's upload cap; deliver it where the presigned "
+                    "URL host is reachable or move it to a smaller object."
+                ),
+            }
+
         # Use provided expiry or fall back to configured TTL constant
         ttl_seconds = expiry if expiry is not None else PRESIGNED_URL_TTL_SECONDS
 
@@ -287,20 +344,35 @@ def operation_download(
             bucket, key, expires=timedelta(seconds=ttl_seconds)
         )
 
-        # Rewrite internal URL to public URL for external agents
-        public_url = rewrite_to_public_url(presigned_url)
-
-        return {
+        result = {
             "success": True,
             "bucket": bucket,
             "key": key,
-            "presigned_url": public_url,
+            "presigned_url": rewrite_to_public_url(presigned_url),
             "expires": ttl_seconds,
-            "size": stat.size,
+            "size": size,
             "content_type": stat.content_type,
         }
 
+        data = _fetch_object(client, bucket, key)
+        if (
+            len(data) <= MAX_TEXT_INLINE_BYTES
+            and _looks_like_text(key, stat.content_type)
+        ):
+            try:
+                result["content"] = data.decode("utf-8")
+                result["encoding"] = "text"
+                return result
+            except UnicodeDecodeError:
+                pass  # the declared text type lied; fall through to base64
+        result["content_base64"] = base64.b64encode(data).decode("ascii")
+        result["encoding"] = "base64"
+        return result
+
     except S3Error as e:
+        code = getattr(e, "code", "") or ""
+        if code in ("NoSuchKey", "NotFound"):
+            return {"success": False, "error": f"Object not found: {bucket}/{key}"}
         return {"success": False, "error": f"S3 error: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -434,12 +506,27 @@ def format_response_text(operation: str, result: dict) -> str:
         )
 
     elif operation == "download":
-        text += "✅ Download URL generated\n"
+        text += "✅ File content retrieved from storage\n"
         text += f"**Bucket:** {result.get('bucket')}\n"
         text += f"**Key:** {result.get('key')}\n"
-        text += f"**Expires in:** {result.get('expires')} seconds\n"
+        text += f"**Size:** {result.get('size')} bytes\n"
+        text += f"**Content-Type:** {result.get('content_type')}\n"
+        if result.get("encoding") == "text":
+            text += "**Content:** inline below (full file)\n\n"
+            text += "<<<CONTENT_START\n"
+            text += f"{result.get('content')}\n"
+            text += "CONTENT_END>>>\n\n"
+        elif result.get("encoding") == "base64":
+            text += (
+                "**Encoding:** base64 (binary or large object — decode before use)\n"
+                "**Base64 content:** inline below (full file)\n\n"
+            )
+            text += "<<<CONTENT_BASE64_START\n"
+            text += f"{result.get('content_base64')}\n"
+            text += "CONTENT_BASE64_END>>>\n\n"
+        text += f"**Presigned URL expires in:** {result.get('expires')} seconds\n"
         text += (
-            "**URL** (extra — only valid if that host:port is reachable from\n"
+            "**Presigned URL** (extra — only valid if that host:port is reachable from\n"
             f"your client; it usually is not): {result.get('presigned_url') or 'N/A'}\n"
         )
 

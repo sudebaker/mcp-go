@@ -28,7 +28,7 @@ las que este compose no propaga. Como mínimo hay que rellenar:
 | Variable | Qué poner |
 |---|---|
 | `BASE_URL` | URL con la que los clientes alcanzan el servidor, p. ej. `http://192.0.2.10:8080` |
-| `RUSTFS_PUBLIC_URL` | valor que el compose exige, pero NO hace la URL alcanzable (`rustfs` está en la red interna y su 9000 no se publica): las descargas van por la tool `rustfs_storage` (bucket + key) |
+| `RUSTFS_PUBLIC_URL` | valor que el compose exige, pero NO hace la URL alcanzable (`rustfs` está en la red interna y su 9000 no se publica): las descargas van por la tool `rustfs_storage` (bucket + key), que devuelve el contenido del fichero (texto o base64) |
 | `POSTGRES_PASSWORD` | secreto URL-safe (`openssl rand -hex 32`) |
 | `MCP_AUTH_KEY` | token Bearer del cliente MCP |
 | `MCP_UPLOAD_API_KEY` | token de `/upload`, **distinto** de `MCP_AUTH_KEY` |

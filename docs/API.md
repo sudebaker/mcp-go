@@ -572,7 +572,7 @@ Creates visual diagrams using Obsidian Canvas JSON format from text descriptions
 |-----------|------|----------|-------------|
 | description | string | Yes | Text description of the diagram |
 | layout | string | No | `horizontal`, `vertical`, `radial`, `auto` (default: `auto`) |
-| save_path | string | No | Optional custom path for .canvas file |
+| save_path | string | No | Optional custom path for .canvas file. Must be inside the sandbox output dir (`OUTPUT_DIR`, e.g. `/tmp/output`); when RustFS is unavailable the diagram is saved there and the path returned in `structured_content.local_path` |
 
 ---
 

@@ -13,11 +13,35 @@ import urllib.request
 import urllib.error
 from typing import Any
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.safe_file_ops import SANDBOX_OUTPUT_DIR
+
 try:
     import folium
     FOLIUM_AVAILABLE = True
 except ImportError:
     FOLIUM_AVAILABLE = False
+
+
+def resolve_output_path(raw: str) -> str:
+    """Resolve where the map HTML is written.
+
+    No absolute dead default in the YAML (t_1b5e1bdb): an empty value lands
+    on map.html inside the sandbox output dir — OUTPUT_DIR, injected by the
+    sidecar (engine.go) and by the in-tool docker executor (sandbox.py),
+    or SANDBOX_OUTPUT_DIR otherwise; /data is read-only there and the
+    pre-sidecar output root under it does not exist. A relative path anchors
+    to the same dir; an absolute one is honored as given (pre-existing
+    behaviour).
+    """
+    sandbox_dir = os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR)
+    raw = (raw or "").strip()
+    if not raw:
+        return os.path.join(sandbox_dir, "map.html")
+    if os.path.isabs(raw):
+        return raw
+    return os.path.join(sandbox_dir, raw)
 
 
 def read_request() -> dict[str, Any]:
@@ -152,7 +176,7 @@ def main() -> None:
             })
             return
 
-        output_path = arguments.get("output_path", "/data/output/map.html")
+        output_path = resolve_output_path(arguments.get("output_path", ""))
         max_points = min(int(arguments.get("max_points", 100)), 500)
 
         valid_types = {"ip", "gps", "cell"}

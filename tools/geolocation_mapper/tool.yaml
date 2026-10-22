@@ -38,8 +38,12 @@ input_schema:
             description: "Color del marcador (red, blue, green, orange, purple, darkblue, lightred, beige, darkgreen, pink)"
     output_path:
       type: string
-      default: /data/output/map.html
-      description: "Ruta donde guardar el mapa HTML generado"
+      description: >
+        Ruta donde guardar el mapa HTML generado. Si se omite, se escribe
+        map.html en el directorio de salida del sandbox (OUTPUT_DIR; p.ej.
+        /tmp/output). Una ruta relativa se ancla a ese directorio; las rutas
+        absolutas fuera de él fallan cuando /data o el rootfs son de solo
+        lectura.
     max_points:
       type: integer
       default: 100

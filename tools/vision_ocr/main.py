@@ -24,6 +24,7 @@ from common.resources import Resource, ToolContext
 from common.validators import validate_file_path, validate_url_ssrf
 from common.retry import call_llm_with_retry
 from common.structured_logging import get_logger
+from common.safe_file_ops import SANDBOX_OUTPUT_DIR
 
 logger = get_logger(__name__, "vision_ocr")
 
@@ -57,10 +58,24 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 
+def scratch_dir() -> Path:
+    """Scratch dir for URL downloads and PDF-page rasters.
+
+    /data is not a writable surface: sandbox jobs mount it read-only (the
+    sidecar engine mounts the per-job input volume at /data ro) and the
+    pre-sidecar scratch root under it never existed (t_1b5e1bdb). The only
+    writable mount is the sandbox output
+    volume, so everything scratch goes to OUTPUT_DIR (injected by the engine
+    and the in-tool docker executor) with SANDBOX_OUTPUT_DIR as fallback —
+    resolved via the constant, never via a literal dead path.
+    """
+    return Path(os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR))
+
+
 def download_image_if_url(image_path: str) -> str:
     """
     Download image if it's a URL, return local path.
-    Saves to /data/tmp for processing.
+    Saves to the sandbox output dir (scratch_dir()) for processing.
     """
     if not image_path.startswith(('http://', 'https://')):
         return image_path
@@ -70,7 +85,7 @@ def download_image_if_url(image_path: str) -> str:
     if not is_valid:
         raise ValueError(f"URL blocked by security policy: {error}")
 
-    tmp_dir = Path("/data/tmp")
+    tmp_dir = scratch_dir()
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     parsed = urlparse(image_path)
@@ -97,7 +112,7 @@ def convert_pdf_page_to_image(pdf_path: str, page: int = 0) -> str:
     except ImportError:
         raise ImportError("pdf2image is required for PDF processing. Install with: pip install pdf2image")
 
-    tmp_dir = Path("/data/tmp")
+    tmp_dir = scratch_dir()
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = tmp_dir / f"pdf_page_{page}_{uuid.uuid4().hex[:8]}.png"
@@ -416,7 +431,7 @@ def main() -> None:
                     resource_client = Resource(uri=image_path, name="", mime="", size=0, sha256="")
                     data = resource_client.read_bytes()
                     suffix = ".jpg"
-                tmp_dir = Path("/data/tmp")
+                tmp_dir = scratch_dir()
                 tmp_dir.mkdir(parents=True, exist_ok=True)
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir)) as tmp:
                     tmp.write(data)
@@ -445,7 +460,8 @@ def main() -> None:
             )
             return
 
-        # Handle URLs by downloading to /data/tmp (skip for res:// which is already downloaded)
+        # Handle URLs by downloading to the scratch dir — scratch_dir(), the
+        # sandbox output mount (skip for res:// which is already downloaded)
         if not image_path.startswith("/"):
             try:
                 image_path = download_image_if_url(image_path)

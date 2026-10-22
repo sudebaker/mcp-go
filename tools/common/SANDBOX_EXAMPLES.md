@@ -4,7 +4,11 @@
 
 El sandbox proporciona operaciones seguras de archivos con dos directorios separados:
 - **INPUT_DIR** (`/data/input`): Solo lectura - archivos de entrada
-- **OUTPUT_DIR** (`/data/output`): Lectura/Escritura - resultados
+- **OUTPUT_DIR** (`/tmp/output`): Lectura/Escritura - resultados
+
+El único volumen escribible del job es el de salida del sandbox: `SANDBOX_OUTPUT_DIR`
+(`safe_file_ops.py`) con `OUTPUT_DIR=/tmp/output` inyectado por el sidecar y por el
+executor docker in-tool. `/data` es de solo lectura y `/data/output` no existe.
 
 ## Basic File Operations
 
@@ -272,7 +276,7 @@ except Exception as e:
 
 ### Allowed Operations
 ✅ Read from `/data/input`
-✅ Write to `/data/output`
+✅ Write to `/tmp/output` (the sandbox output mount, SANDBOX_OUTPUT_DIR)
 ✅ Pandas operations (read_csv, read_excel, etc.)
 ✅ Matplotlib/Seaborn visualization
 ✅ Data processing and transformation

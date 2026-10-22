@@ -609,12 +609,22 @@ Interacts with RustFS/S3 storage for file operations.
 | content | string | No | Base64-encoded content for upload |
 | prefix | string | No | Prefix for list/search operations |
 | max_keys | integer | No | Max items to return (default: 100) |
-| expiry | integer | No | URL expiry in seconds for download (default: 3600) |
+| expiry | integer | No | URL expiry in seconds for the presigned extra (default: 3600) |
 
-The presigned URL is returned in `structured_content.presigned_url` and, in
-full, in the human-readable `text` of the response — never shortened. S3
-authenticates the URL through its `X-Amz-*` query parameters, so any
-truncation drops `X-Amz-Signature` and storage answers `403`.
+`operation: download` returns the object CONTENT, not another URL: small text
+objects (≤ 1 MB — classified by content type or key suffix: `text/*`, JSON,
+CSV, YAML, Markdown, `.canvas`...) come back decoded in
+`structured_content.content` with `encoding: "text"`; everything else comes
+back base64 in `structured_content.content_base64` with `encoding: "base64"`,
+up to the upload cap (100 MB). A missing object answers a clean `Object not
+found: <bucket>/<key>` error.
+
+Because RustFS has no published port, the presigned URL rides along only as a
+conditional extra: returned in `structured_content.presigned_url` and, in
+full, in the human-readable `text` — never shortened. S3 authenticates the
+URL through its `X-Amz-*` query parameters, so any truncation drops
+`X-Amz-Signature` and storage answers `403`; the URL only works where that
+host:port is reachable from the caller.
 
 ---
 

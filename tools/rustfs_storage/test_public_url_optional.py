@@ -63,6 +63,22 @@ class _Stat:
     last_modified = datetime(2026, 10, 20, 7, 0, 0)
 
 
+class _FakeResponse:
+    """Just enough of a get_object response for _fetch_object."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def close(self):
+        pass
+
+    def release_conn(self):
+        pass
+
+
 class _FakeClient:
     def bucket_exists(self, bucket):
         return True
@@ -72,6 +88,9 @@ class _FakeClient:
 
     def stat_object(self, bucket, key):
         return _Stat()
+
+    def get_object(self, bucket, key):
+        return _FakeResponse(b"%PDF-1.7 fake binary payload \x00\x01")
 
     def presigned_get_object(self, bucket, key, expires=None):
         return INTERNAL_PRESIGNED_URL

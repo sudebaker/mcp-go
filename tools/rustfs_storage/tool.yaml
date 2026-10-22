@@ -1,6 +1,6 @@
 name: rustfs_storage
 deprecated: true
-description: 'Operaciones en RustFS/S3: upload, download, list, search, delete, stat.'
+description: 'Operaciones en RustFS/S3: upload, download, list, search, delete, stat. download devuelve el contenido del objeto (texto o base64); la URL presignada va solo como extra condicional.'
 command: python3
 args:
 - main.py

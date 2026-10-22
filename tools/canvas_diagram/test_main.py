@@ -18,6 +18,7 @@ loaded, so these tests run in the CI python job without installing anything.
 """
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -184,7 +185,9 @@ def test_structured_content_flags_the_silent_fallback(monkeypatch):
     )
     monkeypatch.setattr(module, "write_response", lambda response: captured.append(response))
     monkeypatch.setattr(module, "get_rustfs_client", lambda: None)
-    monkeypatch.setattr(module, "ALLOWED_OUTPUT_DIR", "/tmp/canvas-test-output")
+    # output_dir() reads the injected env first — the executor/engine stays in
+    # charge; the test points it somewhere disposable.
+    monkeypatch.setenv("OUTPUT_DIR", "/tmp/canvas-test-output")
 
     module.main()
 
@@ -194,6 +197,63 @@ def test_structured_content_flags_the_silent_fallback(monkeypatch):
     assert payload["structured_content"]["used_llm"] is False
     assert payload["structured_content"]["llm_fallback"] is True
     assert "LLM requested but returned no usable DSL" in payload["content"][0]["text"]
+
+
+def test_output_dir_defaults_to_the_sandbox_mount(monkeypatch):
+    module, _ = load_tool(monkeypatch)
+
+    monkeypatch.delenv("OUTPUT_DIR", raising=False)
+    assert module.SANDBOX_OUTPUT_DIR == "/tmp/output"
+    assert module.output_dir() == "/tmp/output"
+
+    monkeypatch.setenv("OUTPUT_DIR", "/tmp/job-output")
+    assert module.output_dir() == "/tmp/job-output", (
+        "the executor/engine-injected env must win over the constant"
+    )
+
+
+def test_fallback_save_writes_real_canvas_json_in_sandbox_output_dir(monkeypatch, tmp_path):
+    module, _ = load_tool(monkeypatch)
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+
+    captured = []
+    monkeypatch.setattr(
+        module,
+        "read_request",
+        lambda: {
+            "request_id": "r-save",
+            "arguments": {"description": "Login -> Panel", "save_path": ""},
+            "context": {},
+        },
+    )
+    monkeypatch.setattr(module, "write_response", lambda response: captured.append(response))
+    monkeypatch.setattr(module, "get_rustfs_client", lambda: None)
+
+    module.main()
+
+    payload = captured[0]
+    assert payload["success"] is True
+    local_path = payload["structured_content"]["local_path"]
+    assert local_path is not None, "no RustFS and no save_path: the file must still be saved"
+    saved = Path(local_path)
+    assert str(tmp_path) in str(local_path), f"saved outside the sandbox output dir: {local_path}"
+    assert saved.exists(), f"fallback save did not produce the file: {local_path}"
+    stored = json.loads(saved.read_text())
+    assert [node["text"] for node in stored["nodes"]] == ["Login", "Panel"]
+
+
+def test_save_path_outside_sandbox_output_dir_is_rejected(monkeypatch, tmp_path):
+    module, _ = load_tool(monkeypatch)
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+
+    is_valid, err = module.validate_save_path(str(tmp_path / "ok.canvas"))
+    assert is_valid, err
+
+    is_valid, err = module.validate_save_path("/data/output/legacy.canvas")
+    assert not is_valid, "the dead /data/output mount must not validate as a save target"
+    assert err == f"Path must be within {str(tmp_path)}", (
+        f"the error must name the real output dir, got: {err}"
+    )
 
 
 if __name__ == "__main__":

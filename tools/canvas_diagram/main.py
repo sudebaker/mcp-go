@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from common.safe_file_ops import SANDBOX_OUTPUT_DIR
 from common.structured_logging import get_logger
 
 logger = get_logger(__name__, "canvas_diagram")
@@ -57,7 +58,20 @@ CANVAS_COLORS = {
 }
 
 LAYOUTS = ["horizontal", "vertical", "radial", "auto"]
-ALLOWED_OUTPUT_DIR = "/data/output"
+
+
+def output_dir() -> str:
+    """Directory where the .canvas file is saved when RustFS is unavailable.
+
+    The only writable mount is the sandbox output volume: the sidecar injects
+    OUTPUT_DIR=/tmp/output (engine.go) and the in-tool docker executor mounts
+    the same path (sandbox.py). /data is mounted read-only there and the
+    pre-sidecar output root under /data does not exist (t_1b5e1bdb) — the dir
+    comes from SANDBOX_OUTPUT_DIR, never from a literal path; OUTPUT_DIR, when
+    set, wins so the executor and the engine stay in charge.
+    """
+    return os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR)
+
 
 # /api/generate with a thinking model used to take 115s and return nothing;
 # with `think: false` the same prompt answers in ~14s. 30s (the previous
@@ -163,11 +177,12 @@ def validate_save_path(path: str) -> tuple[bool, Optional[str]]:
     if ".." in path:
         return False, "Path traversal not allowed"
 
+    allowed_directory = os.path.abspath(output_dir())
     abs_path = os.path.abspath(path)
-    abs_allowed = os.path.abspath(ALLOWED_OUTPUT_DIR)
+    abs_allowed = allowed_directory
 
     if not abs_path.startswith(abs_allowed + os.sep) and abs_path != abs_allowed:
-        return False, f"Path must be within {ALLOWED_OUTPUT_DIR}"
+        return False, f"Path must be within {allowed_directory}"
 
     return True, None
 
@@ -750,11 +765,11 @@ def main() -> None:
                         pass
 
             if not saved_path:
-                output_dir = ALLOWED_OUTPUT_DIR
                 try:
-                    os.makedirs(output_dir, exist_ok=True)
+                    save_dir = output_dir()
+                    os.makedirs(save_dir, exist_ok=True)
                     filename = f"canvas_{uuid.uuid4().hex[:8]}.canvas"
-                    save_path = os.path.join(output_dir, filename)
+                    save_path = os.path.join(save_dir, filename)
                     with open(save_path, "w") as f:
                         json.dump(canvas_json, f, indent=2)
                     saved_path = save_path

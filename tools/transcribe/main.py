@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.resources import ToolContext
 from common.structured_logging import get_logger
 from common.validators import validate_read_path, PathValidationError, sanitize_filename
+from common.safe_file_ops import SANDBOX_OUTPUT_DIR
 
 logger = get_logger(__name__, "transcribe")
 
@@ -37,6 +38,21 @@ MAX_AUDIO_SIZE_MB = 100
 
 SUPPORTED_FORMATS = {".mp3", ".mp4", ".wav", ".ogg", ".m4a", ".webm", ".flac", ".opus", ".mpeg", ".mpga"}
 ALLOWED_AUDIO_DIR = "/data"
+
+
+def scratch_dir() -> Path:
+    """Scratch dir for decoded temp audio.
+
+    The pre-sidecar scratch root under /data never existed and /data is mounted
+    read-only in sandbox jobs
+    (t_1b5e1bdb), so temp audio is written into the only writable mount: the
+    sandbox output volume — OUTPUT_DIR (injected by the sidecar engine and
+    the in-tool docker executor) with SANDBOX_OUTPUT_DIR as fallback,
+    resolved via the constant, never a literal dead path. The temp file is
+    unlinked right after transcription; it may surface among the collected
+    output files while the job runs.
+    """
+    return Path(os.environ.get("OUTPUT_DIR", SANDBOX_OUTPUT_DIR))
 
 # Whisper picks its decoder from the filename and mime type we send, so a res://
 # resource needs its suffix recovered: /internal/resource/<token> returns the
@@ -188,7 +204,7 @@ def transcribe_fileobj(fileobj, filename: str, mime_type: str, language: Optiona
 
 
 def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
-    """Decode base64 audio, save to temp file in /data and transcribe."""
+    """Decode base64 audio, save to temp file in the sandbox scratch dir and transcribe."""
     try:
         if "," in audio_b64:
             audio_b64 = audio_b64.split(",", 1)[1]
@@ -203,8 +219,9 @@ def transcribe_base64(audio_b64: str, filename: str, language: Optional[str] = N
 
     suffix = Path(filename).suffix.lower() or ".wav"
 
-    # Create temp file in /data/tmp (within allowed directory for transcription)
-    tmp_dir = Path("/data/tmp")
+    # Temp file inside the sandbox output mount (scratch_dir(); /data/tmp
+    # never existed) so the sandbox can read it back.
+    tmp_dir = scratch_dir()
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir)) as tmp:

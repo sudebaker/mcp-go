@@ -23,6 +23,6 @@ input_schema:
         selection)'
     save_path:
       type: string
-      description: Optional custom path to save the .canvas file
+      description: "Optional custom path to save the .canvas file; must be inside the sandbox output dir (OUTPUT_DIR, e.g. /tmp/output) — /data is read-only and its pre-sidecar output root does not exist"
   required:
   - description

@@ -351,7 +351,7 @@ def list_files(
 
 def validate_write_path(
     file_path: str,
-    writable_dir: str = "/data/output",
+    writable_dir: str,
     create_parents: bool = True,
     max_size_mb: Optional[int] = None,
 ) -> Path:
@@ -360,7 +360,11 @@ def validate_write_path(
 
     Args:
         file_path: Path of the file to write.
-        writable_dir: Base writable directory.
+        writable_dir: Base writable directory. Required, no dead default: the
+            caller picks it from SANDBOX_OUTPUT_DIR (safe_file_ops) or the
+            OUTPUT_DIR the sandbox injects — the old default pointed at the
+            dead pre-sidecar output root, a directory that does not exist and
+            is read-only in sandbox jobs (t_1b5e1bdb).
         create_parents: Whether to create parent directories.
         max_size_mb: Maximum allowed file size in MB (checked if file already exists).
 

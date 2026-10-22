@@ -811,7 +811,7 @@ def build_analysis_prompt(data_summary: str, question: str, output_format: str) 
     the caller phrases the request ("plot monthly revenue" with no png enum
     must still produce the file). Paths never appear as literals here: they
     come from SANDBOX_OUTPUT_DIR and safe_files.save_figure (anti-drift,
-    t_14685e1f — /data/output was the pre-sidecar harness mount and is
+    t_14685e1f — the pre-sidecar harness output mount under /data is
     read-only inside the container).
     """
     prompt_parts = [

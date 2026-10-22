@@ -10,7 +10,7 @@ input_schema:
   properties:
     __files__:
       type: array
-      description: Documents to classify as objects {url, name}.
+      description: "Documents to classify as objects {url, name}. url: http(s) link, res://<token> or file:///data/... (file inside /data)."
       items:
         type: object
         properties:

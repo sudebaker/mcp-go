@@ -425,6 +425,57 @@ def operation_stat(client: Minio, bucket: str, key: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def format_response_text(operation: str, result: dict) -> str:
+    """Render the human-readable summary of a completed storage operation.
+
+    The presigned URL is printed in full. Callers hand it back to other tools as
+    ``__files__[].url``, and S3 authenticates it through the ``X-Amz-*`` query
+    parameters: any truncation drops ``X-Amz-Signature`` and RustFS answers 403.
+    """
+    text = f"**RustFS Operation: {operation}**\n\n"
+
+    if operation == "upload":
+        text += "✅ File uploaded successfully\n"
+        text += f"**Bucket:** {result.get('bucket')}\n"
+        text += f"**Key:** {result.get('key')}\n"
+        text += f"**Size:** {result.get('size')} bytes\n"
+        text += f"**Download URL:** {result.get('presigned_url') or 'N/A'}\n"
+
+    elif operation == "download":
+        text += "✅ Download URL generated\n"
+        text += f"**Bucket:** {result.get('bucket')}\n"
+        text += f"**Key:** {result.get('key')}\n"
+        text += f"**Expires in:** {result.get('expires')} seconds\n"
+        text += f"**URL:** {result.get('presigned_url') or 'N/A'}\n"
+
+    elif operation in ["list", "search"]:
+        files = result.get("files", [])
+        text += f"**Bucket:** {result.get('bucket')}\n"
+        text += f"**Files found:** {result.get('count')}\n\n"
+        if files:
+            text += "**Files:**\n"
+            for f in files[:10]:
+                size_str = f"{f['size']:,}" if f.get("size") else "N/A"
+                text += f"- {f['key']} ({size_str} bytes)\n"
+            if len(files) > 10:
+                text += f"\n... and {len(files) - 10} more\n"
+
+    elif operation == "delete":
+        text += "✅ File deleted successfully\n"
+        text += f"**Bucket:** {result.get('bucket')}\n"
+        text += f"**Key:** {result.get('key')}\n"
+
+    elif operation == "stat":
+        text += f"**Bucket:** {result.get('bucket')}\n"
+        text += f"**Key:** {result.get('key')}\n"
+        text += f"**Size:** {result.get('size')} bytes\n"
+        text += f"**Content-Type:** {result.get('content_type')}\n"
+        text += f"**ETag:** {result.get('etag')}\n"
+        text += f"**Last-Modified:** {result.get('last_modified')}\n"
+
+    return text
+
+
 def main() -> None:
     logger.warning(
         "The rustfs_storage tool is deprecated. "
@@ -605,46 +656,7 @@ def main() -> None:
             )
             return
 
-        response_text = f"**RustFS Operation: {operation}**\n\n"
-
-        if operation == "upload":
-            response_text += "✅ File uploaded successfully\n"
-            response_text += f"**Bucket:** {result.get('bucket')}\n"
-            response_text += f"**Key:** {result.get('key')}\n"
-            response_text += f"**Size:** {result.get('size')} bytes\n"
-            response_text += f"**Download URL:** {result.get('presigned_url', 'N/A')[:80]}...\n"
-
-        elif operation == "download":
-            response_text += "✅ Download URL generated\n"
-            response_text += f"**Bucket:** {result.get('bucket')}\n"
-            response_text += f"**Key:** {result.get('key')}\n"
-            response_text += f"**Expires in:** {result.get('expires')} seconds\n"
-            response_text += f"**URL:** {result.get('presigned_url')[:80]}...\n"
-
-        elif operation in ["list", "search"]:
-            files = result.get("files", [])
-            response_text += f"**Bucket:** {result.get('bucket')}\n"
-            response_text += f"**Files found:** {result.get('count')}\n\n"
-            if files:
-                response_text += "**Files:**\n"
-                for f in files[:10]:
-                    size_str = f"{f['size']:,}" if f.get("size") else "N/A"
-                    response_text += f"- {f['key']} ({size_str} bytes)\n"
-                if len(files) > 10:
-                    response_text += f"\n... and {len(files) - 10} more\n"
-
-        elif operation == "delete":
-            response_text += "✅ File deleted successfully\n"
-            response_text += f"**Bucket:** {result.get('bucket')}\n"
-            response_text += f"**Key:** {result.get('key')}\n"
-
-        elif operation == "stat":
-            response_text += f"**Bucket:** {result.get('bucket')}\n"
-            response_text += f"**Key:** {result.get('key')}\n"
-            response_text += f"**Size:** {result.get('size')} bytes\n"
-            response_text += f"**Content-Type:** {result.get('content_type')}\n"
-            response_text += f"**ETag:** {result.get('etag')}\n"
-            response_text += f"**Last-Modified:** {result.get('last_modified')}\n"
+        response_text = format_response_text(operation, result)
 
         write_response(
             {

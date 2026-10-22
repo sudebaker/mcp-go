@@ -12,7 +12,7 @@ input_schema:
       type: array
       minItems: 2
       maxItems: 2
-      description: Two files, index 0 = old version, index 1 = new version
+      description: "Two files, index 0 = old version, index 1 = new version. Each {url, name}; url: http(s) link, res://<token> or file:///data/... (file inside /data)."
       items:
         type: object
         properties:

@@ -254,6 +254,27 @@ Executes a specific tool with provided arguments.
 
 ## Available Tools
 
+### File arguments (`__files__`)
+
+Tools that take documents (`batch_summarize`, `document_classifier`,
+`regulation_diff`, `config_auditor`, ...) receive them as `__files__`, an array
+of objects:
+
+```json
+{"__files__": [{"url": "file:///data/uploads/contrato.pdf", "name": "contrato.pdf"}]}
+```
+
+Each `url` may be:
+
+| Form | Use |
+|------|-----|
+| `file:///data/...` | File already present inside the container under `/data` (a previous tool output, a mounted file, or one an operator placed there). Resolved locally, no network call. Paths outside `/data`, and symlinks that resolve outside it, are rejected. |
+| `res://<token>` | Opaque handle returned by `POST /upload` and `resources/list`. Multi-use until expiry (1-hour TTL); fetched from the internal `/internal/resource/{token}` endpoint. |
+| `http(s)://...` | Public download link or a **complete** S3 presigned URL. Private, loopback, link-local and cloud-metadata addresses are blocked by the SSRF guard, so a presigned URL pointing at a LAN address must be fetched through `res://` (or `file://` if the file is inside `/data`) instead. |
+
+A presigned URL only works while its `X-Amz-Signature` query parameter is
+intact: copy the whole URL, never a shortened form.
+
 ### echo
 
 Simple text echo for testing.
@@ -382,7 +403,7 @@ Compares two versions of a document or regulation.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| __files__ | array | Yes | Exactly 2 entries: `[0]` = old version, `[1]` = new version. Each is `{url: "res://<token>" or http(s) URL (SSRF-validated), name: "file.ext"}`; a plain uri string is also tolerated |
+| __files__ | array | Yes | Exactly 2 entries: `[0]` = old version, `[1]` = new version. Each is `{url: "res://<token>", http(s) URL (SSRF-validated) or file:///data/... (file inside /data), name: "file.ext"}`; a plain uri string is also tolerated |
 | focus | string | No | Optional focus area |
 | output_format | string | No | `markdown` (default) or `structured` |
 
@@ -405,7 +426,7 @@ line and the failure is reported in `notes`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| __files__ | array | Yes | `{url, name}` entries. `url` is a `res://<token>` from `POST /upload` or an http(s) URL (SSRF-validated); `name` must carry the extension |
+| __files__ | array | Yes | `{url, name}` entries. `url` is a `res://<token>` from `POST /upload`, an http(s) URL (SSRF-validated) or `file:///data/...` (file inside `/data`); `name` must carry the extension |
 | rules | array | No | `secrets`, `empty_required`, `dangerous_ports`, `debug_mode`, `hardcoded_ips` (default: all) |
 | severity_filter | string | No | Minimum severity reported: `all` (default), `critical`, `high` (critical + high), `medium`. It only trims the reported list — the score always reflects the whole audit |
 
@@ -589,6 +610,11 @@ Interacts with RustFS/S3 storage for file operations.
 | prefix | string | No | Prefix for list/search operations |
 | max_keys | integer | No | Max items to return (default: 100) |
 | expiry | integer | No | URL expiry in seconds for download (default: 3600) |
+
+The presigned URL is returned in `structured_content.presigned_url` and, in
+full, in the human-readable `text` of the response — never shortened. S3
+authenticates the URL through its `X-Amz-*` query parameters, so any
+truncation drops `X-Amz-Signature` and storage answers `403`.
 
 ---
 

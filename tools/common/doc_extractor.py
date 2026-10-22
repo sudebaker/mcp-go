@@ -22,7 +22,7 @@ import yaml
 import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import importlib.util
 
@@ -141,9 +141,75 @@ def validate_url_for_download(url: str) -> tuple[bool, str]:
         return False, f"URL validation error: {str(e)}"
 
 
+# Roots a ``file://`` URL may name. Tools run inside the container, where the
+# server stores uploads under /data (see POST /upload); anything outside these
+# roots is refused. This does not loosen SSRF: a file:// URI opens no socket,
+# and every other scheme still goes through validate_url_for_download().
+LOCAL_FILE_ROOTS = ("/data",)
+MAX_LOCAL_FILE_BYTES = 50 * 1024 * 1024
+
+
+def is_under_allowed_root(path: Path) -> bool:
+    """True when ``path`` (already resolved) lives under an allowed local root.
+
+    Same policy as ``validators.validate_file_path`` (default allowed dir
+    ``/data``), applied to every configured root.
+    """
+    for root in LOCAL_FILE_ROOTS:
+        try:
+            resolved_root = Path(root).resolve()
+        except OSError:
+            continue
+        if path.is_relative_to(resolved_root):
+            return True
+    return False
+
+
+def resolve_local_file_url(url: str) -> Path:
+    """Map ``file://`` to a readable path inside an allowed root.
+
+    Symlinks are resolved before the root check, so a link under /data that
+    points at /etc/shadow is rejected rather than followed.
+
+    Raises:
+        ValueError: the URL is malformed, names a host, escapes the allowed
+            roots, is not a regular file, or exceeds the size limit.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        raise ValueError(f"Not a file:// URL: {url}")
+    if parsed.netloc not in ("", "localhost"):
+        raise ValueError(f"file:// URL must not name a host: {url}")
+    raw_path = unquote(parsed.path)
+    if not raw_path:
+        raise ValueError(f"file:// URL has no path: {url}")
+
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise ValueError(f"file:// URL path must be absolute: {url}")
+
+    resolved = path.resolve()
+    if not is_under_allowed_root(resolved):
+        raise ValueError(
+            f"Local path outside allowed roots {list(LOCAL_FILE_ROOTS)}: {raw_path}"
+        )
+    if not resolved.is_file():
+        raise ValueError(f"Local path is not a regular file: {raw_path}")
+    size = resolved.stat().st_size
+    if size > MAX_LOCAL_FILE_BYTES:
+        raise ValueError(
+            f"Local file exceeds {MAX_LOCAL_FILE_BYTES} bytes limit: {size}"
+        )
+    return resolved
+
+
 def download_file(url: str) -> io.BytesIO:
     """
     Download a file from URL and return as BytesIO buffer.
+
+    Accepted forms: ``http(s)://`` (SSRF-checked), ``res://<token>`` (internal
+    resource endpoint) and ``file:///data/...`` (local file inside an allowed
+    root).
 
     Args:
         url: URL to download from
@@ -153,7 +219,7 @@ def download_file(url: str) -> io.BytesIO:
 
     Raises:
         ImportError: If httpx is not available
-        ValueError: If URL fails SSRF validation
+        ValueError: If URL fails SSRF validation or names a disallowed path
         Exception: If download fails
 
     """
@@ -190,6 +256,9 @@ def download_file(url: str) -> io.BytesIO:
             raise Exception(f"Failed to resolve resource: HTTP {e.code}") from e
         except Exception as e:
             raise Exception(f"Failed to resolve resource: {str(e)}") from e
+
+    if url.startswith("file:"):
+        return io.BytesIO(resolve_local_file_url(url).read_bytes())
 
     if httpx is None:
         raise ImportError("httpx is not installed. Install with: pip install httpx")

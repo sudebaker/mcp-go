@@ -1828,6 +1828,10 @@ git commit -m "feat(tools): migrate data_analysis and case_evidence to ToolConte
 
 - [ ] **Step 1: canvas_diagram**
 
+> Historical note (2026-10-22): the `/data/output` "short-term" below is this plan's original
+> sketch and is **superseded** — since PR #71 the writable directory is `SANDBOX_OUTPUT_DIR`
+> (`/tmp/output`), injected by the sandbox contract (see `docs/SANDBOX_SIDECAR_API.md`).
+
 Remove custom MinIO upload. Add response field that instructs Go to store the file, or add a new tool operation that the Go server handles. Short-term: write to `/data/output` and include base64 in response for Go to upload.
 
 Long-term: expose a Go endpoint `POST /internal/resource/upload` for tools to request storage. Implement in Phase 5.

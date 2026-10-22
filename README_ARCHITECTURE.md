@@ -336,7 +336,7 @@ print(json.dumps(response))
 
 **Environment Variables:**
 - `RUSTFS_ENDPOINT` - Internal endpoint (e.g., `http://rustfs:9000`)
-- `RUSTFS_PUBLIC_URL` - Public URL for external agents
+- `RUSTFS_PUBLIC_URL` - Optional public host prefix for presigned URLs returned as an extra; with RustFS isolated on `mcp-internal` the port is not published and the URL is unreachable — download via the `rustfs_storage` tool (bucket + key)
 - `RUSTFS_ACCESS_KEY_ID`, `RUSTFS_SECRET_ACCESS_KEY` - Credentials
 - `RUSTFS_PRESIGNED_TTL_SECONDS` - Presigned URL expiry (default: 3600)
 
@@ -413,6 +413,12 @@ RustFS provides object storage with presigned URLs. It's accessed internally by 
 - `RUSTFS_ENDPOINT` - For MCP server → RustFS communication (internal)
 - `RUSTFS_PUBLIC_URL` - For client → RustFS direct download (external)
 
+Both URL legs are conditional extras: the primary file handle is the internal
+reference (bucket + key) returned by the tools, resolvable with `rustfs_storage`
+(`operation: download`). With RustFS alone on the `mcp-internal` network
+(`internal: true`) Docker publishes no port 9000, so neither URL resolves from
+outside — see docs/API.md.
+
 ---
 
 ## Security
@@ -456,7 +462,7 @@ Prevents prompt injection from external content:
 |----------|---------|-------------|
 | `BASE_URL` | required | Public URL for download links |
 | `RUSTFS_ENDPOINT` | `http://rustfs:9000` | Internal RustFS endpoint |
-| `RUSTFS_PUBLIC_URL` | required | Public RustFS URL for clients |
+| `RUSTFS_PUBLIC_URL` | optional | Conditional presigned-URL host prefix; downloads resolve via `rustfs_storage` (bucket/key) |
 | `LLM_API_URL` | `http://ollama:11434` | LLM backend |
 | `LLM_MODEL` | `llama3` | Default LLM model |
 | `DATABASE_URL` | - | PostgreSQL connection URL |

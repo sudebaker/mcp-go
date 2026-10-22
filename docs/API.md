@@ -842,7 +842,7 @@ nodes with no edges. A markdown fence around the answer is stripped. Measured ag
 | Variable | Default | Description |
 |----------|---------|-------------|
 | RUSTFS_ENDPOINT | rustfs:9000 | S3-compatible storage endpoint (internal Docker network) |
-| RUSTFS_PUBLIC_URL | **required** | Public URL for external agents (e.g., http://192.168.1.100:9000) |
+| RUSTFS_PUBLIC_URL | optional | Host prefix for the presigned URL included as an extra (e.g., http://192.168.1.100:9000) |
 | RUSTFS_ACCESS_KEY_ID | rustfsadmin | Access key |
 | RUSTFS_SECRET_ACCESS_KEY | rustfsadmin | Secret key |
 | SSRF_ALLOWLIST | rustfs | Comma-separated list of allowed internal hosts/CIDR ranges (whitelist) |
@@ -857,7 +857,9 @@ nodes with no edges. A markdown fence around the answer is stripped. Measured ag
 - `S3_OPERATION_TIMEOUT_SECONDS`: Prevents indefinite blocking on slow S3 operations.
 - `RUSTFS_PRESIGNED_TTL_SECONDS`: Controls how long uploaded file URLs remain valid.
 
-**Note:** `RUSTFS_PUBLIC_URL` is required for tools that generate presigned URLs (rustfs_storage, canvas_diagram). The server uses `RUSTFS_ENDPOINT` for internal communication and rewrites URLs to `RUSTFS_PUBLIC_URL` before returning them to external agents.
+**Note:** Tools work WITHOUT `RUSTFS_PUBLIC_URL`: everything is generated and resolved through the internal endpoint (`RUSTFS_ENDPOINT`). The file handle that always works is the internal reference — **bucket + key** — returned by the tools (e.g., `canvas_diagram` returns `bucket` + `key`) and resolvable with the `rustfs_storage` tool (`operation: download`).
+
+`RUSTFS_PUBLIC_URL`, when configured, only rewrites the host of the presigned URL returned as an EXTRA. In the compose stack RustFS sits alone on the `mcp-internal` network (`internal: true`), so Docker publishes no port 9000 and that URL is unreachable from any client — treat it as conditional, never as the primary access path.
 In the compose stack the RustFS credentials are **required** (`${VAR:?}`): the
 `rustfsadmin` defaults only apply when the server runs outside it, and leaving
 them means every client on the network can reach the bucket.

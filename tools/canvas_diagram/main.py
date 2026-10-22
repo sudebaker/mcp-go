@@ -113,20 +113,15 @@ def get_rustfs_client() -> Optional[Minio]:
         return None
 
 
-def validate_rustfs_public_url() -> tuple[bool, Optional[str]]:
-    """Validate that RUSTFS_PUBLIC_URL is configured for external access."""
-    public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
-    if not public_url:
-        return False, (
-            "RUSTFS_PUBLIC_URL is not configured. "
-            "Set this environment variable to the publicly accessible URL "
-            "for RustFS (e.g., http://192.168.1.100:9000)"
-        )
-    return True, None
-
-
 def rewrite_to_public_url(presigned_url: str) -> str:
-    """Rewrite internal RustFS URL to public URL for external agents."""
+    """Rewrite internal RustFS URL to the public URL, when configured.
+
+    The rewritten URL is an EXTRA, never the primary access path: RustFS lives
+    alone on the mcp-internal network (internal: true), Docker publishes no
+    9000 there, so the URL only works when that host:port is reachable from
+    the client. The primary handle for consumers is the internal reference
+    (bucket + key), resolved with the `rustfs_storage` tool (t_97f1a1de).
+    """
     endpoint = os.environ.get("RUSTFS_ENDPOINT", "rustfs:9000")
     public_url = os.environ.get("RUSTFS_PUBLIC_URL", "").strip()
 
@@ -144,12 +139,14 @@ def rewrite_to_public_url(presigned_url: str) -> str:
 
 
 def upload_to_rustfs(client: Minio, bucket: str, key: str, content: str) -> dict:
-    try:
-        # Validate that public URL is configured for external access
-        is_valid, err = validate_rustfs_public_url()
-        if not is_valid:
-            return {"success": False, "error": err}
+    """Upload the canvas and report the internal reference (bucket + key).
 
+    RUSTFS_PUBLIC_URL is not required: without it the upload still happens and
+    "url" comes back None (no download URL is promised anywhere); with it,
+    "url" is the rewritten presigned URL — an extra that only works where that
+    host:port is reachable from the client.
+    """
+    try:
         if not client.bucket_exists(bucket):
             client.make_bucket(bucket)
 
@@ -158,14 +155,17 @@ def upload_to_rustfs(client: Minio, bucket: str, key: str, content: str) -> dict
             bucket, key, data, length=len(content), content_type="application/json"
         )
 
-        presigned_url = client.presigned_get_object(
-            bucket, key, expires=timedelta(hours=72)
-        )
+        # The presigned URL is only an extra: without RUSTFS_PUBLIC_URL no URL
+        # is emitted at all — the internal presigned (rustfs:9000) would be as
+        # unreachable from the client as the public one is network-isolated.
+        url = None
+        if os.environ.get("RUSTFS_PUBLIC_URL", "").strip():
+            presigned_url = client.presigned_get_object(
+                bucket, key, expires=timedelta(hours=72)
+            )
+            url = rewrite_to_public_url(presigned_url)
 
-        # Rewrite internal URL to public URL for external agents
-        public_url = rewrite_to_public_url(presigned_url)
-
-        return {"success": True, "url": public_url, "key": key, "bucket": bucket}
+        return {"success": True, "url": url, "key": key, "bucket": bucket}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -739,6 +739,9 @@ def main() -> None:
         )
 
         rustfs_url = None
+        rustfs_bucket = None
+        rustfs_key = None
+        rustfs_saved = False
         saved_path = None
 
         client = get_rustfs_client()
@@ -748,9 +751,17 @@ def main() -> None:
             content = json.dumps(canvas_json, indent=2)
             result = upload_to_rustfs(client, RUSTFS_BUCKET, key, content)
             if result.get("success"):
+                rustfs_bucket = result.get("bucket")
+                rustfs_key = result.get("key")
                 rustfs_url = result.get("url")
+                rustfs_saved = True
+            else:
+                logger.warning(
+                    "RustFS upload failed; falling back to the output dir",
+                    extra_data={"error": result.get("error")},
+                )
 
-        if not rustfs_url:
+        if not rustfs_saved:
             if save_path:
                 is_valid, err = validate_save_path(save_path)
                 if is_valid:
@@ -795,8 +806,21 @@ def main() -> None:
                 "built from the description directly.\n\n"
             )
 
-        if rustfs_url:
-            response_text += f"**Saved to (RustFS):** {rustfs_url}\n\n"
+        if rustfs_saved:
+            response_text += (
+                f"**Saved to RustFS** — bucket `{rustfs_bucket}`, key `{rustfs_key}`\n\n"
+            )
+            response_text += (
+                "**Download (always works):** run the `rustfs_storage` tool with\n"
+                f'`operation="download"`, `bucket="{rustfs_bucket}"`, '
+                f'`key="{rustfs_key}"`.\n\n'
+            )
+            if rustfs_url:
+                response_text += (
+                    "**Optional presigned URL** (extra — only valid if that "
+                    "host:port is reachable from your client; it usually is "
+                    f"not): {rustfs_url}\n\n"
+                )
         elif saved_path:
             response_text += f"**Saved to:** `{saved_path}`\n\n"
 
@@ -815,6 +839,8 @@ def main() -> None:
                     "node_count": len(canvas_json.get("nodes", [])),
                     "edge_count": len(canvas_json.get("edges", [])),
                     "rustfs_url": rustfs_url,
+                    "bucket": rustfs_bucket,
+                    "key": rustfs_key,
                     "local_path": saved_path,
                     "used_llm": used_llm,
                     "llm_fallback": llm_api_url is not None and not used_llm,

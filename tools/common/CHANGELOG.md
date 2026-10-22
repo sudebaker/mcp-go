@@ -1,5 +1,14 @@
 # Changelog - tools/common Security Improvements
 
+> **⚠ Path drift note (2026-10-22):** the `/data/output` examples below come from v2.0.0
+> (2026-01-26) and are **historical** — do not follow them. Since PR #71 the writable
+> directory is the single constant `SANDBOX_OUTPUT_DIR` (`/tmp/output`,
+> `tools/common/safe_file_ops.py`); the contract injects it (see
+> `docs/SANDBOX_SIDECAR_API.md`) and the guard `validate_write_path` rejects anything else.
+> Today's recipe: relative filenames via the `safe_files` helpers —
+> `safe_files.save_figure(fig, "name.png")`, `safe_files.to_csv(df, "result.csv")`,
+> `safe_files.open_write("result.csv")` — never raw `open()` with a path.
+
 ## Version 2.0.0 - Security Hardening & Data Processing Support
 
 ### 🎯 Overview

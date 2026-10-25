@@ -19,7 +19,7 @@ COPY .git/ /tmp/build/.git/
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mcp-server ./cmd/server
 
 # Stage 2: Python base with system dependencies
-FROM python:3.14-slim-bookworm AS python-base
+FROM python:3.15-slim-bookworm AS python-base
 
 # Install system dependencies for all Python tools
 RUN apt-get update && apt-get install -y --no-install-recommends \

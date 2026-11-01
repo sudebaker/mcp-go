@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/sandbox-sidecar ./cmd/sandbox-sidecar
 
 # ── Stage 2: minimal runtime ─────────────────────────────────────────────
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN adduser -D -g '' -s /sbin/nologin sandbox || true
 

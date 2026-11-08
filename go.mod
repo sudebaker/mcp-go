@@ -6,7 +6,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
-	github.com/mark3labs/mcp-go v1.3.0
+	github.com/mark3labs/mcp-go v1.5.0
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.2
